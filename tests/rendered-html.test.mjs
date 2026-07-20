@@ -76,9 +76,10 @@ test("project capture stays contextual instead of becoming a duplicate destinati
   assert.doesNotMatch(page, /className="nav-capture"/);
   assert.doesNotMatch(page, /className="mobile-capture"/);
   assert.doesNotMatch(page, /className="floating-capture"/);
-  assert.match(page, /Add to Sports Engine/);
-  assert.match(page, /project capture/);
-  assert.match(css, /\.sports-add-button/);
+  assert.match(page, /SportsWorkspaceView = "cases" \| "knowledge" \| "workbench" \| "blueprint"/);
+  assert.match(page, /project workbench/);
+  assert.match(page, /Every action lands here/);
+  assert.match(css, /\.sports-workspace-tabs/);
 });
 
 test("capture migrates older device records and shows validation failures", async () => {
@@ -87,11 +88,11 @@ test("capture migrates older device records and shows validation failures", asyn
   assert.match(page, /function normalizeNode/);
   assert.match(page, /data\.nodes\.map\(\(item: Partial<KnowledgeNode>\) => normalizeNode\(item\)\)/);
   assert.match(page, /Complete the highlighted field before saving/);
-  assert.match(page, /Saving always creates a visible receipt/);
+  assert.match(page, /Saving creates a receipt and updates Cases, Recent Work/);
   assert.match(page, /No additional connection/);
 });
 
-test("V4.2 exposes the complete governed Sports Engine entry lifecycle", async () => {
+test("V4.3 exposes the complete governed Sports Engine workspace lifecycle", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
   for (const action of [
@@ -111,9 +112,14 @@ test("V4.2 exposes the complete governed Sports Engine entry lifecycle", async (
     "Available to future retrieval",
   ]) assert.match(page, new RegExp(stage));
 
-  assert.match(page, /Connection Receipt · V4\.2/);
-  assert.match(page, /Create a new knowledge object/);
-  assert.match(page, /Update an existing knowledge object/);
+  assert.match(page, /Change Receipt · V4\.3/);
+  assert.match(page, /Create a new case/);
+  assert.match(page, /Update the selected case/);
+  assert.match(page, /Thesis/);
+  assert.match(page, /Research audit/);
+  assert.match(page, /Evidence ledger/);
+  assert.match(page, /Promotion status/);
+  assert.match(page, /Future retrieval influence/);
   assert.match(page, /relatedId && relatedId !== target\.id/);
   assert.match(page, /approved: false, inferred: true/);
   assert.match(page, /Approve this connection/);
