@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const developmentPreviewMeta =
@@ -53,6 +54,19 @@ test("renders development preview metadata", async () => {
     /^text\/html\b/i,
   );
   assert.match(await response.text(), developmentPreviewMeta);
+});
+
+test("mobile navigation focuses one workspace instead of stacking the full Atlas", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  assert.match(page, /aria-label="Campus Atlas mobile workspace"/);
+  assert.match(page, />Ask<\/button>/);
+  assert.match(page, />Projects<\/button>/);
+  assert.match(page, />Atlas<\/button>/);
+  assert.match(page, />Review<\/button>/);
+  assert.match(css, /\.mobile-ask \.workspace/);
+  assert.match(css, /\.mobile-atlas \.project-strip/);
+  assert.match(css, /\.mobile-review \.workspace/);
 });
 
 test("structures a capture with an explicit governed fallback receipt", async () => {

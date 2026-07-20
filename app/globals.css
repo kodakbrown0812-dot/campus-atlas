@@ -604,6 +604,7 @@ input:focus,textarea:focus,select:focus { border-color:rgba(77,124,254,.62); box
 .boundary-columns>div { border-left:1px solid rgba(143,170,211,.25); padding-left:16px; }
 .boundary-columns span { color:#aebfff; font-size:7px; text-transform:uppercase; letter-spacing:.1em; }
 .boundary-columns p { color:var(--muted); font-size:8px; line-height:1.65; margin:7px 0 0; }
+.mobile-dock { display:none; }
 
 @media (max-width:1200px) {
   .product-intro,.handoff-section,.home-loop,.demo-banner,.project-strip,.workspace,.promotion-section,.platform-layer,.project-hero,.sports-grid,.boundary-callout { margin-left:24px; margin-right:24px; }
@@ -631,6 +632,7 @@ input:focus,textarea:focus,select:focus { border-color:rgba(77,124,254,.62); box
   .guided-demo { height:96vh; }
 }
 @media (max-width:700px) {
+  .app-shell { padding-bottom:82px; }
   .topbar { padding:0 18px; }
   .topbar>.primary-button { font-size:0; padding:10px; }
   .topbar>.primary-button:first-letter { font-size:15px; }
@@ -696,4 +698,14 @@ input:focus,textarea:focus,select:focus { border-color:rgba(77,124,254,.62); box
   .application-preview,.receipt-preview { flex-wrap:wrap; }
   .stage-heading,.demo-next,.demo-finish { align-items:flex-start; flex-direction:column; }
   .ai-receipt>div { grid-template-columns:1fr; }
+  .mobile-dock { position:fixed; z-index:80; left:12px; right:12px; bottom:calc(10px + env(safe-area-inset-bottom)); display:grid; grid-template-columns:repeat(4,1fr); gap:4px; padding:6px; border:1px solid rgba(143,170,211,.24); border-radius:17px; background:rgba(6,18,38,.94); box-shadow:0 18px 50px rgba(0,0,0,.48); backdrop-filter:blur(18px); }
+  .mobile-dock button { min-width:0; border:0; border-radius:11px; padding:8px 3px 7px; background:transparent; color:#7189aa; font-size:9px; display:grid; justify-items:center; gap:3px; }
+  .mobile-dock button span { font-size:14px; line-height:1; }
+  .mobile-dock button.active { color:#eff4ff; background:linear-gradient(145deg,rgba(77,124,254,.24),rgba(39,212,199,.10)); box-shadow:inset 0 0 0 1px rgba(111,148,255,.32); }
+  .mobile-projects .product-intro,.mobile-projects .handoff-section,.mobile-projects .home-loop,.mobile-projects .workspace,.mobile-projects .promotion-section,.mobile-projects .platform-layer,
+  .mobile-atlas .product-intro,.mobile-atlas .handoff-section,.mobile-atlas .home-loop,.mobile-atlas .demo-banner,.mobile-atlas .project-strip,.mobile-atlas .promotion-section,.mobile-atlas .platform-layer,
+  .mobile-review .product-intro,.mobile-review .handoff-section,.mobile-review .home-loop,.mobile-review .demo-banner,.mobile-review .project-strip,.mobile-review .workspace,.mobile-review .platform-layer,
+  .mobile-ask .demo-banner,.mobile-ask .project-strip,.mobile-ask .workspace,.mobile-ask .promotion-section,.mobile-ask .platform-layer { display:none; }
+  .mobile-ask .floating-capture,.mobile-projects .floating-capture { display:none; }
+  .mobile-projects .project-strip,.mobile-atlas .workspace,.mobile-review .promotion-section { margin-top:28px; }
 }

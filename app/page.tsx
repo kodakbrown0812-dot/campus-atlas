@@ -8,6 +8,7 @@ type PromotionLevel = "Observation" | "Candidate Pattern" | "Validated Principle
 type ReviewAction = "Reinforce" | "Challenge" | "Revise" | "Narrow Scope" | "Supersede" | "Merge" | "Retire";
 type EdgeType = "Supports" | "Challenges" | "Revises" | "Applies To" | "Derived From" | "Shares Principle With" | "Supersedes" | "Constrained By";
 type GraphView = "connections" | "lineage" | "challenges" | "influence";
+type MobileSurface = "ask" | "projects" | "atlas" | "review";
 type LocalKind = "Objective" | "Temporary fact" | "Constraint" | "Assumption" | "Exclusion" | "Time horizon" | "Current condition" | "User instruction" | "Missing information";
 
 type Project = { key: ProjectKey; label: string; short: string; color: string; rooms: number; description: string; capabilityCount: number };
@@ -172,6 +173,7 @@ export default function Home() {
   const [handoffResult, setHandoffResult] = useState<HandoffPacket | null>(null);
   const [handoffStatus, setHandoffStatus] = useState<"idle" | "building" | "ready" | "error">("idle");
   const [manualCopyOpen, setManualCopyOpen] = useState(false);
+  const [mobileSurface, setMobileSurface] = useState<MobileSurface>("ask");
 
   useEffect(() => {
     let active = true;
@@ -243,8 +245,12 @@ export default function Home() {
   const promotionCandidates = nodes.filter((node) => node.level !== "Core Lens" && node.status !== "retired").sort((a, b) => b.reconstructionValue - a.reconstructionValue).slice(0, 4);
   const flash = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 2600); };
 
-  function openProject(key: ProjectKey) { if (key === "sports") { setSportsOpen(true); window.scrollTo({ top: 0, behavior: "smooth" }); } else { setProject(key); document.getElementById("atlas-workspace")?.scrollIntoView({ behavior: "smooth" }); } }
-  function openPacket(event?: FormEvent) { event?.preventDefault(); setHandoffTask(query || handoffTask); document.getElementById("chatgpt-handoff")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+  function focusSurface(surface: MobileSurface, target: string) {
+    setMobileSurface(surface);
+    window.setTimeout(() => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" }), 20);
+  }
+  function openProject(key: ProjectKey) { if (key === "sports") { setSportsOpen(true); window.scrollTo({ top: 0, behavior: "smooth" }); } else { setProject(key); focusSurface("atlas", "atlas-workspace"); } }
+  function openPacket(event?: FormEvent) { event?.preventDefault(); setHandoffTask(query || handoffTask); focusSurface("ask", "chatgpt-handoff"); }
 
   async function requestHandoff(task = handoffTask, projectName = handoffProject, localContext = handoffLocal) {
     if (task.trim().length < 8) return;
@@ -329,19 +335,26 @@ export default function Home() {
     flash("Judge demo reset to its seeded starting state");
   }
 
-  if (sportsOpen) return <SportsEngine onBack={() => setSportsOpen(false)} onEvidence={() => { setSportsOpen(false); setSelectedId("pattern-format"); setProject("sports"); window.setTimeout(() => document.getElementById("atlas-workspace")?.scrollIntoView({ behavior: "smooth" }), 50); }} onPromotion={() => { setSportsOpen(false); setSelectedId("pattern-format"); setPromotionOpen(true); }} toast={toast} />;
+  if (sportsOpen) return <SportsEngine onBack={() => setSportsOpen(false)} onEvidence={() => { setSportsOpen(false); setSelectedId("pattern-format"); setProject("sports"); focusSurface("atlas", "atlas-workspace"); }} onPromotion={() => { setSportsOpen(false); setSelectedId("pattern-format"); setPromotionOpen(true); }} toast={toast} />;
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell mobile-${mobileSurface}`}>
       <header className="topbar">
-        <a className="brand" href="#top"><span className="brand-mark">CA</span><span><strong>Campus Atlas</strong><small>Connected reasoning for ChatGPT Projects</small></span></a>
-        <nav><button onClick={() => document.getElementById("chatgpt-handoff")?.scrollIntoView({ behavior: "smooth" })}>Ask Atlas</button><button onClick={() => document.getElementById("promotion-queue")?.scrollIntoView({ behavior: "smooth" })}>Review Inbox</button><button onClick={() => document.getElementById("atlas-workspace")?.scrollIntoView({ behavior: "smooth" })}>Explore Atlas</button><button onClick={() => openProject("sports")}>Sports Engine</button></nav>
+        <a className="brand" href="#top" onClick={() => setMobileSurface("ask")}><span className="brand-mark">CA</span><span><strong>Campus Atlas</strong><small>Connected reasoning for ChatGPT Projects</small></span></a>
+        <nav><button onClick={() => focusSurface("ask", "chatgpt-handoff")}>Ask Atlas</button><button onClick={() => focusSurface("review", "promotion-queue")}>Review Inbox</button><button onClick={() => focusSurface("atlas", "atlas-workspace")}>Explore Atlas</button><button onClick={() => openProject("sports")}>Sports Engine</button></nav>
         <div className="topbar-actions"><span className={`save-state ${saveStatus}`}>{saveStatus === "saved" ? persistenceMode === "device" ? "✓ Saved on device" : "✓ Saved" : saveStatus === "saving" ? "Saving…" : saveStatus === "error" ? "Save failed" : "Loading…"}</span><button className="primary-button" onClick={() => setCampusOpen(true)}>＋ Create your campus</button></div>
       </header>
 
+      <nav className="mobile-dock" aria-label="Campus Atlas mobile workspace">
+        <button className={mobileSurface === "ask" ? "active" : ""} aria-pressed={mobileSurface === "ask"} onClick={() => focusSurface("ask", "top")}><span>✦</span>Ask</button>
+        <button className={mobileSurface === "projects" ? "active" : ""} aria-pressed={mobileSurface === "projects"} onClick={() => focusSurface("projects", "projects")}><span>▦</span>Projects</button>
+        <button className={mobileSurface === "atlas" ? "active" : ""} aria-pressed={mobileSurface === "atlas"} onClick={() => focusSurface("atlas", "atlas-workspace")}><span>∞</span>Atlas</button>
+        <button className={mobileSurface === "review" ? "active" : ""} aria-pressed={mobileSurface === "review"} onClick={() => focusSurface("review", "promotion-queue")}><span>✓</span>Review</button>
+      </nav>
+
       <section className="product-intro" id="top">
         <div><p className="eyebrow">Durable reasoning infrastructure</p><h1>Your ChatGPT Projects should<br /><em>build on each other.</em></h1><p>ChatGPT helps you think now. Campus Atlas helps your projects build on what happened before—governing which decisions, corrections, and principles deserve to affect what happens next.</p></div>
-        <div className="intro-actions"><button className="primary-button large judge-cta" onClick={() => document.getElementById("chatgpt-handoff")?.scrollIntoView({ behavior: "smooth" })}>Ask Atlas →</button><button className="text-cta" onClick={() => setDemoOpen(true)}>See the Learning Loop</button><small>Simple in conversation. Inspectable underneath.</small></div>
+        <div className="intro-actions"><button className="primary-button large judge-cta" onClick={() => focusSurface("ask", "chatgpt-handoff")}>Ask Atlas →</button><button className="text-cta" onClick={() => setDemoOpen(true)}>See the Learning Loop</button><small>Simple in conversation. Inspectable underneath.</small></div>
       </section>
 
       <section className="handoff-section" id="chatgpt-handoff">
@@ -358,7 +371,7 @@ export default function Home() {
           </form>
 
           <div className={`handoff-output ${handoffResult ? "has-result" : ""}`}>
-            {!handoffResult ? <><div className="output-placeholder"><span className="atlas-spark">✦</span><p className="eyebrow">What happens underneath</p><h3>One request. Three quiet steps.</h3></div><div className="handoff-steps"><article><span>1</span><div><strong>Load the blueprint</strong><p>Apply the rules and capabilities this project has earned.</p></div></article><article><span>2</span><div><strong>Retrieve with reasons</strong><p>Carry forward useful precedent, corrections, and active challenges.</p></div></article><article><span>3</span><div><strong>Compile the handoff</strong><p>Give ChatGPT only the smallest useful context—not the entire graph.</p></div></article></div><details className="connect-details"><summary>How this connects to ChatGPT <span>＋</span></summary><p>V4 exposes an HTTPS MCP endpoint at <code>/mcp</code> plus an OpenAPI fallback. Connect it in ChatGPT developer mode after the endpoint has connector access. Read tools retrieve context; write tools create review candidates; promotion stays inside Atlas.</p></details></> : <><div className="output-ready"><div><span className="ready-check">✓</span><div><p>Ready for ChatGPT</p><h3>{handoffResult.packetId}</h3></div></div><span>{handoffResult.budget.used}/{handoffResult.budget.limit} items · ~{handoffResult.budget.estimatedTokens} tokens</span></div><div className="blueprint-loaded"><span>Blueprint loaded</span><strong>{handoffResult.blueprint.project} {handoffResult.blueprint.version}</strong><p>{handoffResult.blueprint.rules[0]}</p></div><div className="retrieval-results"><div className="result-section-title"><span>Retrieved durable knowledge</span><b>{handoffResult.durableKnowledge.length} with reasons</b></div>{handoffResult.durableKnowledge.slice(0, 3).map((item) => <details key={item.id}><summary><span>{item.usefulness}</span><div><strong>{item.title}</strong><small>{item.fidelity} · {item.authorityLevel} · {item.confidence}% source confidence</small></div><i>⌄</i></summary><p>{item.whyIncluded}</p><small>Path: {item.connectionPath.join(" → ")}</small></details>)}</div>{handoffResult.challenges.length > 0 && <div className="carried-challenge"><span>Challenge carried forward</span><strong>{handoffResult.challenges[0].title}</strong><p>{handoffResult.challenges[0].reason}</p></div>}<div className="handoff-actions"><button className="primary-button" onClick={copyHandoff}>Copy for ChatGPT</button><button className="ghost-button" onClick={() => setPacketOpen(true)}>Inspect packet anatomy</button><button className="text-cta" onClick={() => document.getElementById("atlas-workspace")?.scrollIntoView({ behavior: "smooth" })}>Trace it in Atlas</button></div>{manualCopyOpen && <div className="manual-copy"><span>Select and copy this handoff</span><textarea readOnly rows={7} value={handoffResult.compiledPrompt} onFocus={(event) => event.currentTarget.select()} /></div>}<details className="work-receipt"><summary>AI Work Receipt <span>{handoffResult.receipt.checks.length} checks passed</span></summary>{handoffResult.receipt.checks.map((check) => <p key={check}>✓ {check}</p>)}<small>{handoffResult.receipt.tool} · {handoffResult.receipt.id}</small></details></>}
+            {!handoffResult ? <><div className="output-placeholder"><span className="atlas-spark">✦</span><p className="eyebrow">What happens underneath</p><h3>One request. Three quiet steps.</h3></div><div className="handoff-steps"><article><span>1</span><div><strong>Load the blueprint</strong><p>Apply the rules and capabilities this project has earned.</p></div></article><article><span>2</span><div><strong>Retrieve with reasons</strong><p>Carry forward useful precedent, corrections, and active challenges.</p></div></article><article><span>3</span><div><strong>Compile the handoff</strong><p>Give ChatGPT only the smallest useful context—not the entire graph.</p></div></article></div><details className="connect-details"><summary>How this connects to ChatGPT <span>＋</span></summary><p>V4 exposes an HTTPS MCP endpoint at <code>/mcp</code> plus an OpenAPI fallback. Connect it in ChatGPT developer mode after the endpoint has connector access. Read tools retrieve context; write tools create review candidates; promotion stays inside Atlas.</p></details></> : <><div className="output-ready"><div><span className="ready-check">✓</span><div><p>Ready for ChatGPT</p><h3>{handoffResult.packetId}</h3></div></div><span>{handoffResult.budget.used}/{handoffResult.budget.limit} items · ~{handoffResult.budget.estimatedTokens} tokens</span></div><div className="blueprint-loaded"><span>Blueprint loaded</span><strong>{handoffResult.blueprint.project} {handoffResult.blueprint.version}</strong><p>{handoffResult.blueprint.rules[0]}</p></div><div className="retrieval-results"><div className="result-section-title"><span>Retrieved durable knowledge</span><b>{handoffResult.durableKnowledge.length} with reasons</b></div>{handoffResult.durableKnowledge.slice(0, 3).map((item) => <details key={item.id}><summary><span>{item.usefulness}</span><div><strong>{item.title}</strong><small>{item.fidelity} · {item.authorityLevel} · {item.confidence}% source confidence</small></div><i>⌄</i></summary><p>{item.whyIncluded}</p><small>Path: {item.connectionPath.join(" → ")}</small></details>)}</div>{handoffResult.challenges.length > 0 && <div className="carried-challenge"><span>Challenge carried forward</span><strong>{handoffResult.challenges[0].title}</strong><p>{handoffResult.challenges[0].reason}</p></div>}<div className="handoff-actions"><button className="primary-button" onClick={copyHandoff}>Copy for ChatGPT</button><button className="ghost-button" onClick={() => setPacketOpen(true)}>Inspect packet anatomy</button><button className="text-cta" onClick={() => focusSurface("atlas", "atlas-workspace")}>Trace it in Atlas</button></div>{manualCopyOpen && <div className="manual-copy"><span>Select and copy this handoff</span><textarea readOnly rows={7} value={handoffResult.compiledPrompt} onFocus={(event) => event.currentTarget.select()} /></div>}<details className="work-receipt"><summary>AI Work Receipt <span>{handoffResult.receipt.checks.length} checks passed</span></summary>{handoffResult.receipt.checks.map((check) => <p key={check}>✓ {check}</p>)}<small>{handoffResult.receipt.tool} · {handoffResult.receipt.id}</small></details></>}
           </div>
         </div>
       </section>
