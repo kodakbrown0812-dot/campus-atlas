@@ -4,13 +4,13 @@ Campus Atlas is a reasoning sidecar for long-running ChatGPT Projects. It preser
 
 **Campus Atlas is the product.** “AI Reasoning Rebar” describes the architecture underneath it. Amy Campus is the example workspace, and Sports Engine is the mature proof project inside that workspace.
 
-## V4 Build Week proof
+## V4.3 Build Week proof
 
-V4 keeps the governed learning loop and adds the missing everyday-use surface:
+V4.3 turns Sports Engine from a presentation page into a working project surface:
 
-`Ask in normal language → Load project blueprint → Retrieve precedent + corrections → Compile a small handoff → Work in ChatGPT`
+`Open case → Audit research → Record outcome → Run post-mortem → Human-promote knowledge → Test future retrieval`
 
-The judge path still demonstrates the complete durable-learning loop:
+Cases, Knowledge, and Blueprint are the only project destinations. Workbench actions now live inside the selected case. The browser and MCP/API use the same session-scoped demo workspace, so the durable-learning loop is observable end to end:
 
 `Capture → Structure → Connect → Test → Promote → Retrieve`
 
@@ -19,11 +19,11 @@ The final step compares a context packet before and after a human-approved promo
 ## Exact three-minute judge route
 
 1. **0:00–0:15 — Problem.** Read the headline and supporting sentence: ChatGPT helps now; Atlas governs what deserves to affect next time.
-2. **0:15–0:50 — Everyday use.** In **Ask Atlas**, leave the deGrom strikeout task and select **Build ChatGPT handoff**. Point out the Sports Engine V4 blueprint, three budgeted items, the pitcher-prop precedent, and the carried-forward failed innings assumption.
-3. **0:50–1:05 — Inspectability.** Expand one retrieved item, show its inclusion reason and connection path, then open **AI Work Receipt**. Use **Copy for ChatGPT** to show that this output is useful immediately even before the connector is enabled.
-4. **1:05–2:20 — Learning loop.** Select **See the Learning Loop**. Structure and approve the seeded thesis, record the 3–1 result, apply the scope revision, approve promotion, and show the before/after packet. Emphasize that the architecture changed future context—not merely a score.
-5. **2:20–2:40 — Explanation layer.** Close the demo, open the Atlas, and select a typed edge to show the Connection Receipt and preserved lineage.
-6. **2:40–3:00 — Project intelligence.** Open **Sports Engine** and show its blueprint and Capability Ledger. Finish with: Campus Atlas supplies governance; each project earns different capabilities.
+2. **0:15–0:45 — Initial retrieval.** Open **Sports Engine → Cases**, select England–Ghana, and run **Test future retrieval** for the seeded heavy-favorite question. Show that the candidate signal-separation rule is excluded because it lacks authority.
+3. **0:45–1:35 — Governed learning.** Inspect the 0–0 outcome and post-mortem, open the connected signal-separation candidate, review its evidence and challenge, and explicitly approve promotion.
+4. **1:35–2:15 — Changed future context.** Return to the case and run the same question. The promoted rule now appears as a newly retrieved item with a typed path through the Cape Verde precedent.
+5. **2:15–2:40 — Sidecar proof.** Show the shared workspace key, packet budget, exclusions, and action receipt. The same key can be supplied as `workspaceId` to the MCP tools.
+6. **2:40–3:00 — Project intelligence.** Open **Blueprint** and show the promoted principle under Retrieval Authority with the evidence that earned it.
 
 The guided portion is designed to fit inside 90 seconds; the Atlas and Capability Ledger provide the remaining explanation.
 
@@ -59,9 +59,9 @@ Without a runtime API key, the same endpoint returns an explicitly labeled seede
 
 ## Using Campus Atlas with ChatGPT today
 
-V4 supports two paths:
+V4.3 supports two paths:
 
-1. **Immediate handoff:** build a packet in the app and use **Copy for ChatGPT**. This works with the current owner-only deployment.
+1. **Immediate handoff:** build a packet in the app and use **Copy for ChatGPT**. This works directly from the public demonstration workspace.
 2. **Connected app:** connect the Site's HTTPS `/mcp` endpoint in ChatGPT developer mode after the endpoint is made reachable through a public or authenticated connector-safe access policy.
 
 The MCP server implements initialize, tool discovery, and tool calls. It exposes six focused tools:
@@ -70,24 +70,24 @@ The MCP server implements initialize, tool discovery, and tool calls. It exposes
 - `atlas_get_project_blueprint` — read; returns project rules and earned capabilities.
 - `atlas_retrieve_precedents` — read; returns approved precedent with evidence paths.
 - `atlas_get_receipt` — read; inspects preserved external action receipts.
-- `atlas_capture_candidate` — write; creates proposed knowledge only.
+- `atlas_capture_candidate` — write; creates a proposed case or knowledge object only.
 - `atlas_record_outcome` — write; creates a reality evidence event only.
 
 Every tool declares read/write, open-world, and destructive annotations. Writes require idempotency keys and never promote knowledge. External writes fail closed when `CAMPUS_ATLAS_ACTION_KEY` is absent and require that bearer token when it is configured. `GET /api/security` reports the protection mode without returning the secret.
 
 An OpenAPI 3.1 fallback is available at `/openapi.json` for GPT Actions or other compatible clients. The privacy disclosure lives at `/privacy`.
 
-The production Site remains owner-restricted until its audience is explicitly changed. A public-demo boundary is available through `CAMPUS_ATLAS_PUBLIC_DEMO=true`: public visitors receive seeded demonstration knowledge only, `/api/state` never reads or writes the private D1 workspace, Context Packet reads do not create D1 history, and interactive changes persist in that visitor's browser storage. Connector candidate/outcome writes remain separately bearer-protected.
+With `CAMPUS_ATLAS_PUBLIC_DEMO=true`, each visitor receives an opaque demo `workspaceId`. Browser changes, context packets, and authorized connector writes use that session-scoped D1 record while the private workspace remains separate. Anyone holding a demo key may be able to read that demonstration state, so the public workspace must not contain sensitive information. Connector candidate/outcome writes remain separately bearer-protected.
 
 ## Persistence
 
 In private-workspace mode, Campus state is stored in Cloudflare D1 through `GET /api/state` and `POST /api/state`. Captures, reviews, promotions, typed connections, packets, and AI Work Receipts survive refresh. State writes merge known UI fields so connector receipts and packet history are not erased by later browser saves.
 
-In public-demo mode, private D1 state is never returned and hosted state writes return `403`. The same interactions survive refresh through device-local browser storage. The interface labels this mode **Public demo · device-local** and never implies that those changes entered the private workspace. Temporary Local Context remains inside its packet unless the visitor explicitly captures it as candidate knowledge on that device.
+In public-demo mode, private D1 state is never returned. The Site creates a session-scoped D1 record with an opaque workspace key; both `/api/state` and the context/MCP routes resolve that same record. The interface labels successful synchronization as **Browser + API synced**. Temporary Local Context remains inside its packet unless the visitor explicitly captures it.
 
 ## Sample data
 
-Amy Campus contains seeded examples from Headquarters, Sports Engine, Health + Training, Lessons Division, Human Systems Lab, and Finance. Thesis 001—England +1.5 and Under 4.5—is the golden-loop case because its loss requires the system to separate outcome correctness from process quality.
+Amy Campus contains seeded examples from Headquarters, Sports Engine, Health + Training, Lessons Division, Human Systems Lab, and Finance. Thesis 001—England -1.5 and Over 3.5 against Ghana—is the golden-loop case. The 0–0 outcome forces the system to separate favorite quality, match control, scoring probability, and market coverage instead of treating them as one signal.
 
 V4 also includes a clearly reconstructed pitcher-prop precedent set. It demonstrates that a new deGrom strikeout task can retrieve the promoted workload-stability rule and carry forward the failed pitch-count/innings assumption without pretending the historical case predicts today's result.
 
@@ -125,7 +125,17 @@ The previous version already included the premium Campus Atlas visual system, th
 - Added a complete MCP server, six governed tool schemas, OpenAPI fallback, privacy page, idempotent writes, and persistent action receipts.
 - Added copy-to-ChatGPT with a manual fallback when clipboard access is unavailable.
 - Preserved the Atlas graph, promotion lineage, guided learning loop, Amy Campus workspace, and Sports Engine Capability Ledger.
-- Added an implementation audit at `docs/V4_AUDIT.md` and expanded automated coverage to seven passing tests.
+- Added an implementation audit at `docs/V4_AUDIT.md` and expanded automated endpoint and interaction coverage.
+
+### V4.3 additions
+
+- Reduced Sports Engine to **Cases**, **Knowledge**, and **Blueprint**.
+- Moved capture, outcome, post-mortem, correction, evidence, and retrieval actions into the unified case record.
+- Grouped cases into active research, needs post-mortem, and completed work.
+- Added a live before/after retrieval tester with packet deltas, exclusions, receipts, and the shared MCP workspace key.
+- Added session-scoped D1 demo workspaces so browser changes and sidecar retrieval read the same evolving records without exposing private state.
+- Updated the deployed Sports Engine blueprint and fallback corpus to V4.3 England–Ghana data.
+- Allowed authorized sidecar captures to create either proposed cases or proposed knowledge; outcome writes now update the visible case lifecycle.
 
 ## Local development
 
@@ -161,5 +171,5 @@ The hosted Sites project owns its D1 binding. A live model call additionally req
 - ChatGPT writes are idempotent and remain proposed/evidence state.
 - OpenAPI and privacy endpoints are present.
 - Public-demo requests cannot read or mutate private D1 state.
-- Public-demo packets use seeded knowledge and do not create hosted retrieval history.
-- Public interactions persist only on the visitor's device and are labeled accordingly.
+- Public-demo browser and sidecar requests share one opaque, session-scoped workspace.
+- A human promotion changes the Blueprint and the next packet built from that workspace.

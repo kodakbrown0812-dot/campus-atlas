@@ -6,15 +6,15 @@ const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 
 function memoryD1() {
-  let row = null;
+  const rows = new Map();
   return {
     prepare(sql) {
       let values = [];
       return {
         bind(...next) { values = next; return this; },
-        async first() { return /SELECT payload/i.test(sql) ? row : null; },
+        async first() { return /SELECT payload/i.test(sql) ? rows.get(values[0]) ?? null : null; },
         async run() {
-          if (/INSERT INTO atlas_state/i.test(sql)) row = { payload: values[1], updated_at: new Date().toISOString() };
+          if (/INSERT INTO atlas_state/i.test(sql)) rows.set(values[0], { payload: values[1], updated_at: new Date().toISOString() });
           return { success: true };
         },
       };
@@ -76,9 +76,12 @@ test("project capture stays contextual instead of becoming a duplicate destinati
   assert.doesNotMatch(page, /className="nav-capture"/);
   assert.doesNotMatch(page, /className="mobile-capture"/);
   assert.doesNotMatch(page, /className="floating-capture"/);
-  assert.match(page, /SportsWorkspaceView = "cases" \| "knowledge" \| "workbench" \| "blueprint"/);
-  assert.match(page, /project workbench/);
+  assert.match(page, /SportsWorkspaceView = "cases" \| "knowledge" \| "blueprint"/);
+  assert.doesNotMatch(page, /\["workbench", "Workbench"/);
+  assert.match(page, /case workspace/);
   assert.match(page, /Every action lands here/);
+  assert.match(page, /Live sidecar test/);
+  assert.match(page, /Test future retrieval/);
   assert.match(css, /\.sports-workspace-tabs/);
 });
 
@@ -134,7 +137,7 @@ test("structures a capture with an explicit governed fallback receipt", async ()
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        input: "England +1.5 and Under 4.5 should hold because the expected game script is competitive and controlled.",
+        input: "England -1.5 and Over 3.5 against Ghana should hold because the quality gap should produce margin and scoring volume.",
         project: "Sports Engine",
       }),
     }),
@@ -226,13 +229,15 @@ test("MCP writes create proposed knowledge and replay safely", async () => {
     new Request("http://localhost/mcp", {
       method: "POST",
       headers: { "content-type": "application/json", authorization: "Bearer test-action-key" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "atlas_capture_candidate", arguments: { title: "Workload stability matters", summary: "Verify the starter's usable pitch count before pricing strikeouts.", source: "ChatGPT research", project: "Sports Engine", confidence: 74, idempotencyKey: "test-candidate-001" } } }),
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "atlas_capture_candidate", arguments: { title: "Workload stability case", summary: "Verify the starter's usable pitch count before pricing strikeouts.", source: "ChatGPT research", project: "Sports Engine", objectType: "case", confidence: 74, idempotencyKey: "test-candidate-001" } } }),
     }),
     { DB, CAMPUS_ATLAS_ACTION_KEY: "test-action-key", ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
     { waitUntil() {}, passThroughOnException() {} },
   );
   const first = await (await call()).json();
   assert.equal(first.result.structuredContent.candidate.status, "proposed");
+  assert.equal(first.result.structuredContent.candidate.type, "decision");
+  assert.match(first.result.structuredContent.receipt.effect, /Case ledger/i);
   assert.match(first.result.structuredContent.receipt.effect, /human review/i);
   const replay = await (await call()).json();
   assert.equal(replay.result.structuredContent.idempotentReplay, true);
@@ -272,7 +277,7 @@ test("reports write security without revealing the secret", async () => {
   assert.doesNotMatch(JSON.stringify(status), /never-return-this/);
 });
 
-test("public demo mode never reads or writes the private D1 workspace", async () => {
+test("public demo keeps a shared browser/API workspace without exposing private D1 state", async () => {
   const worker = await builtWorker("public-isolation");
   const DB = memoryD1();
   const ctx = { waitUntil() {}, passThroughOnException() {} };
@@ -290,22 +295,52 @@ test("public demo mode never reads or writes the private D1 workspace", async ()
   const statePayload = await publicState.json();
   assert.equal(statePayload.mode, "public_demo");
   assert.equal(statePayload.state, null);
+  assert.match(statePayload.workspaceId, /^demo-[a-z0-9]{24}$/);
   assert.equal(statePayload.privateWorkspaceExposed, false);
+  const cookie = publicState.headers.get("set-cookie").split(";")[0];
 
-  const blockedWrite = await worker.fetch(
-    new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceName: "Attacker" }) }),
+  const demoState = {
+    workspaceName: "Judge workspace",
+    nodes: [
+      { id: "pattern-format", project: "sports", title: "Separate dominance signals from market coverage", summary: "A strong favorite can control a match without producing handicap or total coverage.", status: "proposed", level: "Candidate Pattern", sources: ["England–Ghana post-mortem"], sourceFidelity: 88, reconstructionValue: 96, lineage: ["England 0–0 Ghana", "Post-mortem"] },
+      { id: "precedent-cape-verde", project: "sports", title: "Cape Verde defensive-wall counterexample", summary: "A quality gap did not guarantee repeated scoring against a defensive wall.", status: "approved", level: "Observation", sources: ["Earlier case"], sourceFidelity: 78, reconstructionValue: 91, lineage: ["Earlier match", "Defensive-wall outcome"] },
+    ],
+    connections: [{ id: "demo-edge", from: "pattern-format", to: "precedent-cape-verde", type: "Supports", reason: "Shared defensive-wall mechanism.", approved: true }],
+  };
+  const demoWrite = await worker.fetch(
+    new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify(demoState) }),
     publicEnv,
     ctx,
   );
-  assert.equal(blockedWrite.status, 403);
+  assert.equal(demoWrite.status, 200);
 
-  const publicPacket = await worker.fetch(
-    new Request("http://localhost/api/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: "Research a strikeout prop", project: "Sports Engine" }) }),
+  const beforePacket = await worker.fetch(
+    new Request("http://localhost/api/context", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ task: "Evaluate a heavy favorite against a defensive wall", project: "Sports Engine", workspaceId: statePayload.workspaceId }) }),
     publicEnv,
     ctx,
   );
-  assert.equal(publicPacket.status, 200);
-  assert.doesNotMatch(JSON.stringify(await publicPacket.json()), /PRIVATE-NEVER-RETURN/);
+  assert.equal(beforePacket.status, 200);
+  const before = await beforePacket.json();
+  assert.equal(before.workspace.id, statePayload.workspaceId);
+  assert.ok(before.durableKnowledge.some((item) => item.id === "precedent-cape-verde"));
+  assert.ok(before.excluded.some((item) => item.id === "pattern-format" && /No retrieval authority/.test(item.whyExcluded)));
+  assert.doesNotMatch(JSON.stringify(before), /PRIVATE-NEVER-RETURN/);
+
+  const promotedState = { ...demoState, nodes: demoState.nodes.map((node) => node.id === "pattern-format" ? { ...node, status: "approved", level: "Validated Principle", lineage: [...node.lineage, "Human approval"] } : node) };
+  const promotionWrite = await worker.fetch(
+    new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify(promotedState) }),
+    publicEnv,
+    ctx,
+  );
+  assert.equal(promotionWrite.status, 200);
+  const afterPacket = await worker.fetch(
+    new Request("http://localhost/api/context", { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ task: "Evaluate a heavy favorite against a defensive wall", project: "Sports Engine", workspaceId: statePayload.workspaceId }) }),
+    publicEnv,
+    ctx,
+  );
+  const after = await afterPacket.json();
+  assert.ok(after.durableKnowledge.some((item) => item.id === "pattern-format"));
+  assert.match(after.durableKnowledge.find((item) => item.id === "pattern-format").whyIncluded, /approved path through Cape Verde defensive-wall counterexample/);
 
   const stillPrivate = await worker.fetch(new Request("http://localhost/api/state"), { DB, ASSETS: assets }, ctx);
   const privatePayload = await stillPrivate.json();
@@ -313,7 +348,49 @@ test("public demo mode never reads or writes the private D1 workspace", async ()
   assert.equal(privatePayload.state.contextPackets, undefined);
 });
 
-test("public security status advertises device-local persistence", async () => {
+test("authorized sidecar writes become visible in the same public demo case ledger", async () => {
+  const worker = await builtWorker("public-sidecar-loop");
+  const DB = memoryD1();
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const assets = { fetch: async () => new Response("Not found", { status: 404 }) };
+  const env = { DB, CAMPUS_ATLAS_PUBLIC_DEMO: "true", CAMPUS_ATLAS_ACTION_KEY: "judge-key", ASSETS: assets };
+  const session = await worker.fetch(new Request("http://localhost/api/state"), env, ctx);
+  const { workspaceId } = await session.json();
+
+  const capture = await worker.fetch(
+    new Request("http://localhost/api/candidates", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer judge-key" },
+      body: JSON.stringify({ title: "New heavy-favorite case", summary: "Audit favorite quality, control, scoring, and coverage separately.", source: "ChatGPT task", project: "Sports Engine", objectType: "case", confidence: 82, idempotencyKey: "public-case-001", workspaceId }),
+    }),
+    env,
+    ctx,
+  );
+  assert.equal(capture.status, 201);
+  const captured = await capture.json();
+  assert.equal(captured.candidate.type, "decision");
+
+  const outcome = await worker.fetch(
+    new Request("http://localhost/api/outcomes", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer judge-key" },
+      body: JSON.stringify({ targetId: captured.candidate.id, result: "0–0", reasoningAssessment: "The quality edge did not convert into margin or scoring volume.", source: "Exact final result", impactStrength: "Strong", confidence: 98, idempotencyKey: "public-outcome-001", workspaceId }),
+    }),
+    env,
+    ctx,
+  );
+  assert.equal(outcome.status, 201);
+
+  const state = await worker.fetch(new Request(`http://localhost/api/state?workspaceId=${workspaceId}`), env, ctx);
+  const payload = await state.json();
+  const caseNode = payload.state.nodes.find((node) => node.id === captured.candidate.id);
+  assert.equal(caseNode.type, "decision");
+  assert.equal(caseNode.status, "challenged");
+  assert.match(caseNode.history[0].label, /Outcome recorded/);
+  assert.ok(payload.state.reviews.some((review) => review.nodeId === captured.candidate.id));
+});
+
+test("public security status advertises shared session-scoped persistence", async () => {
   const worker = await builtWorker("public-status");
   const response = await worker.fetch(
     new Request("http://localhost/api/security"),
@@ -322,7 +399,8 @@ test("public security status advertises device-local persistence", async () => {
   );
   const status = await response.json();
   assert.equal(status.publicDemo, true);
-  assert.equal(status.browserStatePersistence, "device_local");
+  assert.equal(status.browserStatePersistence, "session_scoped_d1");
+  assert.equal(status.browserAndApiShareState, true);
   assert.equal(status.privateWorkspaceExposed, false);
 });
 
@@ -332,10 +410,10 @@ test("publishes an OpenAPI fallback and privacy policy", async () => {
   const env = { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
   const ctx = { waitUntil() {}, passThroughOnException() {} };
   const schema = await (await worker.fetch(new Request("http://localhost/openapi.json"), env, ctx)).json();
-  assert.equal(schema.info.version, "4.0.0");
+  assert.equal(schema.info.version, "4.3.0");
   assert.ok(schema.paths["/api/context"]);
   assert.ok(schema.paths["/api/candidates"]);
   const privacy = await worker.fetch(new Request("http://localhost/privacy"), env, ctx);
   assert.equal(privacy.status, 200);
-  assert.match(await privacy.text(), /External writes never promote knowledge/);
+  assert.match(await privacy.text(), /External candidate and outcome writes require authorization and never promote knowledge/);
 });

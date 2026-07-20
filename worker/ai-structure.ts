@@ -35,18 +35,18 @@ function seededProposal(input: string, project: string): Proposal {
   return {
     claim: input.trim(),
     evidence: [
-      "France was favored but England's +1.5 handicap protected several competitive outcomes.",
-      "Most explicitly considered scorelines remained below five total goals.",
+      "The captured thesis priced England as a heavy favorite.",
+      "The user explicitly linked team quality, scoring volume, and handicap coverage.",
     ],
     counterEvidence: [
-      "Third-place matches can be more open than standard knockout matches.",
-      "Rotation and uncertain substitution timing increased variance.",
+      "A defensive-wall outcome can preserve control without producing margin or total coverage.",
+      "Favorite strength alone does not establish the scoring distribution.",
     ],
     assumptions: [
-      "The match would remain tactically controlled.",
-      "England's rotation would weaken attack more than defensive structure.",
+      "England's quality edge would convert into both margin and scoring volume.",
+      "Match control, scoring probability, and market coverage represented the same underlying signal.",
     ],
-    missingInformation: ["Final substitution plan", "Reliable third-place format baseline"],
+    missingInformation: ["Independent scoring-distribution estimate", "Defensive-wall counter-scenarios", "Verified offered market"],
     source: "User-entered thesis · exact capture",
     confidence: 68,
     truthClass: "Predicted",

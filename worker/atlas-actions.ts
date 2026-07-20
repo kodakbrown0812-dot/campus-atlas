@@ -1,8 +1,10 @@
-import { loadAtlasState, saveAtlasState } from "./atlas-state";
+import { demoWorkspaceIdFromRequest, loadAtlasState, normalizeDemoWorkspaceId, saveAtlasState } from "./atlas-state";
 
 type AtlasNode = {
   id: string;
   project: string;
+  room?: string;
+  type?: string;
   title: string;
   summary: string;
   status: string;
@@ -10,7 +12,10 @@ type AtlasNode = {
   sources?: string[];
   sourceFidelity?: number;
   reconstructionValue?: number;
+  decisionImpact?: number;
   scopeStability?: number;
+  x?: number;
+  y?: number;
   lineage?: string[];
   history?: unknown[];
 };
@@ -44,53 +49,66 @@ const fallbackNodes: AtlasNode[] = [
     id: "core-reality",
     project: "hq",
     title: "Reality corrects the model",
-    summary: "Outcomes and direct corrections outrank elegant inference. Preserve the evidence that changed the conclusion.",
+    summary: "Outcomes and explicit corrections outrank elegant inference. Durable claims remain traceable to evidence.",
     status: "approved",
     level: "Core Lens",
-    sources: ["Campus constitution", "Outcome audits"],
+    sources: ["Campus constitution v0.1", "Three explicit corrections", "Outcome audit set"],
     sourceFidelity: 96,
     reconstructionValue: 97,
     scopeStability: 95,
-    lineage: ["Corrections", "Outcome audits", "Human approval"],
+    lineage: ["Repeated user corrections", "Outcome audits across Sports Engine", "Cross-project governance pattern", "Approved Core Lens"],
   },
   {
     id: "correction-total",
     project: "sports",
-    title: "Verify the market that is actually offered",
-    summary: "Distinguish researched markets from currently available markets before pricing or scoring an opportunity.",
+    title: "Market options were overstated",
+    summary: "The available total was corrected by the user. Future retrieval must distinguish researched markets from currently offered markets.",
     status: "approved",
     level: "Observation",
     sources: ["Direct user correction", "Market screenshot"],
     sourceFidelity: 99,
     reconstructionValue: 82,
     scopeStability: 76,
-    lineage: ["Incorrect assumption", "Direct correction", "Retrieval constraint"],
+    lineage: ["Incorrect market assumption", "Direct correction", "Screenshot verification", "Retrieval constraint added"],
   },
   {
     id: "pattern-format",
     project: "sports",
-    title: "Event format can break the base rate",
-    summary: "When motivation, rotation, or incentives materially differ, explicitly adjust the expected variance instead of importing the standard competition baseline.",
-    status: "approved",
-    level: "Validated Principle",
-    sources: ["Thesis 001 post-mortem", "Human promotion review"],
-    sourceFidelity: 86,
-    reconstructionValue: 91,
-    scopeStability: 84,
-    lineage: ["Original thesis", "Outcome", "Post-mortem", "Challenge", "Scope revision", "Human approval"],
+    title: "Separate dominance signals from market coverage",
+    summary: "A strong favorite can control a match without producing the scoring volume or margin required by a handicap-and-total thesis.",
+    status: "proposed",
+    level: "Candidate Pattern",
+    sources: ["England–Ghana post-mortem", "Cape Verde defensive-wall comparison"],
+    sourceFidelity: 88,
+    reconstructionValue: 96,
+    scopeStability: 76,
+    lineage: ["England–Ghana thesis", "0–0 outcome", "Signal-separation post-mortem", "Cape Verde comparison", "Scope narrowed after challenge", "Candidate pattern drafted"],
   },
   {
     id: "decision-england",
     project: "sports",
-    title: "England +1.5 and Under 4.5",
-    summary: "A losing thesis whose post-mortem identified underweighted third-place match variance.",
+    title: "England -1.5 & Over 3.5 vs Ghana",
+    summary: "England was approximately -525. The thesis treated favorite strength, match control, scoring probability, and handicap coverage as if they were the same signal.",
+    status: "challenged",
+    level: "Observation",
+    sources: ["Sports thesis 001", "Exact final result: England 0–0 Ghana"],
+    sourceFidelity: 96,
+    reconstructionValue: 92,
+    scopeStability: 73,
+    lineage: ["Pre-match thesis", "Research audit", "England 0–0 Ghana", "Signal-separation post-mortem"],
+  },
+  {
+    id: "precedent-cape-verde",
+    project: "sports",
+    title: "Cape Verde defensive-wall counterexample",
+    summary: "A perceived quality gap did not guarantee repeated scoring. The case exposes the same defensive-wall failure mode without pretending the events were identical.",
     status: "approved",
     level: "Observation",
-    sources: ["Sports thesis 001", "France 3–1 England"],
-    sourceFidelity: 91,
-    reconstructionValue: 74,
-    scopeStability: 66,
-    lineage: ["Thesis", "Result", "Post-mortem"],
+    sources: ["Earlier Sports Engine case", "Reconstructed comparison"],
+    sourceFidelity: 78,
+    reconstructionValue: 91,
+    scopeStability: 72,
+    lineage: ["Earlier match thesis", "Defensive-wall outcome", "Retrieved as a shared mechanism"],
   },
   {
     id: "principle-workload",
@@ -122,22 +140,23 @@ const fallbackNodes: AtlasNode[] = [
 
 const sportsBlueprint = {
   project: "Sports Engine",
-  version: "V4",
-  purpose: "Preserve and improve the reasoning behind sports research; never generate picks automatically.",
+  version: "V4.3",
+  purpose: "Turn audited sports cases into compact, inspectable reasoning that can improve later research without generating picks automatically.",
   rules: [
     "Classify the research state before assigning confidence.",
+    "Separate favorite quality, match control, scoring probability, and market coverage into distinct claims.",
     "Separate estimated probability from market price and expected value.",
     "Verify the currently offered market before calculating value.",
     "Record counter-evidence, assumptions, and missing information.",
     "Grade outcome correctness and reasoning quality separately.",
     "Reusable principles require evidence lineage and explicit human promotion.",
   ],
-  capabilities: ["Research audit", "Probability and EV", "Lock Score", "Explainable precedent retrieval", "Outcome post-mortem", "Confidence calibration"],
+  capabilities: ["Research audit", "Probability and EV", "Lock Score", "Explainable precedent retrieval", "Outcome post-mortem", "Confidence calibration", "Human-governed promotion"],
 };
 
 const generalBlueprint = {
   project: "Campus Atlas",
-  version: "V4",
+  version: "V4.3",
   purpose: "Carry forward governed, inspectable knowledge across long-running ChatGPT Projects.",
   rules: [
     "Local context stays temporary unless explicitly captured.",
@@ -149,21 +168,26 @@ const generalBlueprint = {
 };
 
 function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
-  return Response.json(data, { status, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, mcp-protocol-version", "access-control-allow-methods": "GET, POST, OPTIONS", ...extraHeaders } });
+  return Response.json(data, { status, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, mcp-protocol-version, x-atlas-workspace", "access-control-allow-methods": "GET, POST, OPTIONS", "cache-control": "no-store", ...extraHeaders } });
 }
 
 function textResponse(text: string, status = 200, contentType = "text/plain; charset=utf-8") {
   return new Response(text, { status, headers: { "content-type": contentType, "access-control-allow-origin": "*" } });
 }
 
-async function stateFor(db: D1Database, publicDemo = false): Promise<AtlasState> {
-  if (publicDemo) return {};
+async function stateFor(db: D1Database, publicDemo = false, workspaceId?: string | null): Promise<AtlasState> {
+  if (publicDemo && !workspaceId) return {};
   try {
-    const loaded = await loadAtlasState(db);
+    const loaded = await loadAtlasState(db, workspaceId || undefined);
     return (loaded.state ?? {}) as AtlasState;
   } catch {
     return {};
   }
+}
+
+function workspaceFor(request: Request, input: Record<string, unknown>, publicDemo: boolean) {
+  if (!publicDemo) return null;
+  return normalizeDemoWorkspaceId(input.workspaceId) || demoWorkspaceIdFromRequest(request);
 }
 
 function nodesFor(state: AtlasState) {
@@ -197,35 +221,64 @@ function rankedNodes(state: AtlasState, task: string, project?: string) {
   return nodesFor(state).map((node) => {
     const searchable = `${node.title} ${node.summary} ${(node.sources || []).join(" ")}`.toLowerCase();
     const searchableWords = new Set(words(searchable));
-    const keywordMatches = taskWords.filter((word) => searchableWords.has(word)).length;
+    const matchedWords = [...new Set(taskWords.filter((word) => searchableWords.has(word)))];
+    const keywordMatches = matchedWords.length;
     const projectFit = node.project === projectKey ? 16 : node.project === "hq" ? 9 : 0;
     const reality = /outcome|result|correction|post-mortem/i.test(searchable) ? 7 : 0;
     const authority = node.status === "approved" ? 10 : 0;
     const score = Math.min(99, Math.round((node.reconstructionValue ?? 55) * .28 + (node.sourceFidelity ?? 60) * .18 + keywordMatches * 9 + projectFit + reality + authority));
-    return { node, score, keywordMatches };
+    return { node, score, keywordMatches, matchedWords };
   }).sort((a, b) => b.score - a.score);
+}
+
+function approvedConnectionFor(state: AtlasState, node: AtlasNode, task: string) {
+  const edges = Array.isArray(state.connections) ? state.connections : [];
+  const allNodes = nodesFor(state);
+  const taskWords = new Set(words(task));
+  return edges
+    .filter((value) => value && value.approved === true && (value.from === node.id || value.to === node.id))
+    .map((edge) => {
+      const otherId = String(edge.from === node.id ? edge.to : edge.from);
+      const other = allNodes.find((candidate) => candidate.id === otherId);
+      const matchCount = other ? words(`${other.title} ${other.summary}`).filter((word) => taskWords.has(word)).length : 0;
+      return { edge, other, matchCount };
+    })
+    .filter((item) => item.other)
+    .sort((a, b) => b.matchCount - a.matchCount)[0];
 }
 
 export function buildContextPacket(state: AtlasState, input: Record<string, unknown>) {
   const task = String(input.task || input.question || "Prepare the next project task using the smallest useful context.").trim();
   const project = String(input.project || "Sports Engine");
   const localContext = String(input.localContext || "").trim();
+  const workspaceId = normalizeDemoWorkspaceId(input.workspaceId);
   const ranked = rankedNodes(state, task, project);
-  const durable = ranked.filter(({ node }) => node.status === "approved").slice(0, 3).map(({ node, score, keywordMatches }) => ({
-    id: node.id,
-    title: node.title,
-    summary: node.summary,
-    usefulness: score,
-    whyIncluded: keywordMatches ? "Matches the active task and retains an inspectable evidence path." : node.project === "hq" ? "Campus-wide governance lens applies to every project task." : "High-value project precedent with reality-linked evidence.",
-    source: (node.sources || ["Campus Atlas"])[0],
-    confidence: node.sourceFidelity ?? 60,
-    scope: node.project === "hq" ? "Entire campus" : blueprintFor(project).project,
-    freshness: "Review before use if current conditions changed",
-    fidelity: fidelity(node),
-    authorityLevel: node.level,
-    connectionPath: [task, blueprintFor(project).project, node.title],
-    lineage: node.lineage || [],
-  }));
+  const durable = ranked.filter(({ node }) => node.status === "approved").slice(0, 3).map(({ node, score, matchedWords }) => {
+    const connected = approvedConnectionFor(state, node, task);
+    const reasons = [node.project === normalizeProject(project) ? "same project" : "campus-wide scope"];
+    if (matchedWords.length) reasons.push(`task match: ${matchedWords.slice(0, 3).join(", ")}`);
+    if (connected?.other) reasons.push(`approved path through ${connected.other.title}`);
+    reasons.push(`${node.reconstructionValue ?? 55} reconstruction value`);
+    const connectionPath = connected?.other
+      ? [task, blueprintFor(project).project, connected.other.title, `${String(connected.edge.type || "Connected")}: ${String(connected.edge.reason || "Approved evidence path")}`, node.title]
+      : [task, blueprintFor(project).project, node.title];
+    return {
+      id: node.id,
+      title: node.title,
+      summary: node.summary,
+      usefulness: score,
+      whyIncluded: reasons.join(" · "),
+      retrievedBecause: reasons,
+      source: (node.sources || ["Campus Atlas"])[0],
+      confidence: node.sourceFidelity ?? 60,
+      scope: node.project === "hq" ? "Entire campus" : blueprintFor(project).project,
+      freshness: "Review before use if current conditions changed",
+      fidelity: fidelity(node),
+      authorityLevel: node.level,
+      connectionPath,
+      lineage: node.lineage || [],
+    };
+  });
   const challenges = ranked.filter(({ node }) => node.status === "challenged" || /challenge|failed|underweight|uncertainty|\blost\b|\bloss\b/i.test(`${node.title} ${node.summary}`)).slice(0, 2).map(({ node }) => ({
     id: node.id,
     title: node.title,
@@ -254,6 +307,7 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
     packetId,
     task,
     project: blueprint.project,
+    workspace: workspaceId ? { id: workspaceId, stateSource: "Shared browser + API demo workspace" } : { id: "default", stateSource: "Default governed workspace" },
     blueprint,
     localContext: localContext ? { content: localContext, retention: "Temporary", expiration: "End of task", captureRequiredForDurability: true } : null,
     durableKnowledge: durable,
@@ -266,7 +320,7 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
       tool: "atlas_build_context_packet",
       proposedBy: "Campus Atlas deterministic retrieval",
       createdAt: new Date().toISOString(),
-      checks: ["Project scope applied", "Only approved knowledge received retrieval authority", "Packet budget enforced", "Local context kept temporary", "Inclusion and exclusion reasons attached"],
+      checks: ["Canonical workspace state loaded", "Project scope applied", "Only approved knowledge received retrieval authority", "Packet budget enforced", "Local context kept temporary", "Inclusion and exclusion reasons attached"],
       humanApprovalRequired: false,
     },
   };
@@ -302,7 +356,9 @@ function securityStatus(env: ActionEnv) {
     protectedRoutes: ["/api/candidates", "/api/outcomes", "atlas_capture_candidate", "atlas_record_outcome"],
     promotionPolicy: "Human approval inside Campus Atlas only",
     publicDemo,
-    browserStatePersistence: publicDemo ? "device_local" : "hosted_d1",
+    browserStatePersistence: publicDemo ? "session_scoped_d1" : "hosted_d1",
+    browserAndApiShareState: true,
+    publicWorkspaceIsolation: publicDemo ? "opaque demo workspace key; private workspace remains separate" : "site access policy",
     privateWorkspaceExposed: !publicDemo,
     siteAccessManagedSeparately: true,
   };
@@ -312,39 +368,45 @@ function requireFields(input: Record<string, unknown>, fields: string[]) {
   return fields.filter((field) => typeof input[field] !== "string" || !String(input[field]).trim());
 }
 
-async function captureCandidate(db: D1Database, input: Record<string, unknown>) {
+async function captureCandidate(db: D1Database, input: Record<string, unknown>, workspaceId?: string | null) {
   const missing = requireFields(input, ["title", "summary", "source", "idempotencyKey"]);
   if (missing.length) return { error: `Missing required fields: ${missing.join(", ")}`, status: 400 };
-  const loaded = await stateFor(db);
+  const loaded = await stateFor(db, Boolean(workspaceId), workspaceId);
   const receipts = Array.isArray(loaded.externalReceipts) ? loaded.externalReceipts : [];
   const key = String(input.idempotencyKey);
   const existing = receipts.find((receipt) => receipt.idempotencyKey === key);
   if (existing) return { data: { created: false, idempotentReplay: true, receipt: existing }, status: 200 };
   const id = `candidate-${Date.now().toString(36)}`;
+  const objectType = input.objectType === "case" ? "case" : "knowledge";
   const node: AtlasNode = {
     id,
     project: normalizeProject(String(input.project || "sports")),
+    room: objectType === "case" ? "Decision Lab" : "Candidate Inbox",
+    type: objectType === "case" ? "decision" : "observation",
     title: String(input.title),
     summary: String(input.summary),
     status: "proposed",
     level: "Observation",
     sources: [String(input.source)],
     sourceFidelity: Number(input.confidence || 60),
+    decisionImpact: objectType === "case" ? 58 : 45,
     reconstructionValue: 50,
     scopeStability: 40,
+    x: 50,
+    y: 50,
     lineage: ["Captured from ChatGPT", "Awaiting human Knowledge Review"],
     history: [{ id: `history-${Date.now()}`, date: "Now", label: "Candidate captured", detail: "External write created proposed knowledge only; no promotion authority was granted." }],
   };
-  const receipt: ActionReceipt = { id: `RCP-${Date.now().toString(36).toUpperCase()}`, tool: "atlas_capture_candidate", createdAt: new Date().toISOString(), idempotencyKey: key, checks: ["Required fields validated", "Idempotency key checked", "Status forced to proposed", "Promotion authority denied"], effect: "Created proposed Observation for human review", targetId: id };
+  const receipt: ActionReceipt = { id: `RCP-${Date.now().toString(36).toUpperCase()}`, tool: "atlas_capture_candidate", createdAt: new Date().toISOString(), idempotencyKey: key, checks: ["Required fields validated", "Idempotency key checked", "Status forced to proposed", "Promotion authority denied"], effect: objectType === "case" ? "Created proposed case in the Case ledger for human review" : "Created proposed Observation for human review", targetId: id };
   const next: AtlasState = { ...loaded, nodes: [...nodesFor(loaded), node], externalReceipts: [...receipts, receipt] };
-  await saveAtlasState(db, next);
+  await saveAtlasState(db, next, workspaceId || undefined);
   return { data: { created: true, candidate: node, receipt }, status: 201 };
 }
 
-async function recordOutcome(db: D1Database, input: Record<string, unknown>) {
+async function recordOutcome(db: D1Database, input: Record<string, unknown>, workspaceId?: string | null) {
   const missing = requireFields(input, ["targetId", "result", "reasoningAssessment", "source", "idempotencyKey"]);
   if (missing.length) return { error: `Missing required fields: ${missing.join(", ")}`, status: 400 };
-  const loaded = await stateFor(db);
+  const loaded = await stateFor(db, Boolean(workspaceId), workspaceId);
   const receipts = Array.isArray(loaded.externalReceipts) ? loaded.externalReceipts : [];
   const key = String(input.idempotencyKey);
   const existing = receipts.find((receipt) => receipt.idempotencyKey === key);
@@ -368,8 +430,10 @@ async function recordOutcome(db: D1Database, input: Record<string, unknown>) {
     eventType: "Reality outcome",
   };
   const receipt: ActionReceipt = { id: `RCP-${Date.now().toString(36).toUpperCase()}`, tool: "atlas_record_outcome", createdAt: new Date().toISOString(), idempotencyKey: key, checks: ["Target exists", "Outcome preserved as evidence event", "No score changed directly", "Promotion authority unchanged"], effect: "Attached reality evidence and opened human review", targetId };
-  const next: AtlasState = { ...loaded, reviews: [...(Array.isArray(loaded.reviews) ? loaded.reviews : []), review], externalReceipts: [...receipts, receipt] };
-  await saveAtlasState(db, next);
+  const outcomeHistory = { id: `history-${Date.now().toString(36)}`, date: "Now", label: "Outcome recorded", detail: `${String(input.result)}. ${String(input.reasoningAssessment)}` };
+  const nextNodes = nodesFor(loaded).map((node) => node.id === targetId ? { ...node, status: "challenged", history: [outcomeHistory, ...(Array.isArray(node.history) ? node.history : [])], lineage: [...(node.lineage || []), "Outcome recorded through Campus Atlas sidecar"] } : node);
+  const next: AtlasState = { ...loaded, nodes: nextNodes, reviews: [...(Array.isArray(loaded.reviews) ? loaded.reviews : []), review], externalReceipts: [...receipts, receipt] };
+  await saveAtlasState(db, next, workspaceId || undefined);
   return { data: { created: true, review, receipt }, status: 201 };
 }
 
@@ -378,52 +442,54 @@ const tools = [
     name: "atlas_build_context_packet",
     title: "Build Context Packet",
     description: "Assemble the smallest useful, inspectable context from one Campus Atlas project for a new ChatGPT task.",
-    inputSchema: { type: "object", properties: { task: { type: "string", description: "The specific task or question ChatGPT is working on." }, project: { type: "string", description: "The Campus Atlas project, such as Sports Engine." }, localContext: { type: "string", description: "Optional temporary facts or constraints for this task only." } }, required: ["task", "project"], additionalProperties: false },
+    inputSchema: { type: "object", properties: { task: { type: "string", description: "The specific task or question ChatGPT is working on." }, project: { type: "string", description: "The Campus Atlas project, such as Sports Engine." }, localContext: { type: "string", description: "Optional temporary facts or constraints for this task only." }, workspaceId: { type: "string", description: "Optional demo workspace key shown in Campus Atlas so ChatGPT reads the same evolving cases as the browser." } }, required: ["task", "project"], additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   },
   {
     name: "atlas_get_project_blueprint",
     title: "Get Project Blueprint",
     description: "Return the current reasoning rules and earned capabilities for a Campus Atlas project.",
-    inputSchema: { type: "object", properties: { project: { type: "string" } }, required: ["project"], additionalProperties: false },
+    inputSchema: { type: "object", properties: { project: { type: "string" }, workspaceId: { type: "string", description: "Optional shared demo workspace key." } }, required: ["project"], additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   },
   {
     name: "atlas_retrieve_precedents",
     title: "Retrieve Explainable Precedents",
     description: "Find approved historical knowledge relevant to a task and explain each evidence path.",
-    inputSchema: { type: "object", properties: { task: { type: "string" }, project: { type: "string" } }, required: ["task", "project"], additionalProperties: false },
+    inputSchema: { type: "object", properties: { task: { type: "string" }, project: { type: "string" }, workspaceId: { type: "string", description: "Optional shared demo workspace key." } }, required: ["task", "project"], additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   },
   {
     name: "atlas_get_receipt",
     title: "Get Atlas Receipt",
     description: "Inspect a preserved receipt for a ChatGPT-to-Atlas action.",
-    inputSchema: { type: "object", properties: { receiptId: { type: "string" } }, required: ["receiptId"], additionalProperties: false },
+    inputSchema: { type: "object", properties: { receiptId: { type: "string" }, workspaceId: { type: "string", description: "Optional shared demo workspace key." } }, required: ["receiptId"], additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   },
   {
     name: "atlas_capture_candidate",
-    title: "Capture Candidate Knowledge",
-    description: "Create proposed knowledge for later human review. This never promotes or grants retrieval authority.",
-    inputSchema: { type: "object", properties: { title: { type: "string" }, summary: { type: "string" }, source: { type: "string" }, project: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 100 }, idempotencyKey: { type: "string", description: "Stable unique key so retries do not duplicate the write." } }, required: ["title", "summary", "source", "project", "idempotencyKey"], additionalProperties: false },
+    title: "Capture Candidate Case or Knowledge",
+    description: "Create a proposed case or knowledge object for later human review. This never promotes or grants retrieval authority.",
+    inputSchema: { type: "object", properties: { title: { type: "string" }, summary: { type: "string" }, source: { type: "string" }, project: { type: "string" }, objectType: { type: "string", enum: ["case", "knowledge"], description: "Use case for a new thesis/decision record; use knowledge for a reusable observation." }, confidence: { type: "number", minimum: 0, maximum: 100 }, idempotencyKey: { type: "string", description: "Stable unique key so retries do not duplicate the write." }, workspaceId: { type: "string", description: "Shared demo workspace key. Required for public-demo writes." } }, required: ["title", "summary", "source", "project", "idempotencyKey"], additionalProperties: false },
     annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
   },
   {
     name: "atlas_record_outcome",
     title: "Record Outcome Evidence",
     description: "Attach a result and reasoning assessment as a preserved evidence event. This never changes authority directly.",
-    inputSchema: { type: "object", properties: { targetId: { type: "string" }, result: { type: "string" }, reasoningAssessment: { type: "string" }, source: { type: "string" }, impactStrength: { type: "string", enum: ["Light", "Moderate", "Strong"] }, scope: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 100 }, idempotencyKey: { type: "string" } }, required: ["targetId", "result", "reasoningAssessment", "source", "idempotencyKey"], additionalProperties: false },
+    inputSchema: { type: "object", properties: { targetId: { type: "string" }, result: { type: "string" }, reasoningAssessment: { type: "string" }, source: { type: "string" }, impactStrength: { type: "string", enum: ["Light", "Moderate", "Strong"] }, scope: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 100 }, idempotencyKey: { type: "string" }, workspaceId: { type: "string", description: "Shared demo workspace key. Required for public-demo writes." } }, required: ["targetId", "result", "reasoningAssessment", "source", "idempotencyKey"], additionalProperties: false },
     annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
   },
 ];
 
 async function executeTool(name: string, input: Record<string, unknown>, request: Request, env: ActionEnv) {
   const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
-  const state = await stateFor(env.DB, publicDemo);
+  const workspaceId = workspaceFor(request, input, publicDemo);
+  const scopedInput = workspaceId ? { ...input, workspaceId } : input;
+  const state = await stateFor(env.DB, publicDemo, workspaceId);
   if (name === "atlas_build_context_packet") {
-    const packet = buildContextPacket(state, input);
-    if (!publicDemo) await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) });
+    const packet = buildContextPacket(state, scopedInput);
+    if (!publicDemo || workspaceId) await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) }, workspaceId || undefined);
     return { data: packet, status: 200 };
   }
   if (name === "atlas_get_project_blueprint") return { data: blueprintFor(String(input.project || "")), status: 200 };
@@ -433,57 +499,76 @@ async function executeTool(name: string, input: Record<string, unknown>, request
     return receipt ? { data: receipt, status: 200 } : { error: "Receipt not found.", status: 404 };
   }
   if (["atlas_capture_candidate", "atlas_record_outcome"].includes(name) && !isAuthorized(request, env)) return { error: "Write authorization required.", status: 401 };
-  if (name === "atlas_capture_candidate") return captureCandidate(env.DB, input);
-  if (name === "atlas_record_outcome") return recordOutcome(env.DB, input);
+  if (["atlas_capture_candidate", "atlas_record_outcome"].includes(name) && publicDemo && !workspaceId) return { error: "A valid public-demo workspaceId is required for writes.", status: 400 };
+  if (name === "atlas_capture_candidate") return captureCandidate(env.DB, scopedInput, workspaceId);
+  if (name === "atlas_record_outcome") return recordOutcome(env.DB, scopedInput, workspaceId);
   return { error: `Unknown tool: ${name}`, status: 404 };
 }
 
 function openApi(origin: string) {
   return {
     openapi: "3.1.0",
-    info: { title: "Campus Atlas Actions", version: "4.0.0", description: "Governed context retrieval and candidate capture for ChatGPT. Writes never grant promotion authority." },
+    info: { title: "Campus Atlas Actions", version: "4.3.0", description: "Governed context retrieval and candidate capture for ChatGPT. Browser and sidecar can share one scoped workspace; writes never grant promotion authority." },
     servers: [{ url: origin }],
     paths: {
       "/api/context": { post: { operationId: "buildContextPacket", summary: "Build the smallest useful context packet", requestBody: { required: true, content: { "application/json": { schema: tools[0].inputSchema } } }, responses: { "200": { description: "Inspectable context packet" } } } },
-      "/api/blueprint": { get: { operationId: "getProjectBlueprint", summary: "Get a project reasoning blueprint", parameters: [{ name: "project", in: "query", required: true, schema: { type: "string" } }], responses: { "200": { description: "Project blueprint" } } } },
+      "/api/blueprint": { get: { operationId: "getProjectBlueprint", summary: "Get a project reasoning blueprint", parameters: [{ name: "project", in: "query", required: true, schema: { type: "string" } }, { name: "workspaceId", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Project blueprint" } } } },
       "/api/precedents": { post: { operationId: "retrievePrecedents", summary: "Retrieve explainable precedents", requestBody: { required: true, content: { "application/json": { schema: tools[2].inputSchema } } }, responses: { "200": { description: "Ranked precedents" } } } },
       "/api/candidates": { post: { operationId: "captureCandidate", summary: "Capture proposed knowledge for human review", requestBody: { required: true, content: { "application/json": { schema: tools[4].inputSchema } } }, responses: { "201": { description: "Candidate and action receipt" } } } },
       "/api/outcomes": { post: { operationId: "recordOutcome", summary: "Record reality evidence", requestBody: { required: true, content: { "application/json": { schema: tools[5].inputSchema } } }, responses: { "201": { description: "Evidence event and action receipt" } } } },
-      "/api/receipts": { get: { operationId: "getAtlasReceipt", summary: "Inspect an action receipt", parameters: [{ name: "id", in: "query", required: true, schema: { type: "string" } }], responses: { "200": { description: "Action receipt" } } } },
+      "/api/receipts": { get: { operationId: "getAtlasReceipt", summary: "Inspect an action receipt", parameters: [{ name: "id", in: "query", required: true, schema: { type: "string" } }, { name: "workspaceId", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Action receipt" } } } },
     },
   };
 }
 
 export async function handleAtlasActions(request: Request, env: ActionEnv) {
   const url = new URL(request.url);
-  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, mcp-protocol-version", "access-control-allow-methods": "GET, POST, OPTIONS" } });
+  if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, mcp-protocol-version, x-atlas-workspace", "access-control-allow-methods": "GET, POST, OPTIONS" } });
 
   if (url.pathname === "/openapi.json" || url.pathname === "/.well-known/openapi.json") return json(openApi(url.origin));
   if (url.pathname === "/api/security" && request.method === "GET") return json(securityStatus(env));
-  if (url.pathname === "/privacy") return textResponse("<!doctype html><html><head><title>Campus Atlas Privacy</title><meta name=viewport content='width=device-width,initial-scale=1'><style>body{font:16px/1.6 system-ui;max-width:760px;margin:64px auto;padding:0 24px;color:#172033}h1{font-size:34px}</style></head><body><h1>Campus Atlas privacy</h1><p>In public demo mode, the browser receives seeded demonstration knowledge only. Interactive changes are stored on that visitor's device and are not written into the private Campus Atlas workspace.</p><p>Temporary Local Context stays attached to its packet unless the user captures it as candidate knowledge on that device. External writes never promote knowledge: connector candidate and outcome writes require authorization and return an inspectable receipt.</p><p>Do not submit secrets, payment data, or sensitive medical information to the demonstration workspace.</p></body></html>", 200, "text/html; charset=utf-8");
+  if (url.pathname === "/privacy") return textResponse("<!doctype html><html><head><title>Campus Atlas Privacy</title><meta name=viewport content='width=device-width,initial-scale=1'><style>body{font:16px/1.6 system-ui;max-width:760px;margin:64px auto;padding:0 24px;color:#172033}h1{font-size:34px}</style></head><body><h1>Campus Atlas privacy</h1><p>In public demo mode, each browser receives an opaque demonstration workspace key. Interactive changes are stored in a session-scoped demo record so the browser and context API can inspect the same evolving cases. That record is separate from the private Campus Atlas workspace.</p><p>Anyone holding a demo workspace key may be able to retrieve that demonstration state, so do not submit secrets, payment data, or sensitive medical information. Temporary Local Context stays attached to its packet unless explicitly captured.</p><p>External candidate and outcome writes require authorization and never promote knowledge. Human approval inside Campus Atlas remains the only promotion authority.</p></body></html>", 200, "text/html; charset=utf-8");
 
   if (url.pathname === "/api/context" && request.method === "POST") {
     const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
-    const state = await stateFor(env.DB, publicDemo);
-    const packet = buildContextPacket(state, await request.json() as Record<string, unknown>);
-    if (!publicDemo) await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) });
+    const input = await request.json() as Record<string, unknown>;
+    const workspaceId = workspaceFor(request, input, publicDemo);
+    const scopedInput = workspaceId ? { ...input, workspaceId } : input;
+    const state = await stateFor(env.DB, publicDemo, workspaceId);
+    const packet = buildContextPacket(state, scopedInput);
+    if (!publicDemo || workspaceId) await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) }, workspaceId || undefined);
     return json(packet);
   }
   if (url.pathname === "/api/blueprint" && request.method === "GET") return json(blueprintFor(url.searchParams.get("project") || ""));
-  if (url.pathname === "/api/precedents" && request.method === "POST") return json(retrievePrecedents(await stateFor(env.DB, env.CAMPUS_ATLAS_PUBLIC_DEMO === "true"), await request.json() as Record<string, unknown>));
+  if (url.pathname === "/api/precedents" && request.method === "POST") {
+    const input = await request.json() as Record<string, unknown>;
+    const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
+    const workspaceId = workspaceFor(request, input, publicDemo);
+    return json(retrievePrecedents(await stateFor(env.DB, publicDemo, workspaceId), input));
+  }
   if (url.pathname === "/api/receipts" && request.method === "GET") {
-    const state = await stateFor(env.DB, env.CAMPUS_ATLAS_PUBLIC_DEMO === "true");
+    const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
+    const input = { workspaceId: url.searchParams.get("workspaceId") || "" };
+    const state = await stateFor(env.DB, publicDemo, workspaceFor(request, input, publicDemo));
     const receipt = (state.externalReceipts || []).find((item) => item.id === url.searchParams.get("id"));
     return receipt ? json(receipt) : json({ error: "Receipt not found." }, 404);
   }
   if (url.pathname === "/api/candidates" && request.method === "POST") {
     if (!isAuthorized(request, env)) return json({ error: "Write authorization required." }, 401);
-    const result = await captureCandidate(env.DB, await request.json() as Record<string, unknown>);
+    const input = await request.json() as Record<string, unknown>;
+    const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
+    const workspaceId = workspaceFor(request, input, publicDemo);
+    if (publicDemo && !workspaceId) return json({ error: "A valid public-demo workspaceId is required for writes." }, 400);
+    const result = await captureCandidate(env.DB, input, workspaceId);
     return "data" in result ? json(result.data, result.status) : json({ error: result.error }, result.status);
   }
   if (url.pathname === "/api/outcomes" && request.method === "POST") {
     if (!isAuthorized(request, env)) return json({ error: "Write authorization required." }, 401);
-    const result = await recordOutcome(env.DB, await request.json() as Record<string, unknown>);
+    const input = await request.json() as Record<string, unknown>;
+    const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
+    const workspaceId = workspaceFor(request, input, publicDemo);
+    if (publicDemo && !workspaceId) return json({ error: "A valid public-demo workspaceId is required for writes." }, 400);
+    const result = await recordOutcome(env.DB, input, workspaceId);
     return "data" in result ? json(result.data, result.status) : json({ error: result.error }, result.status);
   }
 
@@ -493,7 +578,7 @@ export async function handleAtlasActions(request: Request, env: ActionEnv) {
   if (rpc.method?.startsWith("notifications/")) return new Response(null, { status: 202, headers: { "access-control-allow-origin": "*" } });
   const ok = (result: unknown) => json({ jsonrpc: "2.0", id: rpc.id ?? null, result });
   const fail = (code: number, message: string) => json({ jsonrpc: "2.0", id: rpc.id ?? null, error: { code, message } });
-  if (rpc.method === "initialize") return ok({ protocolVersion: String((rpc.params as { protocolVersion?: string } | undefined)?.protocolVersion || "2025-06-18"), capabilities: { tools: { listChanged: false } }, serverInfo: { name: "Campus Atlas", version: "4.0.0" } });
+  if (rpc.method === "initialize") return ok({ protocolVersion: String((rpc.params as { protocolVersion?: string } | undefined)?.protocolVersion || "2025-06-18"), capabilities: { tools: { listChanged: false } }, serverInfo: { name: "Campus Atlas", version: "4.3.0" } });
   if (rpc.method === "tools/list") return ok({ tools });
   if (rpc.method === "tools/call") {
     const params = (rpc.params || {}) as { name?: string; arguments?: Record<string, unknown> };
