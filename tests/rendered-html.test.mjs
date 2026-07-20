@@ -69,6 +69,45 @@ test("mobile navigation focuses one workspace instead of stacking the full Atlas
   assert.match(css, /\.mobile-review \.workspace/);
 });
 
+test("V4.2 makes governed capture a permanent front door", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(page, /className="nav-capture"/);
+  assert.match(page, />＋ Capture<\/button>/);
+  assert.match(page, /className="mobile-capture"/);
+  assert.match(page, /Add to Sports Engine/);
+  assert.match(css, /\.sports-add-button/);
+});
+
+test("V4.2 exposes the complete governed Sports Engine entry lifecycle", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  for (const action of [
+    "Capture research / thesis",
+    "Record outcome",
+    "Run post-mortem",
+    "Add correction",
+    "Add evidence",
+    "Build context packet",
+  ]) assert.match(page, new RegExp(action.replace("/", "\\/")));
+
+  for (const stage of [
+    "Captured",
+    "Connected",
+    "Tested",
+    "Eligible for promotion",
+    "Available to future retrieval",
+  ]) assert.match(page, new RegExp(stage));
+
+  assert.match(page, /Connection Receipt · V4\.2/);
+  assert.match(page, /Create a new knowledge object/);
+  assert.match(page, /Update an existing knowledge object/);
+  assert.match(page, /relatedId && relatedId !== target\.id/);
+  assert.match(page, /approved: false, inferred: true/);
+  assert.match(page, /Approve this connection/);
+});
+
 test("structures a capture with an explicit governed fallback receipt", async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("structure", `${process.pid}-${Date.now()}`);

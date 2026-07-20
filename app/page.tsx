@@ -9,6 +9,7 @@ type ReviewAction = "Reinforce" | "Challenge" | "Revise" | "Narrow Scope" | "Sup
 type EdgeType = "Supports" | "Challenges" | "Revises" | "Applies To" | "Derived From" | "Shares Principle With" | "Supersedes" | "Constrained By";
 type GraphView = "connections" | "lineage" | "challenges" | "influence";
 type MobileSurface = "ask" | "projects" | "atlas" | "review";
+type CaptureAction = "thesis" | "outcome" | "postmortem" | "correction" | "evidence" | "packet";
 type LocalKind = "Objective" | "Temporary fact" | "Constraint" | "Assumption" | "Exclusion" | "Time horizon" | "Current condition" | "User instruction" | "Missing information";
 
 type Project = { key: ProjectKey; label: string; short: string; color: string; rooms: number; description: string; capabilityCount: number };
@@ -25,6 +26,11 @@ type ReviewEvent = {
   relatedNodeId: string; createdAt: string;
 };
 type Connection = { id: string; from: string; to: string; type: EdgeType; reason: string; approved: boolean; inferred?: boolean };
+type CaptureReceiptState = {
+  action: CaptureAction; nodeId: string; nodeTitle: string; nodeCreated: boolean; eventLabel: string;
+  edgeId?: string; edgeType?: EdgeType; connectedTitle?: string; reason: string; approved: boolean; inferred: boolean;
+  influence: string;
+};
 type LocalContext = {
   id: string; kind: LocalKind; content: string; source: string; confidence: number; scope: "This packet" | "This project" | "Entire campus";
   expires: string; promotion: "Temporary" | "Eligible for later promotion"; linkedNodeId: string; captured?: boolean;
@@ -127,6 +133,19 @@ function metricsFor(nodeId: string, events: ReviewEvent[]) {
   const resolutions = relevant.filter((event) => ["Revise", "Narrow Scope", "Supersede", "Retire"].includes(event.action)).length;
   return { supporting, challenging, projectsCount, unresolved: Math.max(0, challenges - resolutions) };
 }
+function lifecycleFor(node: KnowledgeNode, events: ReviewEvent[], edges: Connection[]) {
+  const metrics = metricsFor(node.id, events);
+  const connected = edges.some((edge) => edge.approved && (edge.from === node.id || edge.to === node.id));
+  const tested = events.some((event) => event.nodeId === node.id) || node.history.some((entry) => /outcome|post-mortem|review|correction/i.test(`${entry.label} ${entry.detail}`));
+  const eligible = metrics.supporting >= 1 && metrics.unresolved === 0 && node.sourceFidelity >= 70;
+  return [
+    { label: "Captured", state: "complete" },
+    { label: "Connected", state: connected ? "complete" : "current" },
+    { label: "Tested", state: tested ? "complete" : connected ? "current" : "waiting" },
+    { label: "Eligible for promotion", state: eligible ? "complete" : tested ? "current" : "waiting" },
+    { label: "Available to future retrieval", state: node.status === "approved" ? "complete" : eligible ? "current" : "waiting" },
+  ];
+}
 
 const sportsCapabilities = [
   { name: "Research-quality audits", rule: "Classify research state before confidence", evidence: "12 audited decisions", tested: "Thesis 001", limit: "Manual evidence entry", next: "Independent source coverage" },
@@ -155,6 +174,8 @@ export default function Home() {
   const [reviewPreview, setReviewPreview] = useState<ReviewEvent | null>(null);
   const [promotionOpen, setPromotionOpen] = useState(false);
   const [captureOpen, setCaptureOpen] = useState(false);
+  const [captureProject, setCaptureProject] = useState<ProjectKey>("sports");
+  const [captureReceipt, setCaptureReceipt] = useState<CaptureReceiptState | null>(null);
   const [campusOpen, setCampusOpen] = useState(false);
   const [sportsOpen, setSportsOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
@@ -320,10 +341,71 @@ export default function Home() {
     setPromotionOpen(false); flash(`Human approval recorded · promoted to ${next}`);
   }
 
-  function captureExperience(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); const data = new FormData(event.currentTarget); const key = String(data.get("project")) as ProjectKey;
-    const node: KnowledgeNode = { id: `observation-${Date.now()}`, project: key, room: "Inbox", type: "observation", title: String(data.get("title")), summary: String(data.get("summary")), status: "inferred", level: "Observation", x: 15 + Math.round(Math.random() * 70), y: 15 + Math.round(Math.random() * 70), sources: [String(data.get("source") || "Direct capture")], lineage: ["Experience captured", "Structured as observation"], sourceFidelity: 60, decisionImpact: 45, reconstructionValue: 52, scopeStability: 40, history: [{ id: `h-${Date.now()}`, date: "Now", label: "Captured", detail: "No promotion authority granted." }] };
-    setNodes((current) => [...current, node]); setSelectedId(node.id); setCaptureOpen(false); flash("Experience captured as an observation—not promoted");
+  function openCapture(key: ProjectKey = project === "all" ? "sports" : project) {
+    setCaptureProject(key); setCaptureReceipt(null); setCaptureOpen(true);
+  }
+
+  function saveCapture(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    const action = String(data.get("action")) as CaptureAction;
+    const key = String(data.get("project")) as ProjectKey;
+    const targetId = String(data.get("targetId") || "");
+    const relatedId = String(data.get("relatedId") || "");
+    const title = String(data.get("title") || "Untitled Sports Engine entry");
+    const details = String(data.get("details") || "");
+    const source = String(data.get("source") || "Direct capture");
+    const fidelity = String(data.get("fidelity") || "Reconstructed");
+    const impact = String(data.get("impact") || "challenge");
+    const reason = String(data.get("connectionReason") || "The shared mechanism may affect how this case is researched later.");
+    const now = Date.now();
+    const fidelityScore = fidelity === "Exact" ? 96 : fidelity === "Reconstructed" ? 78 : 62;
+    let nodeId = targetId;
+    let nodeTitle = nodes.find((node) => node.id === targetId)?.title ?? title;
+    let nodeCreated = false;
+    let eventLabel = "Evidence event preserved";
+    let edge: Connection | undefined;
+
+    if (action === "thesis") {
+      const node: KnowledgeNode = { id: `decision-${now}`, project: key, room: key === "sports" ? "Decision Lab" : "Inbox", type: "decision", title, summary: details, status: "proposed", level: "Observation", x: 15 + Math.round(Math.random() * 70), y: 15 + Math.round(Math.random() * 70), sources: [source], lineage: ["Experience captured", `Structured as ${fidelity.toLowerCase()} research`, "Awaiting connection and reality review"], sourceFidelity: fidelityScore, decisionImpact: 58, reconstructionValue: 66, scopeStability: 48, history: [{ id: `h-${now}`, date: "Now", label: "Captured", detail: "Research entered as a durable candidate without promotion authority." }] };
+      nodeId = node.id; nodeTitle = node.title; nodeCreated = true; eventLabel = "Research candidate created";
+      setNodes((current) => [...current, node]); setSelectedId(node.id); setProject(key);
+      if (relatedId) edge = { id: `edge-${now}`, from: node.id, to: relatedId, type: "Shares Principle With", reason, approved: false, inferred: true };
+    } else {
+      const target = nodes.find((node) => node.id === targetId);
+      if (!target) return;
+      const actionMap: Record<Exclude<CaptureAction, "thesis" | "packet">, ReviewAction> = { outcome: impact === "support" ? "Reinforce" : "Challenge", postmortem: "Revise", correction: impact === "supersede" ? "Supersede" : "Revise", evidence: impact === "support" ? "Reinforce" : "Challenge" };
+      const labelMap: Record<Exclude<CaptureAction, "thesis" | "packet">, string> = { outcome: "Outcome recorded", postmortem: "Post-mortem preserved", correction: "Correction adopted", evidence: "Evidence added" };
+      const reviewAction = actionMap[action as Exclude<CaptureAction, "thesis" | "packet">];
+      eventLabel = labelMap[action as Exclude<CaptureAction, "thesis" | "packet">];
+      const review: ReviewEvent = { id: `review-${now}`, nodeId: target.id, action: reviewAction, rationale: details, evidence: title, source, strength: "Moderate", scope: key === "sports" ? "Sports Engine" : "This project", confidence: fidelityScore, project: key, relatedNodeId: relatedId || target.id, createdAt: new Date().toISOString() };
+      setReviews((current) => [...current, review]);
+      setNodes((current) => current.map((node) => node.id === target.id ? { ...node, status: reviewAction === "Challenge" ? "challenged" : node.status, history: [{ id: `h-${now}`, date: "Now", label: eventLabel, detail: `${title}. ${details}` }, ...node.history], lineage: [...node.lineage, eventLabel] } : node));
+      setSelectedId(target.id); setProject(key); nodeId = target.id; nodeTitle = target.title;
+      if (relatedId && relatedId !== target.id) {
+        const edgeType: EdgeType = action === "correction" ? "Revises" : action === "postmortem" ? "Derived From" : impact === "support" ? "Supports" : "Challenges";
+        edge = { id: `edge-${now}`, from: target.id, to: relatedId, type: edgeType, reason, approved: false, inferred: true };
+      }
+    }
+
+    if (edge) setConnections((current) => [...current, edge]);
+    const connected = nodes.find((node) => node.id === (edge?.to ?? relatedId));
+    setCaptureReceipt({ action, nodeId, nodeTitle, nodeCreated, eventLabel, edgeId: edge?.id, edgeType: edge?.type, connectedTitle: connected?.title, reason, approved: false, inferred: Boolean(edge), influence: action === "outcome" || action === "postmortem" ? "This evidence can change calibration and promotion eligibility after review." : action === "correction" ? "Later packets should carry this correction instead of stale reasoning." : action === "evidence" ? "This evidence changes the support ledger; it does not directly change authority." : "Future Sports Engine requests can retrieve this only after governed approval." });
+    setCaptureOpen(false); flash(`${eventLabel} · receipt ready`);
+  }
+
+  function approveCapturedConnection() {
+    if (!captureReceipt?.edgeId) return;
+    setConnections((current) => current.map((edge) => edge.id === captureReceipt.edgeId ? { ...edge, approved: true, inferred: false } : edge));
+    setNodes((current) => current.map((node) => node.id === captureReceipt.nodeId ? { ...node, history: [{ id: `h-${Date.now()}`, date: "Now", label: "Connection approved", detail: `${captureReceipt.edgeType} connection approved with its rationale preserved.` }, ...node.history] } : node));
+    setCaptureReceipt((current) => current ? { ...current, approved: true, inferred: false } : current);
+    flash("Connection approved · lifecycle advanced");
+  }
+
+  function buildPacketFromCapture(task: string, key: ProjectKey) {
+    const projectName = projectFor(key).label;
+    setCaptureOpen(false); setSportsOpen(false); setHandoffProject(projectName); setHandoffTask(task); focusSurface("ask", "chatgpt-handoff");
+    void requestHandoff(task, projectName, "");
   }
 
   function createCampus(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const data = new FormData(event.currentTarget); setWorkspaceName(String(data.get("campus"))); setExampleMode(false); setCampusOpen(false); flash("Campus created · first project blueprint ready"); }
@@ -335,19 +417,20 @@ export default function Home() {
     flash("Judge demo reset to its seeded starting state");
   }
 
-  if (sportsOpen) return <SportsEngine onBack={() => setSportsOpen(false)} onEvidence={() => { setSportsOpen(false); setSelectedId("pattern-format"); setProject("sports"); focusSurface("atlas", "atlas-workspace"); }} onPromotion={() => { setSportsOpen(false); setSelectedId("pattern-format"); setPromotionOpen(true); }} toast={toast} />;
+  if (sportsOpen) return <><SportsEngineV42 onBack={() => setSportsOpen(false)} onAdd={() => openCapture("sports")} onEvidence={() => { setSportsOpen(false); setSelectedId("pattern-format"); setProject("sports"); focusSurface("atlas", "atlas-workspace"); }} onPromotion={() => { setSportsOpen(false); setSelectedId("pattern-format"); setPromotionOpen(true); }} toast={toast} />{captureOpen && <CaptureHub defaultProject={captureProject} nodes={nodes} onSubmit={saveCapture} onBuildPacket={buildPacketFromCapture} onClose={() => setCaptureOpen(false)} />}{captureReceipt && <CaptureReceipt receipt={captureReceipt} node={nodes.find((node) => node.id === captureReceipt.nodeId)} reviews={reviews} connections={connections} onApproveConnection={approveCapturedConnection} onClose={() => setCaptureReceipt(null)} />}</>;
 
   return (
     <main className={`app-shell mobile-${mobileSurface}`}>
       <header className="topbar">
         <a className="brand" href="#top" onClick={() => setMobileSurface("ask")}><span className="brand-mark">CA</span><span><strong>Campus Atlas</strong><small>Connected reasoning for ChatGPT Projects</small></span></a>
-        <nav><button onClick={() => focusSurface("ask", "chatgpt-handoff")}>Ask Atlas</button><button onClick={() => focusSurface("review", "promotion-queue")}>Review Inbox</button><button onClick={() => focusSurface("atlas", "atlas-workspace")}>Explore Atlas</button><button onClick={() => openProject("sports")}>Sports Engine</button></nav>
+        <nav><button className="nav-capture" onClick={() => openCapture()}>＋ Capture</button><button onClick={() => focusSurface("ask", "chatgpt-handoff")}>Ask Atlas</button><button onClick={() => focusSurface("review", "promotion-queue")}>Review Inbox</button><button onClick={() => focusSurface("atlas", "atlas-workspace")}>Explore Atlas</button><button onClick={() => openProject("sports")}>Sports Engine</button></nav>
         <div className="topbar-actions"><span className={`save-state ${saveStatus}`}>{saveStatus === "saved" ? persistenceMode === "device" ? "✓ Saved on device" : "✓ Saved" : saveStatus === "saving" ? "Saving…" : saveStatus === "error" ? "Save failed" : "Loading…"}</span><button className="primary-button" onClick={() => setCampusOpen(true)}>＋ Create your campus</button></div>
       </header>
 
       <nav className="mobile-dock" aria-label="Campus Atlas mobile workspace">
         <button className={mobileSurface === "ask" ? "active" : ""} aria-pressed={mobileSurface === "ask"} onClick={() => focusSurface("ask", "top")}><span>✦</span>Ask</button>
         <button className={mobileSurface === "projects" ? "active" : ""} aria-pressed={mobileSurface === "projects"} onClick={() => focusSurface("projects", "projects")}><span>▦</span>Projects</button>
+        <button className="mobile-capture" onClick={() => openCapture()}><span>＋</span>Capture</button>
         <button className={mobileSurface === "atlas" ? "active" : ""} aria-pressed={mobileSurface === "atlas"} onClick={() => focusSurface("atlas", "atlas-workspace")}><span>∞</span>Atlas</button>
         <button className={mobileSurface === "review" ? "active" : ""} aria-pressed={mobileSurface === "review"} onClick={() => focusSurface("review", "promotion-queue")}><span>✓</span>Review</button>
       </nav>
@@ -394,7 +477,7 @@ export default function Home() {
           <form className="retrieval-bar" onSubmit={openPacket}><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} aria-label="Retrieval question" /><button>Build context packet →</button></form>
         </section>
 
-        <aside className="inspector panel"><div className="inspector-top"><div className="type-chip" style={{ "--node-color": projectFor(selected.project).color } as React.CSSProperties}>{selected.level}</div><span className={`authority-chip ${selected.status}`}>{selected.status === "approved" ? "✓ Human approved" : selected.status}</span></div><p className="room-name">{projectFor(selected.project).label} · {selected.room}</p><h2>{selected.title}</h2><p className="node-summary">{selected.summary}</p><div className="confidence-block"><div><span>Computed confidence</span><strong>{selectedConfidence}%</strong></div><div className="confidence-track"><i style={{ width: `${selectedConfidence}%` }} /></div><small>Derived from {reviews.filter((event) => event.nodeId === selected.id).length} preserved review events—not directly editable.</small></div><div className="ledger-grid"><div><strong>{selectedMetrics.supporting}</strong><span>Support</span></div><div><strong>{selectedMetrics.challenging}</strong><span>Challenge</span></div><div><strong>{selectedMetrics.projectsCount}</strong><span>Projects</span></div><div className={selectedMetrics.unresolved ? "warn" : ""}><strong>{selectedMetrics.unresolved}</strong><span>Unresolved</span></div></div><div className="mini-metrics"><span>Scope stability <b>{selected.scopeStability}</b></span><span>Source fidelity <b>{selected.sourceFidelity}</b></span><span>Confidence trend <b>{selectedMetrics.challenging ? "Review" : "Stable ↑"}</b></span></div><div className="lineage-preview"><div className="section-label"><span>Lineage</span><b>{selected.lineage.length} stages</b></div>{selected.lineage.slice(-3).map((item, index) => <p key={item}><i>{index + 1}</i>{item}</p>)}</div><div className="inspector-actions"><button className="primary-button" onClick={() => { setReviewPreview(null); setReviewOpen(true); }}>Open Knowledge Review</button><button onClick={() => setPromotionOpen(true)}>Inspect promotion eligibility →</button></div></aside>
+        <aside className="inspector panel"><div className="inspector-top"><div className="type-chip" style={{ "--node-color": projectFor(selected.project).color } as React.CSSProperties}>{selected.level}</div><span className={`authority-chip ${selected.status}`}>{selected.status === "approved" ? "✓ Human approved" : selected.status}</span></div><p className="room-name">{projectFor(selected.project).label} · {selected.room}</p><h2>{selected.title}</h2><p className="node-summary">{selected.summary}</p><LifecycleRail node={selected} reviews={reviews} connections={connections} compact /><div className="confidence-block"><div><span>Computed confidence</span><strong>{selectedConfidence}%</strong></div><div className="confidence-track"><i style={{ width: `${selectedConfidence}%` }} /></div><small>Derived from {reviews.filter((event) => event.nodeId === selected.id).length} preserved review events—not directly editable.</small></div><div className="ledger-grid"><div><strong>{selectedMetrics.supporting}</strong><span>Support</span></div><div><strong>{selectedMetrics.challenging}</strong><span>Challenge</span></div><div><strong>{selectedMetrics.projectsCount}</strong><span>Projects</span></div><div className={selectedMetrics.unresolved ? "warn" : ""}><strong>{selectedMetrics.unresolved}</strong><span>Unresolved</span></div></div><div className="mini-metrics"><span>Scope stability <b>{selected.scopeStability}</b></span><span>Source fidelity <b>{selected.sourceFidelity}</b></span><span>Confidence trend <b>{selectedMetrics.challenging ? "Review" : "Stable ↑"}</b></span></div><div className="lineage-preview"><div className="section-label"><span>Lineage</span><b>{selected.lineage.length} stages</b></div>{selected.lineage.slice(-3).map((item, index) => <p key={item}><i>{index + 1}</i>{item}</p>)}</div><div className="inspector-actions"><button className="primary-button" onClick={() => { setReviewPreview(null); setReviewOpen(true); }}>Open Knowledge Review</button><button onClick={() => setPromotionOpen(true)}>Inspect promotion eligibility →</button></div></aside>
       </section>
 
       <section className="promotion-section" id="promotion-queue"><div className="promotion-heading"><div><p className="eyebrow">Review Inbox · governed promotion</p><h2>Decide what deserves future influence.</h2><p>Every candidate arrives with supporting cases, challenges, scope, lineage, and a clear blocker. Review the receipt—never raise a number directly.</p></div><div className="promotion-hierarchy">{levels.map((level, index) => <span key={level}><b>{index + 1}</b>{level}{index < levels.length - 1 && <i>→</i>}</span>)}</div></div><div className="queue-grid">{promotionCandidates.map((node) => { const metrics = metricsFor(node.id, reviews); const eligible = metrics.supporting >= 1 && metrics.unresolved === 0 && node.sourceFidelity >= 70; return <article key={node.id} className={node.id === "pattern-format" ? "featured-candidate" : ""}><div className="candidate-top"><span>{node.level}</span><b className={eligible ? "eligible" : "blocked"}>{eligible ? "Eligible" : "Blocked"}</b></div><h3>{node.title}</h3><div className="candidate-metrics"><span><b>{metrics.supporting}</b> supporting cases</span><span><b>{metrics.challenging}</b> challenging cases</span><span><b>{metrics.projectsCount}</b> independent projects</span><span><b>{confidenceFor(node.id, reviews)}%</b> computed confidence</span><span><b>{node.sourceFidelity}</b> source fidelity</span><span><b>{node.decisionImpact}</b> decision impact</span><span><b>{node.reconstructionValue}</b> reconstruction value</span><span><b>{metrics.unresolved}</b> contradictions</span></div><div className={`eligibility-note ${eligible ? "ready" : "hold"}`}><strong>{eligible ? "Why eligible" : "What blocks promotion"}</strong><p>{eligible ? "Evidence is traceable, scope is stable enough, and no active contradiction remains." : metrics.unresolved ? "Resolve the active challenge and add an independent comparison case." : "Needs stronger support or source fidelity before review."}</p></div><button onClick={() => { setSelectedId(node.id); setPromotionOpen(true); }}>Review complete lineage →</button></article>; })}</div></section>
@@ -404,11 +487,12 @@ export default function Home() {
       {packetOpen && <PacketModal packet={packet} setPacket={setPacket} packetNodes={packetNodes} nodes={nodes} reviews={reviews} query={query} onClose={() => setPacketOpen(false)} localFormOpen={localFormOpen} setLocalFormOpen={setLocalFormOpen} addLocalContext={addLocalContext} captureLocal={captureLocal} flash={flash} />}
       {reviewOpen && <ReviewModal selected={selected} nodes={nodes} preview={reviewPreview} onPreview={buildReviewPreview} onApply={applyReview} onClose={() => { setReviewOpen(false); setReviewPreview(null); }} reviews={reviews} />}
       {promotionOpen && <PromotionModal node={selected} reviews={reviews} nodes={nodes} proposalStates={proposalStates} setProposalStates={setProposalStates} proposalTypes={proposalTypes} setProposalTypes={setProposalTypes} onApprove={() => approvePromotion(selected)} onClose={() => setPromotionOpen(false)} />}
-      {captureOpen && <CaptureModal onSubmit={captureExperience} onClose={() => setCaptureOpen(false)} />}
+      {captureOpen && <CaptureHub defaultProject={captureProject} nodes={nodes} onSubmit={saveCapture} onBuildPacket={buildPacketFromCapture} onClose={() => setCaptureOpen(false)} />}
+      {captureReceipt && <CaptureReceipt receipt={captureReceipt} node={nodes.find((node) => node.id === captureReceipt.nodeId)} reviews={reviews} connections={connections} onApproveConnection={approveCapturedConnection} onClose={() => setCaptureReceipt(null)} />}
       {campusOpen && <CampusModal onSubmit={createCampus} onClose={() => setCampusOpen(false)} />}
       {demoOpen && <GuidedDemo nodes={nodes} setNodes={setNodes} reviews={reviews} setReviews={setReviews} setConnections={setConnections} receipts={aiReceipts} setReceipts={setAiReceipts} onClose={() => setDemoOpen(false)} onReset={resetDemo} flash={flash} />}
       {edgeReceiptOpen && <ConnectionReceipt edge={selectedEdge} nodes={nodes} onClose={() => setEdgeReceiptOpen(false)} />}
-      <button className="floating-capture" onClick={() => setCaptureOpen(true)}>＋ Capture experience</button>{toast && <div className="toast">✓ {toast}</div>}
+      <button className="floating-capture" onClick={() => openCapture()}>＋ Capture</button>{toast && <div className="toast">✓ {toast}</div>}
     </main>
   );
 }
@@ -534,7 +618,36 @@ function GuidedDemo({ nodes, setNodes, reviews, setReviews, setConnections, rece
   </section></div>;
 }
 
-function CaptureModal({ onSubmit, onClose }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; onClose: () => void }) { return <div className="modal-backdrop" onMouseDown={onClose}><form className="capture-modal" onSubmit={onSubmit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-header"><div><p>Capture · start of the learning loop</p><h2>Structure an experience</h2></div><button type="button" onClick={onClose}>×</button></div><label>Project<select name="project">{projects.filter((item) => item.key !== "hq").map((item) => <option value={item.key} key={item.key}>{item.label}</option>)}</select></label><label>What happened?<input name="title" required /></label><label>Why might it matter?<textarea name="summary" required rows={4} /></label><label>Source<input name="source" required placeholder="Conversation, result, observation…" /></label><div className="capture-rule"><span>i</span><p>This begins as an observation. It gains authority only through evidence, challenges, connections, and human promotion.</p></div><button className="primary-button wide">Capture observation →</button></form></div>; }
+function LifecycleRail({ node, reviews, connections, compact = false }: { node: KnowledgeNode; reviews: ReviewEvent[]; connections: Connection[]; compact?: boolean }) {
+  return <div className={`entry-lifecycle ${compact ? "compact" : ""}`}>{lifecycleFor(node, reviews, connections).map((step, index) => <div className={step.state} key={step.label}><span>{step.state === "complete" ? "✓" : index + 1}</span><strong>{step.label}</strong></div>)}</div>;
+}
+
+const captureActions: Array<{ key: CaptureAction; icon: string; title: string; copy: string }> = [
+  { key: "thesis", icon: "◇", title: "Capture research / thesis", copy: "Create a new structured decision object." },
+  { key: "outcome", icon: "◎", title: "Record outcome", copy: "Attach reality to an existing decision." },
+  { key: "postmortem", icon: "↺", title: "Run post-mortem", copy: "Evaluate result and reasoning separately." },
+  { key: "correction", icon: "△", title: "Add correction", copy: "Revise or supersede stale reasoning." },
+  { key: "evidence", icon: "＋", title: "Add evidence", copy: "Support or challenge an existing node." },
+  { key: "packet", icon: "▣", title: "Build context packet", copy: "Retrieve the smallest useful future context." },
+];
+
+function CaptureHub({ defaultProject, nodes, onSubmit, onBuildPacket, onClose }: { defaultProject: ProjectKey; nodes: KnowledgeNode[]; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onBuildPacket: (task: string, project: ProjectKey) => void; onClose: () => void }) {
+  const [action, setAction] = useState<CaptureAction>("thesis");
+  const [projectKey, setProjectKey] = useState<ProjectKey>(defaultProject);
+  const [packetTask, setPacketTask] = useState("How should Sports Engine research a similar decision using what it has learned?");
+  const targetNodes = nodes.filter((node) => node.project === projectKey || node.project === "hq");
+  const needsTarget = action !== "thesis" && action !== "packet";
+  const actionTitle = captureActions.find((item) => item.key === action)?.title ?? "Capture";
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="capture-hub" onMouseDown={(event) => event.stopPropagation()}><div className="modal-header"><div><p>Capture · governed entry point</p><h2>What are you adding?</h2><small>Create new knowledge or attach reality to something that already exists.</small></div><button type="button" onClick={onClose}>×</button></div><div className="capture-action-grid">{captureActions.map((item) => <button type="button" className={action === item.key ? "active" : ""} onClick={() => setAction(item.key)} key={item.key}><span>{item.icon}</span><div><strong>{item.title}</strong><p>{item.copy}</p></div></button>)}</div>{action === "packet" ? <section className="capture-form packet-entry"><div><span className="form-kicker">Build Context Packet</span><h3>Assemble the smallest useful context for a new task.</h3></div><label>Project<select value={projectKey} onChange={(event) => setProjectKey(event.target.value as ProjectKey)}>{projects.filter((item) => item.key !== "hq").map((item) => <option value={item.key} key={item.key}>{item.label}</option>)}</select></label><label>New task or question<textarea rows={4} value={packetTask} onChange={(event) => setPacketTask(event.target.value)} /></label><button className="primary-button wide" disabled={packetTask.trim().length < 8} onClick={() => onBuildPacket(packetTask, projectKey)}>Build Context Packet →</button></section> : <form className="capture-form" onSubmit={onSubmit}><input type="hidden" name="action" value={action} /><div className="capture-form-heading"><span className="form-kicker">{actionTitle}</span><h3>{action === "thesis" ? "Create a new knowledge object" : "Update an existing knowledge object"}</h3><p>{action === "thesis" ? "The entry begins without promotion or retrieval authority." : "The update becomes a preserved evidence event—not a disconnected duplicate."}</p></div><label>Project<select name="project" value={projectKey} onChange={(event) => setProjectKey(event.target.value as ProjectKey)}>{projects.filter((item) => item.key !== "hq").map((item) => <option value={item.key} key={item.key}>{item.label}</option>)}</select></label>{needsTarget && <label>Attach this to<select name="targetId">{targetNodes.map((node) => <option value={node.id} key={node.id}>{node.title}</option>)}</select></label>}<label>{action === "thesis" ? "Research or thesis title" : action === "outcome" ? "What happened in reality?" : action === "postmortem" ? "Post-mortem conclusion" : action === "correction" ? "What needs correction?" : "Evidence summary"}<input name="title" required /></label><label>{action === "thesis" ? "Reasoning, evidence, assumptions, and missing information" : "What happened, why it matters, and what should change"}<textarea name="details" required rows={5} /></label><div className="form-row"><label>Source<input name="source" required placeholder="Conversation, result, screenshot, research…" /></label><label>Source fidelity<select name="fidelity"><option>Exact</option><option>Reconstructed</option><option>Inferred</option></select></label></div>{action !== "thesis" && <label>Effect on the existing knowledge<select name="impact"><option value="challenge">Challenge</option><option value="support">Reinforce</option>{action === "correction" && <option value="supersede">Supersede</option>}</select></label>}<label>{action === "thesis" ? "Proposed connection" : "Connect this update to additional knowledge"}<select name="relatedId">{nodes.map((node) => <option value={node.id} key={node.id}>{node.title}</option>)}</select></label><label>Why this connection matters<textarea name="connectionReason" required rows={2} defaultValue="The shared mechanism may affect how this case is researched later." /></label><div className="capture-rule"><span>i</span><p>The connection is proposed as inferred. Review its receipt before allowing it to influence retrieval.</p></div><button className="primary-button wide">Save and inspect Connection Receipt →</button></form>}</section></div>;
+}
+
+function CaptureReceipt({ receipt, node, reviews, connections, onApproveConnection, onClose }: { receipt: CaptureReceiptState; node?: KnowledgeNode; reviews: ReviewEvent[]; connections: Connection[]; onApproveConnection: () => void; onClose: () => void }) {
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="capture-receipt" onMouseDown={(event) => event.stopPropagation()}><div className="modal-header"><div><p>Connection Receipt · V4.2</p><h2>{receipt.eventLabel}</h2><small>Every change keeps its target, rationale, connection state, and future influence inspectable.</small></div><button onClick={onClose}>×</button></div><div className="receipt-created"><span>{receipt.nodeCreated ? "New node created" : "Existing node updated"}</span><strong>{receipt.nodeTitle}</strong><small>{receipt.nodeCreated ? "Observation · no promotion authority" : "Evidence event attached without creating a duplicate"}</small></div>{receipt.edgeId ? <div className="capture-connection"><article><span>Connection type</span><strong>{receipt.edgeType}</strong></article><i>→</i><article><span>Connected knowledge</span><strong>{receipt.connectedTitle}</strong></article><article className="connection-reason"><span>Why it matters</span><p>{receipt.reason}</p></article><article><span>Status</span><strong className={receipt.approved ? "approved-text" : "inferred-text"}>{receipt.approved ? "Human approved" : "Inferred · awaiting approval"}</strong></article></div> : <div className="no-connection"><strong>No additional typed connection was created.</strong><p>The evidence remains attached to its target node and is visible in that node’s history.</p></div>}<div className="future-influence"><span>How this could influence future requests</span><p>{receipt.influence}</p></div>{node && <><div className="receipt-section-title"><span>Visible lifecycle</span><small>Authority advances only when the evidence earns it.</small></div><LifecycleRail node={node} reviews={reviews} connections={connections} /></>}{receipt.edgeId && !receipt.approved && <button className="primary-button wide" onClick={onApproveConnection}>Approve this connection →</button>}<button className="ghost-button wide" onClick={onClose}>Close receipt</button></section></div>;
+}
+
+function SportsEngineV42({ onBack, onAdd, onEvidence, onPromotion, toast }: { onBack: () => void; onAdd: () => void; onEvidence: () => void; onPromotion: () => void; toast: string }) {
+  return <div className="sports-v42-shell"><SportsEngine onBack={onBack} onEvidence={onEvidence} onPromotion={onPromotion} toast={toast} /><button className="sports-add-button" onClick={onAdd}><span>＋</span><strong>Add to Sports Engine</strong><small>Research · outcome · correction · evidence</small></button></div>;
+}
 
 function CampusModal({ onSubmit, onClose }: { onSubmit: (event: FormEvent<HTMLFormElement>) => void; onClose: () => void }) { return <div className="modal-backdrop" onMouseDown={onClose}><form className="capture-modal" onSubmit={onSubmit} onMouseDown={(event) => event.stopPropagation()}><div className="modal-header"><div><p>Start with your structure</p><h2>Create your knowledge campus</h2></div><button type="button" onClick={onClose}>×</button></div><label>Campus name<input name="campus" required defaultValue="Cody Campus" /></label><label>First project<input name="firstProject" required placeholder="Research, school, training, work…" /></label><div className="starter-steps"><div><span>1</span><p><strong>Capture</strong>Begin with specific experiences.</p></div><div><span>2</span><p><strong>Test</strong>Preserve support and challenge.</p></div><div><span>3</span><p><strong>Promote</strong>Approve earned authority.</p></div></div><button className="primary-button wide">Create campus →</button></form></div>; }
 
