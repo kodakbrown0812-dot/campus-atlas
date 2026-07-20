@@ -73,11 +73,11 @@ The MCP server implements initialize, tool discovery, and tool calls. It exposes
 - `atlas_capture_candidate` — write; creates proposed knowledge only.
 - `atlas_record_outcome` — write; creates a reality evidence event only.
 
-Every tool declares read/write, open-world, and destructive annotations. Writes require idempotency keys and never promote knowledge. If `CAMPUS_ATLAS_ACTION_KEY` is configured, write routes require that bearer token.
+Every tool declares read/write, open-world, and destructive annotations. Writes require idempotency keys and never promote knowledge. External writes fail closed when `CAMPUS_ATLAS_ACTION_KEY` is absent and require that bearer token when it is configured. `GET /api/security` reports the protection mode without returning the secret.
 
 An OpenAPI 3.1 fallback is available at `/openapi.json` for GPT Actions or other compatible clients. The privacy disclosure lives at `/privacy`.
 
-The production Site is intentionally still owner-restricted. That protects the workspace, but it also means a remote ChatGPT connector cannot call `/mcp` yet. Do not make the Site public until write authentication and the desired access policy are explicitly approved.
+The production Site is intentionally still owner-restricted. That protects the workspace, but it also means a remote ChatGPT connector cannot call `/mcp` yet. Connector candidate/outcome writes are now bearer-protected; the general browser-state write route still assumes the Site access gate, so do not make the full workspace public until a read-only public demo boundary or identity-aware state policy is explicitly approved.
 
 ## Persistence
 

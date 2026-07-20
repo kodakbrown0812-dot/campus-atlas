@@ -155,10 +155,10 @@ test("MCP writes create proposed knowledge and replay safely", async () => {
   const call = () => worker.fetch(
     new Request("http://localhost/mcp", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", authorization: "Bearer test-action-key" },
       body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "atlas_capture_candidate", arguments: { title: "Workload stability matters", summary: "Verify the starter's usable pitch count before pricing strikeouts.", source: "ChatGPT research", project: "Sports Engine", confidence: 74, idempotencyKey: "test-candidate-001" } } }),
     }),
-    { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { DB, CAMPUS_ATLAS_ACTION_KEY: "test-action-key", ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
     { waitUntil() {}, passThroughOnException() {} },
   );
   const first = await (await call()).json();
@@ -166,6 +166,40 @@ test("MCP writes create proposed knowledge and replay safely", async () => {
   assert.match(first.result.structuredContent.receipt.effect, /human review/i);
   const replay = await (await call()).json();
   assert.equal(replay.result.structuredContent.idempotentReplay, true);
+});
+
+test("external writes fail closed without a configured secret or valid bearer", async () => {
+  const worker = await builtWorker("write-security");
+  const DB = memoryD1();
+  const body = JSON.stringify({ title: "Candidate", summary: "This must not be stored without authorization.", source: "Test", project: "Sports Engine", idempotencyKey: "blocked-001" });
+  const disabled = await worker.fetch(
+    new Request("http://localhost/api/candidates", { method: "POST", headers: { "content-type": "application/json" }, body }),
+    { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(disabled.status, 401);
+
+  const wrongBearer = await worker.fetch(
+    new Request("http://localhost/api/candidates", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer wrong" }, body }),
+    { DB, CAMPUS_ATLAS_ACTION_KEY: "correct", ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(wrongBearer.status, 401);
+});
+
+test("reports write security without revealing the secret", async () => {
+  const worker = await builtWorker("security-status");
+  const DB = memoryD1();
+  const response = await worker.fetch(
+    new Request("http://localhost/api/security"),
+    { DB, CAMPUS_ATLAS_ACTION_KEY: "never-return-this", ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(response.status, 200);
+  const status = await response.json();
+  assert.equal(status.externalWrites, "bearer_required");
+  assert.equal(status.writeSecretConfigured, true);
+  assert.doesNotMatch(JSON.stringify(status), /never-return-this/);
 });
 
 test("publishes an OpenAPI fallback and privacy policy", async () => {

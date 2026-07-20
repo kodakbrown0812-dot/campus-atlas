@@ -288,8 +288,18 @@ function retrievePrecedents(state: AtlasState, input: Record<string, unknown>) {
 }
 
 function isAuthorized(request: Request, env: ActionEnv) {
-  if (!env.CAMPUS_ATLAS_ACTION_KEY) return true;
+  if (!env.CAMPUS_ATLAS_ACTION_KEY) return false;
   return request.headers.get("authorization") === `Bearer ${env.CAMPUS_ATLAS_ACTION_KEY}`;
+}
+
+function securityStatus(env: ActionEnv) {
+  return {
+    externalWrites: env.CAMPUS_ATLAS_ACTION_KEY ? "bearer_required" : "disabled",
+    writeSecretConfigured: Boolean(env.CAMPUS_ATLAS_ACTION_KEY),
+    protectedRoutes: ["/api/candidates", "/api/outcomes", "atlas_capture_candidate", "atlas_record_outcome"],
+    promotionPolicy: "Human approval inside Campus Atlas only",
+    siteAccessManagedSeparately: true,
+  };
 }
 
 function requireFields(input: Record<string, unknown>, fields: string[]) {
@@ -442,6 +452,7 @@ export async function handleAtlasActions(request: Request, env: ActionEnv) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": "*", "access-control-allow-headers": "authorization, content-type, mcp-protocol-version", "access-control-allow-methods": "GET, POST, OPTIONS" } });
 
   if (url.pathname === "/openapi.json" || url.pathname === "/.well-known/openapi.json") return json(openApi(url.origin));
+  if (url.pathname === "/api/security" && request.method === "GET") return json(securityStatus(env));
   if (url.pathname === "/privacy") return textResponse("<!doctype html><html><head><title>Campus Atlas Privacy</title><meta name=viewport content='width=device-width,initial-scale=1'><style>body{font:16px/1.6 system-ui;max-width:760px;margin:64px auto;padding:0 24px;color:#172033}h1{font-size:34px}</style></head><body><h1>Campus Atlas privacy</h1><p>Campus Atlas stores the project knowledge, review events, context packets, and action receipts that a user explicitly submits. Temporary Local Context stays attached to its packet unless the user captures it as candidate knowledge.</p><p>ChatGPT tools may read approved project knowledge or create proposed candidates and outcome evidence. External writes never promote knowledge or grant authority. Consequential promotion requires explicit review inside Campus Atlas.</p><p>Do not submit secrets, payment data, or sensitive medical information to the demonstration workspace.</p></body></html>", 200, "text/html; charset=utf-8");
 
   if (url.pathname === "/api/context" && request.method === "POST") {
