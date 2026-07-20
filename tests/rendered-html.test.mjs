@@ -4,6 +4,29 @@ import test from "node:test";
 const developmentPreviewMeta =
   /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
 
+function memoryD1() {
+  let row = null;
+  return {
+    prepare(sql) {
+      let values = [];
+      return {
+        bind(...next) { values = next; return this; },
+        async first() { return /SELECT payload/i.test(sql) ? row : null; },
+        async run() {
+          if (/INSERT INTO atlas_state/i.test(sql)) row = { payload: values[1], updated_at: new Date().toISOString() };
+          return { success: true };
+        },
+      };
+    },
+  };
+}
+
+async function builtWorker(suffix) {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set(suffix, `${process.pid}-${Date.now()}-${Math.random()}`);
+  return (await import(workerUrl.href)).default;
+}
+
 test("renders development preview metadata", async () => {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
@@ -70,4 +93,91 @@ test("rejects captures that cannot produce inspectable structure", async () => {
     { waitUntil() {}, passThroughOnException() {} },
   );
   assert.equal(response.status, 400);
+});
+
+test("builds a useful context handoff while keeping Local Context temporary", async () => {
+  const worker = await builtWorker("context");
+  const DB = memoryD1();
+  const response = await worker.fetch(
+    new Request("http://localhost/api/context", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task: "Research deGrom over 6.5 strikeouts and verify workload stability.",
+        project: "Sports Engine",
+        localContext: "The lineup is not final and this expires after the task.",
+      }),
+    }),
+    { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(response.status, 200);
+  const packet = await response.json();
+  assert.equal(packet.project, "Sports Engine");
+  assert.equal(packet.localContext.retention, "Temporary");
+  assert.equal(packet.localContext.captureRequiredForDurability, true);
+  assert.ok(packet.durableKnowledge.length > 0 && packet.durableKnowledge.length <= 4);
+  assert.ok(packet.durableKnowledge.every((item) => item.whyIncluded && item.connectionPath.length >= 3));
+  assert.match(packet.compiledPrompt, /CHALLENGES TO CARRY FORWARD/);
+  assert.ok(packet.receipt.checks.includes("Packet budget enforced"));
+
+  const stored = await worker.fetch(
+    new Request("http://localhost/api/state"),
+    { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  const persisted = await stored.json();
+  assert.equal(persisted.state.contextPackets.at(-1).packetId, packet.packetId);
+});
+
+test("exposes six governed MCP tools with explicit safety annotations", async () => {
+  const worker = await builtWorker("mcp-list");
+  const DB = memoryD1();
+  const response = await worker.fetch(
+    new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    }),
+    { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(response.status, 200);
+  const rpc = await response.json();
+  assert.equal(rpc.result.tools.length, 6);
+  assert.ok(rpc.result.tools.every((tool) => typeof tool.annotations.readOnlyHint === "boolean"));
+  assert.equal(rpc.result.tools.find((tool) => tool.name === "atlas_capture_candidate").annotations.readOnlyHint, false);
+});
+
+test("MCP writes create proposed knowledge and replay safely", async () => {
+  const worker = await builtWorker("mcp-write");
+  const DB = memoryD1();
+  const call = () => worker.fetch(
+    new Request("http://localhost/mcp", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "atlas_capture_candidate", arguments: { title: "Workload stability matters", summary: "Verify the starter's usable pitch count before pricing strikeouts.", source: "ChatGPT research", project: "Sports Engine", confidence: 74, idempotencyKey: "test-candidate-001" } } }),
+    }),
+    { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  const first = await (await call()).json();
+  assert.equal(first.result.structuredContent.candidate.status, "proposed");
+  assert.match(first.result.structuredContent.receipt.effect, /human review/i);
+  const replay = await (await call()).json();
+  assert.equal(replay.result.structuredContent.idempotentReplay, true);
+});
+
+test("publishes an OpenAPI fallback and privacy policy", async () => {
+  const worker = await builtWorker("openapi");
+  const DB = memoryD1();
+  const env = { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const schema = await (await worker.fetch(new Request("http://localhost/openapi.json"), env, ctx)).json();
+  assert.equal(schema.info.version, "4.0.0");
+  assert.ok(schema.paths["/api/context"]);
+  assert.ok(schema.paths["/api/candidates"]);
+  const privacy = await worker.fetch(new Request("http://localhost/privacy"), env, ctx);
+  assert.equal(privacy.status, 200);
+  assert.match(await privacy.text(), /External writes never promote knowledge/);
 });

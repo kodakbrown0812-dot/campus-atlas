@@ -3,11 +3,13 @@ import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } fr
 import handler from "vinext/server/app-router-entry";
 import { handleAtlasState } from "./atlas-state";
 import { handleStructure } from "./ai-structure";
+import { handleAtlasActions } from "./atlas-actions";
 
 interface Env {
   ASSETS: Fetcher;
   DB: D1Database;
   OPENAI_API_KEY?: string;
+  CAMPUS_ATLAS_ACTION_KEY?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -38,6 +40,10 @@ const worker = {
 
     if (url.pathname === "/api/structure") {
       return handleStructure(request, env.OPENAI_API_KEY);
+    }
+
+    if (["/mcp", "/openapi.json", "/.well-known/openapi.json", "/privacy", "/api/context", "/api/blueprint", "/api/precedents", "/api/candidates", "/api/outcomes", "/api/receipts"].includes(url.pathname)) {
+      return handleAtlasActions(request, { DB: env.DB, CAMPUS_ATLAS_ACTION_KEY: env.CAMPUS_ATLAS_ACTION_KEY });
     }
 
     if (url.pathname === "/_vinext/image") {

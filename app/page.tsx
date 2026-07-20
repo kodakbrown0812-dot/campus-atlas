@@ -38,6 +38,17 @@ type AIReceipt = {
   id: string; operation: string; model: string; mode: "live_gpt" | "seeded_demo"; proposedAt: string;
   checks: string[]; approved: string[]; rejected: string[]; inputSummary: string;
 };
+type HandoffPacket = {
+  packetId: string; task: string; project: string;
+  blueprint: { project: string; version: string; purpose: string; rules: string[]; capabilities: string[] };
+  localContext: null | { content: string; retention: string; expiration: string; captureRequiredForDurability: boolean };
+  durableKnowledge: Array<{ id: string; title: string; summary: string; usefulness: number; whyIncluded: string; source: string; confidence: number; scope: string; freshness: string; fidelity: string; authorityLevel: string; connectionPath: string[]; lineage: string[] }>;
+  challenges: Array<{ id: string; title: string; reason: string; source: string; status: string }>;
+  excluded: Array<{ id: string; title: string; whyExcluded: string }>;
+  budget: { used: number; limit: number; estimatedTokens: number };
+  compiledPrompt: string;
+  receipt: { id: string; tool: string; proposedBy: string; createdAt: string; checks: string[]; humanApprovalRequired: boolean };
+};
 
 const projects: Project[] = [
   { key: "hq", label: "Headquarters", short: "HQ", color: "#a78bfa", rooms: 2, description: "Campus governance and promotion", capabilityCount: 1 },
@@ -62,6 +73,8 @@ const initialNodes: KnowledgeNode[] = [
   { id: "principle-timeline", project: "training", room: "Recovery Board", type: "principle", title: "Consider the timeline", summary: "Interpret today’s signal inside recent workload, recovery, and trajectory—not as an isolated reading.", status: "approved", level: "Whiteboard Method", x: 61, y: 84, sources: ["Health + Training Whiteboard", "Eight linked observations"], lineage: ["Knee signal observations", "Load-history comparison", "Repeated recovery decisions", "Whiteboard method approved"], sourceFidelity: 92, decisionImpact: 93, reconstructionValue: 91, scopeStability: 90, history: [{ id: "h6", date: "Jul 16", label: "Method promoted", detail: "Now has authority in Health + Training decisions." }] },
   { id: "principle-reconstruct", project: "lessons", room: "Software Engineering", type: "principle", title: "Connections preserve continuity", summary: "Knowledge compounds when relationships and reconstruction paths survive compression.", status: "approved", level: "Whiteboard Method", x: 49, y: 12, sources: ["Lessons Division", "Architecture review", "Codex blueprint"], lineage: ["Context storage lesson", "Architecture review", "Cross-room reconstruction tests", "Whiteboard approval"], sourceFidelity: 94, decisionImpact: 86, reconstructionValue: 99, scopeStability: 91, history: [{ id: "h7", date: "Jul 18", label: "Reinforced", detail: "Rebar blueprint supplied independent confirmation." }] },
   { id: "correction-total", project: "sports", room: "Corrections", type: "correction", title: "Market options were overstated", summary: "The available total was corrected by the user. Future retrieval must distinguish researched markets from currently offered markets.", status: "approved", level: "Observation", x: 16, y: 81, sources: ["Direct user correction", "Market screenshot"], lineage: ["Incorrect market assumption", "Direct correction", "Screenshot verification", "Retrieval constraint added"], sourceFidelity: 99, decisionImpact: 72, reconstructionValue: 82, scopeStability: 76, history: [{ id: "h8", date: "Jul 18", label: "Correction preserved", detail: "Direct correction overrides system inference." }] },
+  { id: "principle-workload", project: "sports", room: "Pitching Props", type: "principle", title: "Workload stability gates strikeout overs", summary: "Before pricing pitcher strikeouts, verify recent pitch counts, manager constraints, and a realistic innings range.", status: "approved", level: "Validated Principle", x: 43, y: 37, sources: ["Three closed pitcher-prop post-mortems", "Human promotion review"], lineage: ["Three pitcher-prop cases", "Failed innings assumption", "Scope review", "Human-approved principle"], sourceFidelity: 84, decisionImpact: 92, reconstructionValue: 92, scopeStability: 86, history: [{ id: "h9", date: "Jul 20", label: "Promoted", detail: "Workload verification earned authority after comparison across three closed props." }] },
+  { id: "precedent-pitcher-set", project: "sports", room: "Precedent Library", type: "observation", title: "Ace-versus-lineup strikeout precedent set", summary: "Two comparable strikeout props held, while the failed case overestimated innings because pitch-count stability was never verified.", status: "approved", level: "Observation", x: 41, y: 78, sources: ["Reconstructed Sports Engine case set"], lineage: ["Three closed props", "Outcome comparison", "Reconstructed precedent set"], sourceFidelity: 76, decisionImpact: 87, reconstructionValue: 89, scopeStability: 72, history: [{ id: "h10", date: "Jul 20", label: "Precedent set reconstructed", detail: "The retrieval path preserves the shared mechanism and the failed innings assumption." }] },
 ];
 
 const seedReviews: ReviewEvent[] = [
@@ -75,6 +88,8 @@ const seedReviews: ReviewEvent[] = [
   { id: "r8", nodeId: "principle-timeline", action: "Reinforce", rationale: "Repeated health decisions reconstructed correctly.", evidence: "Current pain made sense only inside recent workload.", source: "Recovery Board", strength: "Strong", scope: "Health + Training", confidence: 92, project: "training", relatedNodeId: "pattern-overwork", createdAt: "2026-07-16" },
   { id: "r9", nodeId: "principle-reconstruct", action: "Reinforce", rationale: "Architecture tests preserved why a fact mattered.", evidence: "Typed edges reconstructed prior decisions after compression.", source: "Codex architecture review", strength: "Strong", scope: "Entire campus", confidence: 94, project: "lessons", relatedNodeId: "core-reality", createdAt: "2026-07-18" },
   { id: "r10", nodeId: "correction-total", action: "Reinforce", rationale: "Direct source verified the correction.", evidence: "Screenshot showed only 0.5, 1.5, and 2.5 totals.", source: "Market screenshot", strength: "Strong", scope: "Sports Engine", confidence: 99, project: "sports", relatedNodeId: "decision-england", createdAt: "2026-07-18" },
+  { id: "r11", nodeId: "principle-workload", action: "Reinforce", rationale: "The same workload mechanism appeared across three closed pitcher props.", evidence: "The failed thesis overestimated innings after pitch-count stability went unverified.", source: "Pitcher-prop post-mortems", strength: "Strong", scope: "Sports Engine", confidence: 86, project: "sports", relatedNodeId: "precedent-pitcher-set", createdAt: "2026-07-20" },
+  { id: "r12", nodeId: "precedent-pitcher-set", action: "Challenge", rationale: "The cases are reconstructed and should not substitute for current workload research.", evidence: "Today’s manager constraints and recent pitch counts remain time-sensitive.", source: "Research audit", strength: "Moderate", scope: "Sports Engine", confidence: 90, project: "sports", relatedNodeId: "principle-workload", createdAt: "2026-07-20" },
 ];
 
 const initialConnections: Connection[] = [
@@ -86,6 +101,8 @@ const initialConnections: Connection[] = [
   { id: "e6", from: "principle-reconstruct", to: "core-reality", type: "Supports", reason: "Preserved reconstruction paths keep corrections traceable to their evidence.", approved: true },
   { id: "e7", from: "pattern-format", to: "decision-england", type: "Challenges", reason: "The pattern challenges the original use of a standard competition base rate.", approved: true },
   { id: "e8", from: "principle-timeline", to: "core-reality", type: "Shares Principle With", reason: "Both use evidence over isolated interpretation.", approved: true },
+  { id: "e9", from: "precedent-pitcher-set", to: "principle-workload", type: "Supports", reason: "The closed case set earned the workload-verification principle while preserving the failed innings assumption.", approved: true },
+  { id: "e10", from: "principle-workload", to: "core-reality", type: "Applies To", reason: "Current workload evidence must be able to override a projection built from generic matchup strength.", approved: true },
 ];
 
 const actionDelta: Record<ReviewAction, number> = { Reinforce: 1, Challenge: -1, Revise: 0.25, "Narrow Scope": -0.15, Supersede: -1.2, Merge: 0.2, Retire: -2 };
@@ -148,19 +165,26 @@ export default function Home() {
   const [proposalTypes, setProposalTypes] = useState<Record<string, EdgeType>>({ p1: "Derived From", p2: "Challenges", p3: "Constrained By" });
   const [aiReceipts, setAiReceipts] = useState<AIReceipt[]>([]);
   const [saveStatus, setSaveStatus] = useState<"loading" | "saved" | "saving" | "error">("loading");
+  const [handoffTask, setHandoffTask] = useState("Research deGrom over 6.5 strikeouts without repeating past innings assumptions.");
+  const [handoffProject, setHandoffProject] = useState("Sports Engine");
+  const [handoffLocal, setHandoffLocal] = useState("");
+  const [handoffResult, setHandoffResult] = useState<HandoffPacket | null>(null);
+  const [handoffStatus, setHandoffStatus] = useState<"idle" | "building" | "ready" | "error">("idle");
+  const [manualCopyOpen, setManualCopyOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
     void fetch("/api/state").then((response) => response.ok ? response.json() : null).then((result) => {
       if (!active || !result?.state) return;
       const data = result.state;
-      if (Array.isArray(data.nodes)) setNodes(data.nodes);
-      if (Array.isArray(data.reviews)) setReviews(data.reviews);
-      if (Array.isArray(data.connections)) setConnections(data.connections);
+      if (Array.isArray(data.nodes)) { const ids = new Set(data.nodes.map((item: KnowledgeNode) => item.id)); setNodes([...data.nodes, ...initialNodes.filter((item) => !ids.has(item.id))]); }
+      if (Array.isArray(data.reviews)) { const ids = new Set(data.reviews.map((item: ReviewEvent) => item.id)); setReviews([...data.reviews, ...seedReviews.filter((item) => !ids.has(item.id))]); }
+      if (Array.isArray(data.connections)) { const ids = new Set(data.connections.map((item: Connection) => item.id)); setConnections([...data.connections, ...initialConnections.filter((item) => !ids.has(item.id))]); }
       if (data.packet) setPacket(data.packet);
       if (data.workspaceName) setWorkspaceName(data.workspaceName);
       if (typeof data.exampleMode === "boolean") setExampleMode(data.exampleMode);
       if (Array.isArray(data.aiReceipts)) setAiReceipts(data.aiReceipts);
+      if (Array.isArray(data.contextPackets) && data.contextPackets.length) setHandoffResult(data.contextPackets[data.contextPackets.length - 1]);
     }).finally(() => { if (active) setHydrated(true); });
     return () => { active = false; };
   }, []);
@@ -169,7 +193,7 @@ export default function Home() {
     if (!hydrated) return;
     const timer = window.setTimeout(() => {
       setSaveStatus("saving");
-      void fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 2, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts }) })
+      void fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 4, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts }) })
         .then((response) => { if (!response.ok) throw new Error("save failed"); setSaveStatus("saved"); })
         .catch(() => setSaveStatus("error"));
     }, 450);
@@ -207,7 +231,37 @@ export default function Home() {
   const flash = (message: string) => { setToast(message); window.setTimeout(() => setToast(""), 2600); };
 
   function openProject(key: ProjectKey) { if (key === "sports") { setSportsOpen(true); window.scrollTo({ top: 0, behavior: "smooth" }); } else { setProject(key); document.getElementById("atlas-workspace")?.scrollIntoView({ behavior: "smooth" }); } }
-  function openPacket(event?: FormEvent) { event?.preventDefault(); setPacket((current) => ({ ...current, question: query || current.question })); setPacketOpen(true); }
+  function openPacket(event?: FormEvent) { event?.preventDefault(); setHandoffTask(query || handoffTask); document.getElementById("chatgpt-handoff")?.scrollIntoView({ behavior: "smooth", block: "start" }); }
+
+  async function requestHandoff(task = handoffTask, projectName = handoffProject, localContext = handoffLocal) {
+    if (task.trim().length < 8) return;
+    setHandoffStatus("building");
+    try {
+      const response = await fetch("/api/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task, project: projectName, localContext }) });
+      if (!response.ok) throw new Error("packet failed");
+      const result = await response.json() as HandoffPacket;
+      setHandoffResult(result); setHandoffStatus("ready");
+      setQuery(task); setPacket((current) => ({ ...current, question: task }));
+      flash("ChatGPT handoff built with inspectable context");
+    } catch {
+      setHandoffStatus("error");
+    }
+  }
+
+  function buildHandoff(event: FormEvent<HTMLFormElement>) { event.preventDefault(); void requestHandoff(); }
+
+  async function copyHandoff() {
+    if (!handoffResult) return;
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(handoffResult.compiledPrompt);
+      copied = true;
+    } catch {
+      const field = document.createElement("textarea"); field.value = handoffResult.compiledPrompt; field.style.position = "fixed"; field.style.opacity = "0"; document.body.appendChild(field); field.select(); copied = document.execCommand("copy"); field.remove();
+    }
+    setManualCopyOpen(!copied);
+    flash(copied ? "Compiled handoff copied for ChatGPT" : "Clipboard blocked—handoff opened for manual copy");
+  }
 
   function addLocalContext(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const data = new FormData(event.currentTarget);
@@ -268,13 +322,32 @@ export default function Home() {
     <main className="app-shell">
       <header className="topbar">
         <a className="brand" href="#top"><span className="brand-mark">CA</span><span><strong>Campus Atlas</strong><small>Connected reasoning for ChatGPT Projects</small></span></a>
-        <nav><button onClick={() => document.getElementById("atlas-workspace")?.scrollIntoView({ behavior: "smooth" })}>Atlas</button><button onClick={() => document.getElementById("projects")?.scrollIntoView({ behavior: "smooth" })}>Projects</button><button onClick={() => document.getElementById("promotion-queue")?.scrollIntoView({ behavior: "smooth" })}>Learning Loop</button><button onClick={() => openPacket()}>Context Packets</button></nav>
+        <nav><button onClick={() => document.getElementById("chatgpt-handoff")?.scrollIntoView({ behavior: "smooth" })}>Ask Atlas</button><button onClick={() => document.getElementById("promotion-queue")?.scrollIntoView({ behavior: "smooth" })}>Review Inbox</button><button onClick={() => document.getElementById("atlas-workspace")?.scrollIntoView({ behavior: "smooth" })}>Explore Atlas</button><button onClick={() => openProject("sports")}>Sports Engine</button></nav>
         <div className="topbar-actions"><span className={`save-state ${saveStatus}`}>{saveStatus === "saved" ? "✓ Saved" : saveStatus === "saving" ? "Saving…" : saveStatus === "error" ? "Save failed" : "Loading…"}</span><button className="primary-button" onClick={() => setCampusOpen(true)}>＋ Create your campus</button></div>
       </header>
 
       <section className="product-intro" id="top">
         <div><p className="eyebrow">Durable reasoning infrastructure</p><h1>Your ChatGPT Projects should<br /><em>build on each other.</em></h1><p>ChatGPT helps you think now. Campus Atlas helps your projects build on what happened before—governing which decisions, corrections, and principles deserve to affect what happens next.</p></div>
-        <div className="intro-actions"><button className="primary-button large judge-cta" onClick={() => setDemoOpen(true)}>See the Learning Loop →</button><button className="text-cta" onClick={() => setCampusOpen(true)}>Create your campus</button><small>A 90-second, replayable Sports Engine proof.</small></div>
+        <div className="intro-actions"><button className="primary-button large judge-cta" onClick={() => document.getElementById("chatgpt-handoff")?.scrollIntoView({ behavior: "smooth" })}>Ask Atlas →</button><button className="text-cta" onClick={() => setDemoOpen(true)}>See the Learning Loop</button><small>Simple in conversation. Inspectable underneath.</small></div>
+      </section>
+
+      <section className="handoff-section" id="chatgpt-handoff">
+        <div className="handoff-heading"><div><span className="example-chip">ChatGPT handoff · live V4 flow</span><h2>Ask normally. Atlas brings forward what your projects earned.</h2><p>Describe the next task. Campus Atlas loads the project blueprint, retrieves a small set of relevant precedents and corrections, and returns a concise handoff for ChatGPT.</p></div><div className="connector-state"><span className="live-dot" /><div><strong>Connector-ready</strong><small>6 governed tools · setup required in ChatGPT</small></div></div></div>
+        <div className="handoff-grid">
+          <form className="handoff-compose" onSubmit={buildHandoff}>
+            <div className="compose-title"><span>01</span><div><strong>What are you working on?</strong><small>This should feel like starting a normal ChatGPT conversation.</small></div></div>
+            <label>Project<select value={handoffProject} onChange={(event) => setHandoffProject(event.target.value)}><option>Sports Engine</option><option>Health + Training</option><option>Lessons Division</option><option>Human Systems Lab</option><option>Finance</option></select></label>
+            <label>Task<textarea rows={4} value={handoffTask} onChange={(event) => setHandoffTask(event.target.value)} placeholder="Ask the question you would normally ask ChatGPT…" /></label>
+            <details className="local-context-control"><summary>＋ Add what matters right now <span>optional · temporary</span></summary><label>Local Context<textarea rows={3} value={handoffLocal} onChange={(event) => setHandoffLocal(event.target.value)} placeholder="Current conditions, constraints, exclusions, or user instructions…" /></label><small>This stays inside this packet. It will not enter durable knowledge automatically.</small></details>
+            <div className="quick-prompts"><span>Try one</span><button type="button" onClick={() => setHandoffTask("Research deGrom over 6.5 strikeouts. Verify workload stability before estimating probability.")}>Strikeout prop</button><button type="button" onClick={() => setHandoffTask("Evaluate a third-place match total without importing a standard knockout-round base rate.")}>Format risk</button></div>
+            <button className="primary-button large wide" disabled={handoffStatus === "building" || handoffTask.trim().length < 8}>{handoffStatus === "building" ? "Building the smallest useful context…" : "Build ChatGPT handoff →"}</button>
+            {handoffStatus === "error" && <div className="inline-error">The packet could not be built. Your task is still here—try again.</div>}
+          </form>
+
+          <div className={`handoff-output ${handoffResult ? "has-result" : ""}`}>
+            {!handoffResult ? <><div className="output-placeholder"><span className="atlas-spark">✦</span><p className="eyebrow">What happens underneath</p><h3>One request. Three quiet steps.</h3></div><div className="handoff-steps"><article><span>1</span><div><strong>Load the blueprint</strong><p>Apply the rules and capabilities this project has earned.</p></div></article><article><span>2</span><div><strong>Retrieve with reasons</strong><p>Carry forward useful precedent, corrections, and active challenges.</p></div></article><article><span>3</span><div><strong>Compile the handoff</strong><p>Give ChatGPT only the smallest useful context—not the entire graph.</p></div></article></div><details className="connect-details"><summary>How this connects to ChatGPT <span>＋</span></summary><p>V4 exposes an HTTPS MCP endpoint at <code>/mcp</code> plus an OpenAPI fallback. Connect it in ChatGPT developer mode after the endpoint has connector access. Read tools retrieve context; write tools create review candidates; promotion stays inside Atlas.</p></details></> : <><div className="output-ready"><div><span className="ready-check">✓</span><div><p>Ready for ChatGPT</p><h3>{handoffResult.packetId}</h3></div></div><span>{handoffResult.budget.used}/{handoffResult.budget.limit} items · ~{handoffResult.budget.estimatedTokens} tokens</span></div><div className="blueprint-loaded"><span>Blueprint loaded</span><strong>{handoffResult.blueprint.project} {handoffResult.blueprint.version}</strong><p>{handoffResult.blueprint.rules[0]}</p></div><div className="retrieval-results"><div className="result-section-title"><span>Retrieved durable knowledge</span><b>{handoffResult.durableKnowledge.length} with reasons</b></div>{handoffResult.durableKnowledge.slice(0, 3).map((item) => <details key={item.id}><summary><span>{item.usefulness}</span><div><strong>{item.title}</strong><small>{item.fidelity} · {item.authorityLevel} · {item.confidence}% source confidence</small></div><i>⌄</i></summary><p>{item.whyIncluded}</p><small>Path: {item.connectionPath.join(" → ")}</small></details>)}</div>{handoffResult.challenges.length > 0 && <div className="carried-challenge"><span>Challenge carried forward</span><strong>{handoffResult.challenges[0].title}</strong><p>{handoffResult.challenges[0].reason}</p></div>}<div className="handoff-actions"><button className="primary-button" onClick={copyHandoff}>Copy for ChatGPT</button><button className="ghost-button" onClick={() => setPacketOpen(true)}>Inspect packet anatomy</button><button className="text-cta" onClick={() => document.getElementById("atlas-workspace")?.scrollIntoView({ behavior: "smooth" })}>Trace it in Atlas</button></div>{manualCopyOpen && <div className="manual-copy"><span>Select and copy this handoff</span><textarea readOnly rows={7} value={handoffResult.compiledPrompt} onFocus={(event) => event.currentTarget.select()} /></div>}<details className="work-receipt"><summary>AI Work Receipt <span>{handoffResult.receipt.checks.length} checks passed</span></summary>{handoffResult.receipt.checks.map((check) => <p key={check}>✓ {check}</p>)}<small>{handoffResult.receipt.tool} · {handoffResult.receipt.id}</small></details></>}
+          </div>
+        </div>
       </section>
 
       <section className="home-loop" aria-label="Campus Atlas learning mechanism">
@@ -298,7 +371,7 @@ export default function Home() {
         <aside className="inspector panel"><div className="inspector-top"><div className="type-chip" style={{ "--node-color": projectFor(selected.project).color } as React.CSSProperties}>{selected.level}</div><span className={`authority-chip ${selected.status}`}>{selected.status === "approved" ? "✓ Human approved" : selected.status}</span></div><p className="room-name">{projectFor(selected.project).label} · {selected.room}</p><h2>{selected.title}</h2><p className="node-summary">{selected.summary}</p><div className="confidence-block"><div><span>Computed confidence</span><strong>{selectedConfidence}%</strong></div><div className="confidence-track"><i style={{ width: `${selectedConfidence}%` }} /></div><small>Derived from {reviews.filter((event) => event.nodeId === selected.id).length} preserved review events—not directly editable.</small></div><div className="ledger-grid"><div><strong>{selectedMetrics.supporting}</strong><span>Support</span></div><div><strong>{selectedMetrics.challenging}</strong><span>Challenge</span></div><div><strong>{selectedMetrics.projectsCount}</strong><span>Projects</span></div><div className={selectedMetrics.unresolved ? "warn" : ""}><strong>{selectedMetrics.unresolved}</strong><span>Unresolved</span></div></div><div className="mini-metrics"><span>Scope stability <b>{selected.scopeStability}</b></span><span>Source fidelity <b>{selected.sourceFidelity}</b></span><span>Confidence trend <b>{selectedMetrics.challenging ? "Review" : "Stable ↑"}</b></span></div><div className="lineage-preview"><div className="section-label"><span>Lineage</span><b>{selected.lineage.length} stages</b></div>{selected.lineage.slice(-3).map((item, index) => <p key={item}><i>{index + 1}</i>{item}</p>)}</div><div className="inspector-actions"><button className="primary-button" onClick={() => { setReviewPreview(null); setReviewOpen(true); }}>Open Knowledge Review</button><button onClick={() => setPromotionOpen(true)}>Inspect promotion eligibility →</button></div></aside>
       </section>
 
-      <section className="promotion-section" id="promotion-queue"><div className="promotion-heading"><div><p className="eyebrow">Learning Loop · governed promotion</p><h2>Promotion Queue</h2><p>A node advances when its evidence, counter-evidence, scope, lineage, and usefulness justify new authority—and a human approves it.</p></div><div className="promotion-hierarchy">{levels.map((level, index) => <span key={level}><b>{index + 1}</b>{level}{index < levels.length - 1 && <i>→</i>}</span>)}</div></div><div className="queue-grid">{promotionCandidates.map((node) => { const metrics = metricsFor(node.id, reviews); const eligible = metrics.supporting >= 1 && metrics.unresolved === 0 && node.sourceFidelity >= 70; return <article key={node.id} className={node.id === "pattern-format" ? "featured-candidate" : ""}><div className="candidate-top"><span>{node.level}</span><b className={eligible ? "eligible" : "blocked"}>{eligible ? "Eligible" : "Blocked"}</b></div><h3>{node.title}</h3><div className="candidate-metrics"><span><b>{metrics.supporting}</b> supporting cases</span><span><b>{metrics.challenging}</b> challenging cases</span><span><b>{metrics.projectsCount}</b> independent projects</span><span><b>{confidenceFor(node.id, reviews)}%</b> computed confidence</span><span><b>{node.sourceFidelity}</b> source fidelity</span><span><b>{node.decisionImpact}</b> decision impact</span><span><b>{node.reconstructionValue}</b> reconstruction value</span><span><b>{metrics.unresolved}</b> contradictions</span></div><div className={`eligibility-note ${eligible ? "ready" : "hold"}`}><strong>{eligible ? "Why eligible" : "What blocks promotion"}</strong><p>{eligible ? "Evidence is traceable, scope is stable enough, and no active contradiction remains." : metrics.unresolved ? "Resolve the active challenge and add an independent comparison case." : "Needs stronger support or source fidelity before review."}</p></div><button onClick={() => { setSelectedId(node.id); setPromotionOpen(true); }}>Open complete lineage →</button></article>; })}</div></section>
+      <section className="promotion-section" id="promotion-queue"><div className="promotion-heading"><div><p className="eyebrow">Review Inbox · governed promotion</p><h2>Decide what deserves future influence.</h2><p>Every candidate arrives with supporting cases, challenges, scope, lineage, and a clear blocker. Review the receipt—never raise a number directly.</p></div><div className="promotion-hierarchy">{levels.map((level, index) => <span key={level}><b>{index + 1}</b>{level}{index < levels.length - 1 && <i>→</i>}</span>)}</div></div><div className="queue-grid">{promotionCandidates.map((node) => { const metrics = metricsFor(node.id, reviews); const eligible = metrics.supporting >= 1 && metrics.unresolved === 0 && node.sourceFidelity >= 70; return <article key={node.id} className={node.id === "pattern-format" ? "featured-candidate" : ""}><div className="candidate-top"><span>{node.level}</span><b className={eligible ? "eligible" : "blocked"}>{eligible ? "Eligible" : "Blocked"}</b></div><h3>{node.title}</h3><div className="candidate-metrics"><span><b>{metrics.supporting}</b> supporting cases</span><span><b>{metrics.challenging}</b> challenging cases</span><span><b>{metrics.projectsCount}</b> independent projects</span><span><b>{confidenceFor(node.id, reviews)}%</b> computed confidence</span><span><b>{node.sourceFidelity}</b> source fidelity</span><span><b>{node.decisionImpact}</b> decision impact</span><span><b>{node.reconstructionValue}</b> reconstruction value</span><span><b>{metrics.unresolved}</b> contradictions</span></div><div className={`eligibility-note ${eligible ? "ready" : "hold"}`}><strong>{eligible ? "Why eligible" : "What blocks promotion"}</strong><p>{eligible ? "Evidence is traceable, scope is stable enough, and no active contradiction remains." : metrics.unresolved ? "Resolve the active challenge and add an independent comparison case." : "Needs stronger support or source fidelity before review."}</p></div><button onClick={() => { setSelectedId(node.id); setPromotionOpen(true); }}>Review complete lineage →</button></article>; })}</div></section>
 
       <section className="platform-layer"><div className="loop-intro"><p className="eyebrow">The general Campus Atlas layer</p><h2>Capture → Structure → Connect → Test → Promote → Retrieve</h2><p>Sports Engine proves what one mature project can become. The governed learning architecture belongs to every project.</p></div><div className="platform-grid">{[["Local Context","Task-specific additions stay inside their packet until explicitly captured."],["Evidence events","Support and challenge are preserved reviews, never score buttons."],["Support ledgers","Confidence is computed from traceable events and independent confirmation."],["Promotion lineage","Every durable principle can reconstruct the cases that earned its authority."],["Connection review","Typed post-promotion edges are individually approved, rejected, or edited."],["Challenge maps","Contradictions stay visible instead of being averaged away."],["Human governance","The system proposes. A person decides what becomes durable."],["Project blueprints","Specialized capabilities emerge locally without hardcoding the whole platform."]].map(([title,copy],index) => <article key={title}><span>{String(index + 1).padStart(2,"0")}</span><h3>{title}</h3><p>{copy}</p></article>)}</div></section>
 

@@ -4,26 +4,26 @@ Campus Atlas is a reasoning sidecar for long-running ChatGPT Projects. It preser
 
 **Campus Atlas is the product.** “AI Reasoning Rebar” describes the architecture underneath it. Amy Campus is the example workspace, and Sports Engine is the mature proof project inside that workspace.
 
-## Build Week proof
+## V4 Build Week proof
 
-The V2.2 judge path demonstrates one complete loop:
+V4 keeps the governed learning loop and adds the missing everyday-use surface:
+
+`Ask in normal language → Load project blueprint → Retrieve precedent + corrections → Compile a small handoff → Work in ChatGPT`
+
+The judge path still demonstrates the complete durable-learning loop:
 
 `Capture → Structure → Connect → Test → Promote → Retrieve`
 
 The final step compares a context packet before and after a human-approved promotion. The claim is intentionally narrow: the demo proves that governed knowledge changes future context in an inspectable way. It does not claim that one example proves better prediction outcomes.
 
-## Three-minute demo route
+## Exact three-minute judge route
 
-1. Open the homepage and state the problem: ChatGPT helps people think now; Campus Atlas helps their projects build on what happened before.
-2. Select **See the Learning Loop**.
-3. Structure the seeded Sports Engine thesis. Open the **AI Work Receipt** if time permits, then approve the proposal as an Observation.
-4. Inspect the **before** Context Packet. Point out that the format lesson exists but is excluded because it has an unresolved challenge and no retrieval authority.
-5. Record the 3–1 outcome and post-mortem. Emphasize that result quality and reasoning quality are graded separately.
-6. Apply the Knowledge Review. The action creates a preserved event, typed edge, ledger update, and history entry; there is no direct score control.
-7. Approve promotion to **Validated Principle**.
-8. Show the **after** packet. The newly promoted principle now appears with its constraint and exact lineage.
-9. Close into the changed Atlas and open a **Connection Receipt** to show why an edge exists.
-10. Open Sports Engine and show its project-specific **Capability Ledger**.
+1. **0:00–0:15 — Problem.** Read the headline and supporting sentence: ChatGPT helps now; Atlas governs what deserves to affect next time.
+2. **0:15–0:50 — Everyday use.** In **Ask Atlas**, leave the deGrom strikeout task and select **Build ChatGPT handoff**. Point out the Sports Engine V4 blueprint, three budgeted items, the pitcher-prop precedent, and the carried-forward failed innings assumption.
+3. **0:50–1:05 — Inspectability.** Expand one retrieved item, show its inclusion reason and connection path, then open **AI Work Receipt**. Use **Copy for ChatGPT** to show that this output is useful immediately even before the connector is enabled.
+4. **1:05–2:20 — Learning loop.** Select **See the Learning Loop**. Structure and approve the seeded thesis, record the 3–1 result, apply the scope revision, approve promotion, and show the before/after packet. Emphasize that the architecture changed future context—not merely a score.
+5. **2:20–2:40 — Explanation layer.** Close the demo, open the Atlas, and select a typed edge to show the Connection Receipt and preserved lineage.
+6. **2:40–3:00 — Project intelligence.** Open **Sports Engine** and show its blueprint and Capability Ledger. Finish with: Campus Atlas supplies governance; each project earns different capabilities.
 
 The guided portion is designed to fit inside 90 seconds; the Atlas and Capability Ledger provide the remaining explanation.
 
@@ -57,13 +57,37 @@ No hidden chain-of-thought is displayed. The AI Work Receipt shows structured pr
 
 Without a runtime API key, the same endpoint returns an explicitly labeled seeded demonstration proposal so the judge path remains replayable. The receipt never mislabels fallback output as a live model call.
 
+## Using Campus Atlas with ChatGPT today
+
+V4 supports two paths:
+
+1. **Immediate handoff:** build a packet in the app and use **Copy for ChatGPT**. This works with the current owner-only deployment.
+2. **Connected app:** connect the Site's HTTPS `/mcp` endpoint in ChatGPT developer mode after the endpoint is made reachable through a public or authenticated connector-safe access policy.
+
+The MCP server implements initialize, tool discovery, and tool calls. It exposes six focused tools:
+
+- `atlas_build_context_packet` — read; returns the smallest useful context with inclusion and exclusion reasons.
+- `atlas_get_project_blueprint` — read; returns project rules and earned capabilities.
+- `atlas_retrieve_precedents` — read; returns approved precedent with evidence paths.
+- `atlas_get_receipt` — read; inspects preserved external action receipts.
+- `atlas_capture_candidate` — write; creates proposed knowledge only.
+- `atlas_record_outcome` — write; creates a reality evidence event only.
+
+Every tool declares read/write, open-world, and destructive annotations. Writes require idempotency keys and never promote knowledge. If `CAMPUS_ATLAS_ACTION_KEY` is configured, write routes require that bearer token.
+
+An OpenAPI 3.1 fallback is available at `/openapi.json` for GPT Actions or other compatible clients. The privacy disclosure lives at `/privacy`.
+
+The production Site is intentionally still owner-restricted. That protects the workspace, but it also means a remote ChatGPT connector cannot call `/mcp` yet. Do not make the Site public until write authentication and the desired access policy are explicitly approved.
+
 ## Persistence
 
-Campus state is stored in Cloudflare D1 through `GET /api/state` and `POST /api/state`. Captures, reviews, promotions, typed connections, packets, and AI Work Receipts survive refresh. Temporary Local Context remains inside its packet unless the user explicitly chooses **Capture as Candidate Knowledge**.
+Campus state is stored in Cloudflare D1 through `GET /api/state` and `POST /api/state`. Captures, reviews, promotions, typed connections, packets, and AI Work Receipts survive refresh. State writes merge known UI fields so connector receipts and packet history are not erased by later browser saves. Temporary Local Context remains inside its packet unless the user explicitly chooses **Capture as Candidate Knowledge**.
 
 ## Sample data
 
 Amy Campus contains seeded examples from Headquarters, Sports Engine, Health + Training, Lessons Division, Human Systems Lab, and Finance. Thesis 001—England +1.5 and Under 4.5—is the golden-loop case because its loss requires the system to separate outcome correctness from process quality.
+
+V4 also includes a clearly reconstructed pitcher-prop precedent set. It demonstrates that a new deGrom strikeout task can retrieve the promoted workload-stability rule and carry forward the failed pitch-count/innings assumption without pretending the historical case predicts today's result.
 
 Use **Reset Demo** to restore the seeded starting state.
 
@@ -89,6 +113,18 @@ The previous version already included the premium Campus Atlas visual system, th
 - Functional reset and clearer non-dead actions
 - Automated endpoint validation tests
 
+### V4 additions
+
+- Replaced passive scroll-label navigation with **Ask Atlas**, **Review Inbox**, **Explore Atlas**, and **Sports Engine** actions.
+- Added a conversation-first ChatGPT handoff that makes Context Packets useful before exposing their internal anatomy.
+- Added Local Context as a small optional, temporary layer instead of a required knowledge-entry form.
+- Added ranked retrieval with exact inclusion reasons, exclusions, source fidelity, connection paths, packet budgets, and a compiled ChatGPT payload.
+- Added the pitcher-prop precedent and workload-stability principle needed for a genuinely useful strikeout-task demonstration.
+- Added a complete MCP server, six governed tool schemas, OpenAPI fallback, privacy page, idempotent writes, and persistent action receipts.
+- Added copy-to-ChatGPT with a manual fallback when clipboard access is unavailable.
+- Preserved the Atlas graph, promotion lineage, guided learning loop, Amy Campus workspace, and Sports Engine Capability Ledger.
+- Added an implementation audit at `docs/V4_AUDIT.md` and expanded automated coverage to seven passing tests.
+
 ## Local development
 
 Requirements:
@@ -104,7 +140,7 @@ npm run lint
 npm test
 ```
 
-The hosted Sites project owns its D1 binding. A live model call additionally requires the `OPENAI_API_KEY` runtime secret.
+The hosted Sites project owns its D1 binding. A live model call additionally requires the `OPENAI_API_KEY` runtime secret. Before exposing write tools publicly, set `CAMPUS_ATLAS_ACTION_KEY` and use a connector-safe authentication policy.
 
 ## Acceptance coverage
 
@@ -118,3 +154,7 @@ The hosted Sites project owns its D1 binding. A live model call additionally req
 - The after packet visibly changes because of the approved promotion.
 - Sports-specific capability rules remain inside Sports Engine.
 - Amy Campus is labeled as an example workspace.
+- Context packets persist and retain their receipts.
+- MCP tool discovery returns six tools with explicit safety annotations.
+- ChatGPT writes are idempotent and remain proposed/evidence state.
+- OpenAPI and privacy endpoints are present.
