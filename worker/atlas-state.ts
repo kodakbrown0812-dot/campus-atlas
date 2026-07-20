@@ -27,12 +27,18 @@ export async function saveAtlasState(db: D1Database, state: unknown) {
   `).bind(WORKSPACE_ID, payload).run();
 }
 
-export async function handleAtlasState(request: Request, db: D1Database) {
+export async function handleAtlasState(request: Request, db: D1Database, publicDemo = false) {
   try {
+    if (publicDemo) {
+      if (request.method === "GET") return Response.json({ state: null, updatedAt: null, mode: "public_demo", persistence: "device_local", privateWorkspaceExposed: false });
+      if (request.method === "POST") return Response.json({ error: "Hosted state writes are disabled in public demo mode.", mode: "public_demo" }, { status: 403 });
+      return Response.json({ error: "Method not allowed." }, { status: 405, headers: { Allow: "GET, POST" } });
+    }
+
     await ensureAtlasStateTable(db);
 
     if (request.method === "GET") {
-      return Response.json(await loadAtlasState(db));
+      return Response.json({ ...(await loadAtlasState(db)), mode: "private_workspace", persistence: "hosted" });
     }
 
     if (request.method === "POST") {

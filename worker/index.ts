@@ -10,6 +10,7 @@ interface Env {
   DB: D1Database;
   OPENAI_API_KEY?: string;
   CAMPUS_ATLAS_ACTION_KEY?: string;
+  CAMPUS_ATLAS_PUBLIC_DEMO?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -35,7 +36,7 @@ const worker = {
     const url = new URL(request.url);
 
     if (url.pathname === "/api/state") {
-      return handleAtlasState(request, env.DB);
+      return handleAtlasState(request, env.DB, env.CAMPUS_ATLAS_PUBLIC_DEMO === "true");
     }
 
     if (url.pathname === "/api/structure") {
@@ -43,7 +44,7 @@ const worker = {
     }
 
     if (["/mcp", "/openapi.json", "/.well-known/openapi.json", "/privacy", "/api/context", "/api/blueprint", "/api/precedents", "/api/candidates", "/api/outcomes", "/api/receipts", "/api/security"].includes(url.pathname)) {
-      return handleAtlasActions(request, { DB: env.DB, CAMPUS_ATLAS_ACTION_KEY: env.CAMPUS_ATLAS_ACTION_KEY });
+      return handleAtlasActions(request, { DB: env.DB, CAMPUS_ATLAS_ACTION_KEY: env.CAMPUS_ATLAS_ACTION_KEY, CAMPUS_ATLAS_PUBLIC_DEMO: env.CAMPUS_ATLAS_PUBLIC_DEMO });
     }
 
     if (url.pathname === "/_vinext/image") {

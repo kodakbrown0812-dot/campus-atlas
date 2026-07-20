@@ -165,6 +165,7 @@ export default function Home() {
   const [proposalTypes, setProposalTypes] = useState<Record<string, EdgeType>>({ p1: "Derived From", p2: "Challenges", p3: "Constrained By" });
   const [aiReceipts, setAiReceipts] = useState<AIReceipt[]>([]);
   const [saveStatus, setSaveStatus] = useState<"loading" | "saved" | "saving" | "error">("loading");
+  const [persistenceMode, setPersistenceMode] = useState<"hosted" | "device">("hosted");
   const [handoffTask, setHandoffTask] = useState("Research deGrom over 6.5 strikeouts without repeating past innings assumptions.");
   const [handoffProject, setHandoffProject] = useState("Sports Engine");
   const [handoffLocal, setHandoffLocal] = useState("");
@@ -175,8 +176,15 @@ export default function Home() {
   useEffect(() => {
     let active = true;
     void fetch("/api/state").then((response) => response.ok ? response.json() : null).then((result) => {
-      if (!active || !result?.state) return;
-      const data = result.state;
+      if (!active) return;
+      let data = result?.state;
+      if (result?.mode === "public_demo") {
+        setPersistenceMode("device");
+        try { data = JSON.parse(window.localStorage.getItem("campus-atlas-public-demo-v4") || "null"); } catch { data = null; }
+      } else {
+        setPersistenceMode("hosted");
+      }
+      if (!data) return;
       if (Array.isArray(data.nodes)) { const ids = new Set(data.nodes.map((item: KnowledgeNode) => item.id)); setNodes([...data.nodes, ...initialNodes.filter((item) => !ids.has(item.id))]); }
       if (Array.isArray(data.reviews)) { const ids = new Set(data.reviews.map((item: ReviewEvent) => item.id)); setReviews([...data.reviews, ...seedReviews.filter((item) => !ids.has(item.id))]); }
       if (Array.isArray(data.connections)) { const ids = new Set(data.connections.map((item: Connection) => item.id)); setConnections([...data.connections, ...initialConnections.filter((item) => !ids.has(item.id))]); }
@@ -193,12 +201,17 @@ export default function Home() {
     if (!hydrated) return;
     const timer = window.setTimeout(() => {
       setSaveStatus("saving");
-      void fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 4, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts }) })
+      const state = { schemaVersion: 4, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts, contextPackets: handoffResult ? [handoffResult] : [] };
+      if (persistenceMode === "device") {
+        try { window.localStorage.setItem("campus-atlas-public-demo-v4", JSON.stringify(state)); setSaveStatus("saved"); } catch { setSaveStatus("error"); }
+        return;
+      }
+      void fetch("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(state) })
         .then((response) => { if (!response.ok) throw new Error("save failed"); setSaveStatus("saved"); })
         .catch(() => setSaveStatus("error"));
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [hydrated, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts]);
+  }, [hydrated, persistenceMode, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts, handoffResult]);
 
   const selected = nodes.find((node) => node.id === selectedId) ?? nodes[0];
   const selectedConfidence = confidenceFor(selected.id, reviews);
@@ -323,7 +336,7 @@ export default function Home() {
       <header className="topbar">
         <a className="brand" href="#top"><span className="brand-mark">CA</span><span><strong>Campus Atlas</strong><small>Connected reasoning for ChatGPT Projects</small></span></a>
         <nav><button onClick={() => document.getElementById("chatgpt-handoff")?.scrollIntoView({ behavior: "smooth" })}>Ask Atlas</button><button onClick={() => document.getElementById("promotion-queue")?.scrollIntoView({ behavior: "smooth" })}>Review Inbox</button><button onClick={() => document.getElementById("atlas-workspace")?.scrollIntoView({ behavior: "smooth" })}>Explore Atlas</button><button onClick={() => openProject("sports")}>Sports Engine</button></nav>
-        <div className="topbar-actions"><span className={`save-state ${saveStatus}`}>{saveStatus === "saved" ? "✓ Saved" : saveStatus === "saving" ? "Saving…" : saveStatus === "error" ? "Save failed" : "Loading…"}</span><button className="primary-button" onClick={() => setCampusOpen(true)}>＋ Create your campus</button></div>
+        <div className="topbar-actions"><span className={`save-state ${saveStatus}`}>{saveStatus === "saved" ? persistenceMode === "device" ? "✓ Saved on device" : "✓ Saved" : saveStatus === "saving" ? "Saving…" : saveStatus === "error" ? "Save failed" : "Loading…"}</span><button className="primary-button" onClick={() => setCampusOpen(true)}>＋ Create your campus</button></div>
       </header>
 
       <section className="product-intro" id="top">
@@ -355,7 +368,7 @@ export default function Home() {
         <p>Every promotion is earned through visible evidence, challenges, approvals, and connections—not a number increasing.</p>
       </section>
 
-      <section className="demo-banner"><div><span className="example-chip">Example workspace</span><strong>{workspaceName}</strong><p>{exampleMode ? "A polished campus showing how multiple projects connect—and how one project develops specialized capabilities." : "Your campus shell is ready. Amy Campus remains the reference example."}</p></div>{exampleMode ? <span className="explore-note">Explore the governed learning loop ↘</span> : <button onClick={() => { setWorkspaceName("Amy Campus"); setExampleMode(true); }}>Restore Amy Campus example</button>}</section>
+      <section className="demo-banner"><div><span className="example-chip">{persistenceMode === "device" ? "Public demo · device-local" : "Example workspace"}</span><strong>{workspaceName}</strong><p>{persistenceMode === "device" ? "Seeded demonstration knowledge only. Your interactions persist on this device without touching the private Campus Atlas workspace." : exampleMode ? "A polished campus showing how multiple projects connect—and how one project develops specialized capabilities." : "Your campus shell is ready. Amy Campus remains the reference example."}</p></div>{exampleMode ? <span className="explore-note">Explore the governed learning loop ↘</span> : <button onClick={() => { setWorkspaceName("Amy Campus"); setExampleMode(true); }}>Restore Amy Campus example</button>}</section>
 
       <section className="project-strip" id="projects"><div className="strip-heading"><div><p>Projects inside this campus</p><h2>Each project keeps its own blueprint and capabilities.</h2></div><span>{projects.length} projects · 16 rooms</span></div><div className="project-cards">{projects.filter((item) => item.key !== "hq").map((item) => <button key={item.key} className={`project-card ${item.key === "sports" ? "featured" : ""}`} onClick={() => openProject(item.key)} style={{ "--project-color": item.color } as React.CSSProperties}><span className="project-card-icon">{item.short}</span><span><small>{item.rooms} rooms · {item.capabilityCount} capabilities</small><strong>{item.label}</strong><p>{item.description}</p></span><i>{item.key === "sports" ? "Open flagship example →" : "View in Atlas →"}</i></button>)}</div></section>
 

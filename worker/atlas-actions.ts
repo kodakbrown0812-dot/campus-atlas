@@ -36,6 +36,7 @@ type ActionReceipt = {
 type ActionEnv = {
   DB: D1Database;
   CAMPUS_ATLAS_ACTION_KEY?: string;
+  CAMPUS_ATLAS_PUBLIC_DEMO?: string;
 };
 
 const fallbackNodes: AtlasNode[] = [
@@ -155,7 +156,8 @@ function textResponse(text: string, status = 200, contentType = "text/plain; cha
   return new Response(text, { status, headers: { "content-type": contentType, "access-control-allow-origin": "*" } });
 }
 
-async function stateFor(db: D1Database): Promise<AtlasState> {
+async function stateFor(db: D1Database, publicDemo = false): Promise<AtlasState> {
+  if (publicDemo) return {};
   try {
     const loaded = await loadAtlasState(db);
     return (loaded.state ?? {}) as AtlasState;
@@ -293,11 +295,15 @@ function isAuthorized(request: Request, env: ActionEnv) {
 }
 
 function securityStatus(env: ActionEnv) {
+  const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
   return {
     externalWrites: env.CAMPUS_ATLAS_ACTION_KEY ? "bearer_required" : "disabled",
     writeSecretConfigured: Boolean(env.CAMPUS_ATLAS_ACTION_KEY),
     protectedRoutes: ["/api/candidates", "/api/outcomes", "atlas_capture_candidate", "atlas_record_outcome"],
     promotionPolicy: "Human approval inside Campus Atlas only",
+    publicDemo,
+    browserStatePersistence: publicDemo ? "device_local" : "hosted_d1",
+    privateWorkspaceExposed: !publicDemo,
     siteAccessManagedSeparately: true,
   };
 }
@@ -413,10 +419,11 @@ const tools = [
 ];
 
 async function executeTool(name: string, input: Record<string, unknown>, request: Request, env: ActionEnv) {
-  const state = await stateFor(env.DB);
+  const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
+  const state = await stateFor(env.DB, publicDemo);
   if (name === "atlas_build_context_packet") {
     const packet = buildContextPacket(state, input);
-    await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) });
+    if (!publicDemo) await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) });
     return { data: packet, status: 200 };
   }
   if (name === "atlas_get_project_blueprint") return { data: blueprintFor(String(input.project || "")), status: 200 };
@@ -453,18 +460,19 @@ export async function handleAtlasActions(request: Request, env: ActionEnv) {
 
   if (url.pathname === "/openapi.json" || url.pathname === "/.well-known/openapi.json") return json(openApi(url.origin));
   if (url.pathname === "/api/security" && request.method === "GET") return json(securityStatus(env));
-  if (url.pathname === "/privacy") return textResponse("<!doctype html><html><head><title>Campus Atlas Privacy</title><meta name=viewport content='width=device-width,initial-scale=1'><style>body{font:16px/1.6 system-ui;max-width:760px;margin:64px auto;padding:0 24px;color:#172033}h1{font-size:34px}</style></head><body><h1>Campus Atlas privacy</h1><p>Campus Atlas stores the project knowledge, review events, context packets, and action receipts that a user explicitly submits. Temporary Local Context stays attached to its packet unless the user captures it as candidate knowledge.</p><p>ChatGPT tools may read approved project knowledge or create proposed candidates and outcome evidence. External writes never promote knowledge or grant authority. Consequential promotion requires explicit review inside Campus Atlas.</p><p>Do not submit secrets, payment data, or sensitive medical information to the demonstration workspace.</p></body></html>", 200, "text/html; charset=utf-8");
+  if (url.pathname === "/privacy") return textResponse("<!doctype html><html><head><title>Campus Atlas Privacy</title><meta name=viewport content='width=device-width,initial-scale=1'><style>body{font:16px/1.6 system-ui;max-width:760px;margin:64px auto;padding:0 24px;color:#172033}h1{font-size:34px}</style></head><body><h1>Campus Atlas privacy</h1><p>In public demo mode, the browser receives seeded demonstration knowledge only. Interactive changes are stored on that visitor's device and are not written into the private Campus Atlas workspace.</p><p>Temporary Local Context stays attached to its packet unless the user captures it as candidate knowledge on that device. External writes never promote knowledge: connector candidate and outcome writes require authorization and return an inspectable receipt.</p><p>Do not submit secrets, payment data, or sensitive medical information to the demonstration workspace.</p></body></html>", 200, "text/html; charset=utf-8");
 
   if (url.pathname === "/api/context" && request.method === "POST") {
-    const state = await stateFor(env.DB);
+    const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
+    const state = await stateFor(env.DB, publicDemo);
     const packet = buildContextPacket(state, await request.json() as Record<string, unknown>);
-    await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) });
+    if (!publicDemo) await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) });
     return json(packet);
   }
   if (url.pathname === "/api/blueprint" && request.method === "GET") return json(blueprintFor(url.searchParams.get("project") || ""));
-  if (url.pathname === "/api/precedents" && request.method === "POST") return json(retrievePrecedents(await stateFor(env.DB), await request.json() as Record<string, unknown>));
+  if (url.pathname === "/api/precedents" && request.method === "POST") return json(retrievePrecedents(await stateFor(env.DB, env.CAMPUS_ATLAS_PUBLIC_DEMO === "true"), await request.json() as Record<string, unknown>));
   if (url.pathname === "/api/receipts" && request.method === "GET") {
-    const state = await stateFor(env.DB);
+    const state = await stateFor(env.DB, env.CAMPUS_ATLAS_PUBLIC_DEMO === "true");
     const receipt = (state.externalReceipts || []).find((item) => item.id === url.searchParams.get("id"));
     return receipt ? json(receipt) : json({ error: "Receipt not found." }, 404);
   }

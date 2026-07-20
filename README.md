@@ -77,11 +77,13 @@ Every tool declares read/write, open-world, and destructive annotations. Writes 
 
 An OpenAPI 3.1 fallback is available at `/openapi.json` for GPT Actions or other compatible clients. The privacy disclosure lives at `/privacy`.
 
-The production Site is intentionally still owner-restricted. That protects the workspace, but it also means a remote ChatGPT connector cannot call `/mcp` yet. Connector candidate/outcome writes are now bearer-protected; the general browser-state write route still assumes the Site access gate, so do not make the full workspace public until a read-only public demo boundary or identity-aware state policy is explicitly approved.
+The production Site remains owner-restricted until its audience is explicitly changed. A public-demo boundary is available through `CAMPUS_ATLAS_PUBLIC_DEMO=true`: public visitors receive seeded demonstration knowledge only, `/api/state` never reads or writes the private D1 workspace, Context Packet reads do not create D1 history, and interactive changes persist in that visitor's browser storage. Connector candidate/outcome writes remain separately bearer-protected.
 
 ## Persistence
 
-Campus state is stored in Cloudflare D1 through `GET /api/state` and `POST /api/state`. Captures, reviews, promotions, typed connections, packets, and AI Work Receipts survive refresh. State writes merge known UI fields so connector receipts and packet history are not erased by later browser saves. Temporary Local Context remains inside its packet unless the user explicitly chooses **Capture as Candidate Knowledge**.
+In private-workspace mode, Campus state is stored in Cloudflare D1 through `GET /api/state` and `POST /api/state`. Captures, reviews, promotions, typed connections, packets, and AI Work Receipts survive refresh. State writes merge known UI fields so connector receipts and packet history are not erased by later browser saves.
+
+In public-demo mode, private D1 state is never returned and hosted state writes return `403`. The same interactions survive refresh through device-local browser storage. The interface labels this mode **Public demo · device-local** and never implies that those changes entered the private workspace. Temporary Local Context remains inside its packet unless the visitor explicitly captures it as candidate knowledge on that device.
 
 ## Sample data
 
@@ -158,3 +160,6 @@ The hosted Sites project owns its D1 binding. A live model call additionally req
 - MCP tool discovery returns six tools with explicit safety annotations.
 - ChatGPT writes are idempotent and remain proposed/evidence state.
 - OpenAPI and privacy endpoints are present.
+- Public-demo requests cannot read or mutate private D1 state.
+- Public-demo packets use seeded knowledge and do not create hosted retrieval history.
+- Public interactions persist only on the visitor's device and are labeled accordingly.

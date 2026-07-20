@@ -202,6 +202,60 @@ test("reports write security without revealing the secret", async () => {
   assert.doesNotMatch(JSON.stringify(status), /never-return-this/);
 });
 
+test("public demo mode never reads or writes the private D1 workspace", async () => {
+  const worker = await builtWorker("public-isolation");
+  const DB = memoryD1();
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const assets = { fetch: async () => new Response("Not found", { status: 404 }) };
+  const privateState = { nodes: [{ id: "private", title: "PRIVATE-NEVER-RETURN", status: "approved" }] };
+  const seeded = await worker.fetch(
+    new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(privateState) }),
+    { DB, ASSETS: assets },
+    ctx,
+  );
+  assert.equal(seeded.status, 200);
+
+  const publicEnv = { DB, CAMPUS_ATLAS_PUBLIC_DEMO: "true", CAMPUS_ATLAS_ACTION_KEY: "configured", ASSETS: assets };
+  const publicState = await worker.fetch(new Request("http://localhost/api/state"), publicEnv, ctx);
+  const statePayload = await publicState.json();
+  assert.equal(statePayload.mode, "public_demo");
+  assert.equal(statePayload.state, null);
+  assert.equal(statePayload.privateWorkspaceExposed, false);
+
+  const blockedWrite = await worker.fetch(
+    new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ workspaceName: "Attacker" }) }),
+    publicEnv,
+    ctx,
+  );
+  assert.equal(blockedWrite.status, 403);
+
+  const publicPacket = await worker.fetch(
+    new Request("http://localhost/api/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task: "Research a strikeout prop", project: "Sports Engine" }) }),
+    publicEnv,
+    ctx,
+  );
+  assert.equal(publicPacket.status, 200);
+  assert.doesNotMatch(JSON.stringify(await publicPacket.json()), /PRIVATE-NEVER-RETURN/);
+
+  const stillPrivate = await worker.fetch(new Request("http://localhost/api/state"), { DB, ASSETS: assets }, ctx);
+  const privatePayload = await stillPrivate.json();
+  assert.equal(privatePayload.state.nodes[0].title, "PRIVATE-NEVER-RETURN");
+  assert.equal(privatePayload.state.contextPackets, undefined);
+});
+
+test("public security status advertises device-local persistence", async () => {
+  const worker = await builtWorker("public-status");
+  const response = await worker.fetch(
+    new Request("http://localhost/api/security"),
+    { DB: memoryD1(), CAMPUS_ATLAS_PUBLIC_DEMO: "true", CAMPUS_ATLAS_ACTION_KEY: "configured", ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  const status = await response.json();
+  assert.equal(status.publicDemo, true);
+  assert.equal(status.browserStatePersistence, "device_local");
+  assert.equal(status.privateWorkspaceExposed, false);
+});
+
 test("publishes an OpenAPI fallback and privacy policy", async () => {
   const worker = await builtWorker("openapi");
   const DB = memoryD1();
