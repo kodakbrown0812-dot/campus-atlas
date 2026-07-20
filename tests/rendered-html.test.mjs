@@ -69,15 +69,26 @@ test("mobile navigation focuses one workspace instead of stacking the full Atlas
   assert.match(css, /\.mobile-review \.workspace/);
 });
 
-test("V4.2 makes governed capture a permanent front door", async () => {
+test("project capture stays contextual instead of becoming a duplicate destination", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
-  assert.match(page, /className="nav-capture"/);
-  assert.match(page, />＋ Capture<\/button>/);
-  assert.match(page, /className="mobile-capture"/);
+  assert.doesNotMatch(page, /className="nav-capture"/);
+  assert.doesNotMatch(page, /className="mobile-capture"/);
+  assert.doesNotMatch(page, /className="floating-capture"/);
   assert.match(page, /Add to Sports Engine/);
+  assert.match(page, /project capture/);
   assert.match(css, /\.sports-add-button/);
+});
+
+test("capture migrates older device records and shows validation failures", async () => {
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(page, /function normalizeNode/);
+  assert.match(page, /data\.nodes\.map\(\(item: Partial<KnowledgeNode>\) => normalizeNode\(item\)\)/);
+  assert.match(page, /Complete the highlighted field before saving/);
+  assert.match(page, /Saving always creates a visible receipt/);
+  assert.match(page, /No additional connection/);
 });
 
 test("V4.2 exposes the complete governed Sports Engine entry lifecycle", async () => {
