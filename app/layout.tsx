@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Starter Project",
-  description: "A clean starting point for building your site.",
+  title: "Campus Atlas — Connected reasoning for ChatGPT Projects",
+  description: "Durable, connected reasoning infrastructure across your ChatGPT Projects.",
   other: {
     "codex-preview": "development",
   },
