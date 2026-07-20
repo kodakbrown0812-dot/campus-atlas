@@ -1,108 +1,120 @@
-# vinext-starter
+# Campus Atlas
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+Campus Atlas is a reasoning sidecar for long-running ChatGPT Projects. It preserves decisions, evidence, corrections, challenges, and promoted principles as connected, inspectable knowledge—then compiles the smallest useful context for future work.
 
-## Prerequisites
+**Campus Atlas is the product.** “AI Reasoning Rebar” describes the architecture underneath it. Amy Campus is the example workspace, and Sports Engine is the mature proof project inside that workspace.
+
+## Build Week proof
+
+The V2.2 judge path demonstrates one complete loop:
+
+`Capture → Structure → Connect → Test → Promote → Retrieve`
+
+The final step compares a context packet before and after a human-approved promotion. The claim is intentionally narrow: the demo proves that governed knowledge changes future context in an inspectable way. It does not claim that one example proves better prediction outcomes.
+
+## Three-minute demo route
+
+1. Open the homepage and state the problem: ChatGPT helps people think now; Campus Atlas helps their projects build on what happened before.
+2. Select **See the Learning Loop**.
+3. Structure the seeded Sports Engine thesis. Open the **AI Work Receipt** if time permits, then approve the proposal as an Observation.
+4. Inspect the **before** Context Packet. Point out that the format lesson exists but is excluded because it has an unresolved challenge and no retrieval authority.
+5. Record the 3–1 outcome and post-mortem. Emphasize that result quality and reasoning quality are graded separately.
+6. Apply the Knowledge Review. The action creates a preserved event, typed edge, ledger update, and history entry; there is no direct score control.
+7. Approve promotion to **Validated Principle**.
+8. Show the **after** packet. The newly promoted principle now appears with its constraint and exact lineage.
+9. Close into the changed Atlas and open a **Connection Receipt** to show why an edge exists.
+10. Open Sports Engine and show its project-specific **Capability Ledger**.
+
+The guided portion is designed to fit inside 90 seconds; the Atlas and Capability Ledger provide the remaining explanation.
+
+## Architecture
+
+### General Campus Atlas layer
+
+- Projects and rooms
+- Typed knowledge nodes and connections
+- Exact, reconstructed, and inferred fidelity
+- Evidence and challenge events
+- Computed support ledgers
+- Human-governed promotion
+- Context Packet retrieval and exclusions
+- Connection and AI Work Receipts
+- D1-backed persistence and revision history
+
+### Project-specific layer
+
+Each project owns its blueprint and capabilities. Sports Engine adds research audits, probability and expected-value analysis, Lock Scores, explainable precedent retrieval, outcome post-mortems, confidence calibration, and principle promotion. These capabilities are not hardcoded as global Campus Atlas behavior.
+
+### Governance boundary
+
+The model proposes. Deterministic application logic validates input bounds, output schema, scope, persistence, event history, and promotion gates. A human approves consequential changes.
+
+No hidden chain-of-thought is displayed. The AI Work Receipt shows structured proposals, deterministic checks, approvals, and rejections.
+
+## Model integration
+
+`POST /api/structure` uses the OpenAI Responses API with model `gpt-5.6` and a strict JSON schema when `OPENAI_API_KEY` is configured in the hosted environment.
+
+Without a runtime API key, the same endpoint returns an explicitly labeled seeded demonstration proposal so the judge path remains replayable. The receipt never mislabels fallback output as a live model call.
+
+## Persistence
+
+Campus state is stored in Cloudflare D1 through `GET /api/state` and `POST /api/state`. Captures, reviews, promotions, typed connections, packets, and AI Work Receipts survive refresh. Temporary Local Context remains inside its packet unless the user explicitly chooses **Capture as Candidate Knowledge**.
+
+## Sample data
+
+Amy Campus contains seeded examples from Headquarters, Sports Engine, Health + Training, Lessons Division, Human Systems Lab, and Finance. Thesis 001—England +1.5 and Under 4.5—is the golden-loop case because its loss requires the system to separate outcome correctness from process quality.
+
+Use **Reset Demo** to restore the seeded starting state.
+
+## What existed before V2.2
+
+The previous version already included the premium Campus Atlas visual system, the Amy Campus workspace, project cards, left-side project navigation, a central graph, a node inspector, a Promotion Queue, Local Context in Context Packets, Knowledge Review actions, basic persistence, and the Sports Engine project page.
+
+## What Codex added during Build Week
+
+- A homepage **See the Learning Loop** CTA
+- A replayable six-stage judge experience
+- Structured capture proposal and AI Work Receipt endpoint
+- Deterministic capture validation
+- Explicit before/after Context Packet comparison
+- Reality events and separate outcome/process grading
+- Review-event-driven promotion eligibility
+- Human-approved promotion with typed edges
+- Downstream retrieval proof and graph pulse
+- Connection Receipts
+- Context packet budgets and richer provenance metadata
+- Sports Engine Capability Ledger
+- Visible save state and persistence verification
+- Functional reset and clearer non-dead actions
+- Automated endpoint validation tests
+
+## Local development
+
+Requirements:
 
 - Node.js `>=22.13.0`
-- Linux with `flock`, `curl`, and GNU `timeout`
+- Linux tooling used by the Sites build scripts
 
-## Sites Lifecycle
+Common commands:
 
-The Sites lifecycle CLI runs the locked dependency install before returning this checkout. Edit the source under `app/`, then checkpoint when a coherent milestone is ready to inspect or share. The remote Sites builder runs `npm run build` against the pushed commit. Do not repeat install or build as a normal pre-checkpoint step.
-
-This starter does not use `wrangler.jsonc`.
-
-`install:ci` is intentionally a single, non-retrying `npm ci`. It refuses a concurrent install for the same project, consumes a matching image-seeded npm cache with `--prefer-offline` while retaining registry fallback for a missing cache object, otherwise downloads and verifies the complete vinext tarball recorded in `package-lock.json`, limits npm to one socket, and terminates a stalled install. `build` applies a short timeout and then validates the Sites artifact. These helpers target Linux and use GNU `timeout`; they are not native macOS scripts.
-
-Scripts that need writable project-scoped home, npm, XDG, and temporary paths use `scripts/sites-env.sh`. The `dev` and `start` scripts honor the caller's runtime environment and keep Wrangler logs inside the checkout. The generated `.sites-runtime/` directory is disposable and ignored by Git.
-
-## Included Shape
-
-- edit site code under `app/`
-- `app/chatgpt-auth.ts` provides optional dispatch-owned ChatGPT sign-in helpers
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/index.ts` reads the D1 binding from the Cloudflare Worker environment
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
+```bash
+npm run dev
+npm run lint
+npm test
 ```
 
-## Optional Dispatch-Owned ChatGPT Sign-In
+The hosted Sites project owns its D1 binding. A live model call additionally requires the `OPENAI_API_KEY` runtime secret.
 
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
+## Acceptance coverage
 
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Diagnostic Commands
-
-- `npm run install:ci`: perform the one bounded lockfile install
-- `npm run dev`: start the Vite/Vinext development server
-- `npm run build`: build and validate the deployable Sites artifact
-- `npm run start`: start the built Vinext application
-- `npm test`: build, validate, and verify the rendered development-preview metadata
-- `npm run validate:artifact`: recheck an existing artifact's manifest and ESM `default.fetch` export
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-Use build and validation commands for targeted diagnosis after a remote failure, not as part of the normal checkpoint path.
-
-The timeout defaults can be overridden for a controlled canary with `SITES_INSTALL_TIMEOUT`, `SITES_INSTALL_KILL_AFTER`, `SITES_BUILD_TIMEOUT`, and `SITES_BUILD_KILL_AFTER`. A timeout fails the command; the helpers never retry an unchanged install or build.
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+- Captures persist after refresh.
+- Temporary Local Context does not automatically become durable.
+- Reviews create events, typed connections, ledger changes, and history entries.
+- Scores are computed from evidence events.
+- Promotion requires an explicit click.
+- Promoted nodes retain complete lineage.
+- Packet items explain inclusion, exclusion, provenance, scope, confidence, fidelity, and connection path.
+- The after packet visibly changes because of the approved promotion.
+- Sports-specific capability rules remain inside Sports Engine.
+- Amy Campus is labeled as an example workspace.
