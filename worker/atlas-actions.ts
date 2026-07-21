@@ -18,12 +18,17 @@ type AtlasNode = {
   y?: number;
   lineage?: string[];
   history?: unknown[];
+  metadata?: Record<string, string>;
 };
 
 type AtlasState = {
   nodes?: AtlasNode[];
   reviews?: Array<Record<string, unknown>>;
   connections?: Array<Record<string, unknown>>;
+  cases?: Array<Record<string, unknown>>;
+  evidence?: Array<Record<string, unknown>>;
+  knowledge?: Array<Record<string, unknown>>;
+  blueprintRules?: Array<Record<string, unknown>>;
   externalReceipts?: ActionReceipt[];
   [key: string]: unknown;
 };
@@ -147,11 +152,10 @@ const fallbackNodes: AtlasNode[] = [
 
 const sportsBlueprint = {
   project: "Sports Engine",
-  version: "V4.5",
+  version: "V4.6",
   purpose: "Turn audited sports cases into compact, inspectable reasoning that can improve later research without generating picks automatically.",
   rules: [
     "Classify the research state before assigning confidence.",
-    "Separate favorite quality, match control, scoring probability, and market coverage into distinct claims.",
     "Separate estimated probability from market price and expected value.",
     "Verify the currently offered market before calculating value.",
     "Record counter-evidence, assumptions, and missing information.",
@@ -163,7 +167,7 @@ const sportsBlueprint = {
 
 const generalBlueprint = {
   project: "Campus Atlas",
-  version: "V4.5",
+  version: "V4.6",
   purpose: "Carry forward governed, inspectable knowledge across long-running ChatGPT Projects.",
   rules: [
     "Local context stays temporary unless explicitly captured.",
@@ -204,13 +208,24 @@ function nodesFor(state: AtlasState) {
 function normalizeProject(project?: string) {
   const value = (project || "sports").toLowerCase();
   if (value.includes("sport")) return "sports";
-  if (value.includes("train") || value.includes("health") || value.includes("hockey")) return "training";
+  if (value.includes("train") || value.includes("health") || value.includes("hockey")) return "hockey";
   if (value.includes("lesson") || value.includes("learn")) return "lessons";
   return value.replace(/[^a-z0-9-]/g, "-") || "all";
 }
 
-function blueprintFor(project?: string) {
-  return normalizeProject(project) === "sports" ? sportsBlueprint : generalBlueprint;
+function blueprintFor(project?: string, state?: AtlasState) {
+  const projectKey = normalizeProject(project);
+  const projectName = projectKey === "sports" ? "Sports Engine" : projectKey === "hockey" ? "Hockey Development" : projectKey === "lessons" ? "Lessons Division" : project || "Campus Atlas";
+  const activeRules = Array.isArray(state?.blueprintRules) ? state.blueprintRules.filter((rule) => String(rule.project) === projectKey && String(rule.status) === "Active") : [];
+  if (!activeRules.length) return projectKey === "sports" ? sportsBlueprint : { ...generalBlueprint, project: projectName };
+  const versions = activeRules.map((rule) => String(rule.version || "V4.6"));
+  return {
+    ...(projectKey === "sports" ? sportsBlueprint : generalBlueprint),
+    project: projectName,
+    version: versions.find((version) => version === "V4.6.1") || versions[0] || "V4.6",
+    rules: activeRules.map((rule) => String(rule.content)),
+    capabilities: projectKey === "sports" ? ["Research audit", "Probability and EV", "Outcome post-mortem", "Explainable retrieval", "Human-governed promotion"] : projectKey === "hockey" ? ["Game-transfer review", "Skill-dial evidence", "Explainable retrieval", "Human-governed promotion"] : generalBlueprint.capabilities,
+  };
 }
 
 function fidelity(node: AtlasNode) {
@@ -222,20 +237,41 @@ function words(value: string) {
   return value.toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length > 3).map((word) => word.endsWith("s") && word.length > 5 ? word.slice(0, -1) : word);
 }
 
+function inferredDomain(task: string) {
+  const value = task.toLowerCase();
+  if (/england|ghana|soccer|football|favorite|handicap|defensive wall|match total/.test(value)) return "soccer";
+  if (/pitcher|strikeout|mlb|baseball|innings|pitch count/.test(value)) return "baseball";
+  if (/hockey|puck|forecheck|skate|zone|support route/.test(value)) return "hockey";
+  return "";
+}
+
 function rankedNodes(state: AtlasState, task: string, project?: string) {
   const projectKey = normalizeProject(project);
   const taskWords = words(task);
+  const taskDomain = inferredDomain(task);
   return nodesFor(state).map((node) => {
-    const searchable = `${node.title} ${node.summary} ${(node.sources || []).join(" ")}`.toLowerCase();
+    const metadata = node.metadata || {};
+    const metadataText = Object.entries(metadata).map(([key, value]) => `${key} ${value}`).join(" ");
+    const searchable = `${node.title} ${node.summary} ${(node.sources || []).join(" ")} ${metadataText}`.toLowerCase();
     const searchableWords = new Set(words(searchable));
     const matchedWords = [...new Set(taskWords.filter((word) => searchableWords.has(word)))];
     const keywordMatches = matchedWords.length;
-    const projectFit = node.project === projectKey ? 16 : node.project === "hq" ? 9 : 0;
+    const projectFit = node.project === projectKey ? 24 : -30;
+    const nodeDomain = String(metadata.Sport || metadata.Domain || "").toLowerCase();
+    const domainFit = !taskDomain || !nodeDomain ? 0 : nodeDomain.includes(taskDomain) ? 24 : -38;
+    const mechanism = String(metadata.Mechanism || metadata["Shared mechanism"] || metadata["Technical mechanism"] || "").toLowerCase();
+    const mechanismWords = words(mechanism);
+    const mechanismMatches = mechanismWords.filter((word) => taskWords.includes(word));
+    const mechanismFit = mechanismMatches.length * 12;
+    const market = String(metadata["Market type"] || "").toLowerCase();
+    const marketFit = market && words(market).some((word) => taskWords.includes(word)) ? 14 : 0;
     const reality = /outcome|result|correction|post-mortem/i.test(searchable) ? 7 : 0;
-    const authority = node.status === "approved" ? 10 : 0;
-    const score = Math.min(99, Math.round((node.reconstructionValue ?? 55) * .28 + (node.sourceFidelity ?? 60) * .18 + keywordMatches * 9 + projectFit + reality + authority));
-    return { node, score, keywordMatches, matchedWords };
-  }).sort((a, b) => b.score - a.score);
+    const authority = node.status === "approved" ? 24 : -24;
+    const recordPriority = node.type === "principle" || node.type === "pattern" || node.type === "adapted transfer" ? 3 : node.type === "decision" || node.type === "observation" ? 2 : 1;
+    const score = Math.max(0, Math.min(99, Math.round((node.reconstructionValue ?? 55) * .18 + (node.sourceFidelity ?? 60) * .13 + keywordMatches * 7 + projectFit + domainFit + mechanismFit + marketFit + reality + authority)));
+    const labels = Object.entries(metadata).filter(([, value]) => words(String(value)).some((word) => taskWords.includes(word))).map(([key, value]) => `${key}: ${value}`);
+    return { node, score, recordPriority, keywordMatches, matchedWords, domainFit, mechanismMatches, labels, nodeDomain };
+  }).sort((a, b) => b.score - a.score || b.recordPriority - a.recordPriority || (b.node.reconstructionValue ?? 55) - (a.node.reconstructionValue ?? 55));
 }
 
 function approvedConnectionFor(state: AtlasState, node: AtlasNode, task: string) {
@@ -258,17 +294,30 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
   const task = String(input.task || input.question || "Prepare the next project task using the smallest useful context.").trim();
   const project = String(input.project || "Sports Engine");
   const localContext = String(input.localContext || "").trim();
+  const constraints = String(input.constraints || "").trim();
+  const retrievalScope = ["project", "transfers", "campus"].includes(String(input.retrievalScope)) ? String(input.retrievalScope) : "project";
+  const requestedTokens = Math.max(250, Math.min(2500, Number(input.tokenBudget) || 700));
+  const itemLimit = Math.max(1, Math.min(6, Math.floor(requestedTokens / 190)));
   const workspaceId = normalizeDemoWorkspaceId(input.workspaceId);
   const ranked = rankedNodes(state, task, project);
-  const durable = ranked.filter(({ node }) => node.status === "approved").slice(0, 3).map(({ node, score, matchedWords }) => {
+  const projectKey = normalizeProject(project);
+  const taskDomain = inferredDomain(task);
+  const eligible = ranked.filter(({ node, nodeDomain, score }) => node.status === "approved" && node.project === projectKey && score >= 34 && (!taskDomain || !nodeDomain || nodeDomain.includes(taskDomain)));
+  const durable = eligible.slice(0, itemLimit).map(({ node, score, matchedWords, mechanismMatches, labels }) => {
     const connected = approvedConnectionFor(state, node, task);
-    const reasons = [node.project === normalizeProject(project) ? "same project" : "campus-wide scope"];
+    const reasons = ["human-approved", "same project"];
+    const sport = node.metadata?.Sport;
+    if (sport) reasons.push(`same sport: ${sport}`);
+    const market = node.metadata?.["Market type"];
+    if (market && words(market).some((word) => words(task).includes(word))) reasons.push(`same market family: ${market}`);
+    if (mechanismMatches.length) reasons.push(`shared mechanism: ${mechanismMatches.join(", ")}`);
     if (matchedWords.length) reasons.push(`task match: ${matchedWords.slice(0, 3).join(", ")}`);
     if (connected?.other) reasons.push(`approved path through ${connected.other.title}`);
+    if (labels.length) reasons.push(`structured labels: ${labels.slice(0, 2).join(", ")}`);
     reasons.push(`${node.reconstructionValue ?? 55} reconstruction value`);
     const connectionPath = connected?.other
-      ? [task, blueprintFor(project).project, connected.other.title, `${String(connected.edge.type || "Connected")}: ${String(connected.edge.reason || "Approved evidence path")}`, node.title]
-      : [task, blueprintFor(project).project, node.title];
+      ? [task, blueprintFor(project, state).project, connected.other.title, `${String(connected.edge.type || "Connected")}: ${String(connected.edge.explanation || connected.edge.reason || "Approved evidence path")}`, node.title]
+      : [task, blueprintFor(project, state).project, node.title];
     return {
       id: node.id,
       title: node.title,
@@ -278,7 +327,7 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
       retrievedBecause: reasons,
       source: (node.sources || ["Campus Atlas"])[0],
       confidence: node.sourceFidelity ?? 60,
-      scope: node.project === "hq" ? "Entire campus" : blueprintFor(project).project,
+      scope: blueprintFor(project, state).project,
       freshness: "Review before use if current conditions changed",
       fidelity: fidelity(node),
       authorityLevel: node.level,
@@ -286,7 +335,7 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
       lineage: node.lineage || [],
     };
   });
-  const challenges = ranked.filter(({ node }) => node.status === "challenged" || /challenge|failed|underweight|uncertainty|\blost\b|\bloss\b/i.test(`${node.title} ${node.summary}`)).slice(0, 2).map(({ node }) => ({
+  const challenges = ranked.filter(({ node, nodeDomain }) => node.project === projectKey && (!taskDomain || !nodeDomain || nodeDomain.includes(taskDomain)) && (node.status === "challenged" || /challenge|failed|underweight|uncertainty|\blost\b|\bloss\b|contradict/i.test(`${node.title} ${node.summary}`))).slice(0, 2).map(({ node }) => ({
     id: node.id,
     title: node.title,
     reason: "Carry this forward so the next answer does not repeat a known failure mode.",
@@ -294,25 +343,49 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
     status: node.status,
   }));
   const includedIds = new Set(durable.map((item) => item.id));
-  const excluded = ranked.filter(({ node }) => !includedIds.has(node.id)).slice(0, 3).map(({ node }) => ({
+  const excluded = ranked.filter(({ node }) => !includedIds.has(node.id)).slice(0, 6).map(({ node, nodeDomain, score }) => ({
     id: node.id,
     title: node.title,
-    whyExcluded: node.status !== "approved" ? `No retrieval authority: ${node.status}.` : "Lower usefulness for this task and outside the packet budget.",
+    whyExcluded: node.status !== "approved" ? `Not approved: ${node.status}.` : node.project !== projectKey ? "Wrong project scope." : taskDomain && nodeDomain && !nodeDomain.includes(taskDomain) ? `Wrong sport or domain: ${nodeDomain}.` : score < 34 ? "Unrelated mechanism or insufficient task fit." : includedIds.size >= itemLimit ? "Outside token budget; less useful than selected evidence." : "Lower evidence quality or reconstruction value than selected records.",
   }));
   const packetId = `PKT-${Date.now().toString(36).toUpperCase()}`;
   const receiptId = `RCP-${Date.now().toString(36).toUpperCase()}`;
-  const blueprint = blueprintFor(project);
+  const blueprint = blueprintFor(project, state);
+  const allConnections = Array.isArray(state.connections) ? state.connections : [];
+  const reconstructionPathways = allConnections.filter((connection) => String(connection.project) === "campus" && [String(connection.sourceId), String(connection.targetId)].some((id) => nodesFor(state).find((node) => node.id === id)?.project === projectKey)).map((connection) => {
+    const approved = String(connection.approvalState || "").toLowerCase() === "approved";
+    const rejected = String(connection.approvalState || "").toLowerCase() === "rejected";
+    const mechanism = String(connection.sharedMechanism || "No mechanism established");
+    const mechanismMatch = words(mechanism).some((word) => words(task).includes(word));
+    const selected = !rejected && mechanismMatch && ((approved && (retrievalScope === "transfers" || retrievalScope === "campus")) || (!approved && retrievalScope === "campus"));
+    const sourceNode = nodesFor(state).find((node) => node.id === String(connection.sourceId));
+    const targetNode = nodesFor(state).find((node) => node.id === String(connection.targetId));
+    return {
+      id: String(connection.id),
+      sourceProject: sourceNode ? blueprintFor(sourceNode.project, state).project : "Connected project",
+      targetProject: targetNode ? blueprintFor(targetNode.project, state).project : blueprint.project,
+      sharedMechanism: mechanism,
+      authority: approved ? "Approved transfer" : rejected ? "Rejected pathway" : "Exploratory connection",
+      recordsFollowed: [String(connection.sourceId), ...(Array.isArray(connection.evidenceIds) ? connection.evidenceIds.map(String) : []), String(connection.targetId)],
+      contribution: selected ? approved ? "Supplied adapted target-project context with human-approved authority." : "Helped reconstruct a possible analogy without inserting source-project authority into the final packet." : "No context contributed.",
+      domainLimitations: String(connection.domainLimitations || "Project conclusions remain separate."),
+      selected,
+      reason: selected ? `Activated by the shared mechanism “${mechanism}” under ${retrievalScope} scope.` : rejected ? "Rejected: keyword similarity did not establish a meaningful mechanism." : !mechanismMatch ? "Shared mechanism did not match the current task." : approved ? "Approved transfer was outside the selected retrieval scope." : "Transfer is not approved; Campus exploration is required for exploratory use.",
+    };
+  });
   const compiledPrompt = [
     `TASK\n${task}`,
     `PROJECT BLUEPRINT\n${blueprint.rules.map((rule, index) => `${index + 1}. ${rule}`).join("\n")}`,
     localContext ? `LOCAL CONTEXT — temporary for this task only\n${localContext}` : "LOCAL CONTEXT\nNone supplied.",
+    constraints ? `CALLER CONSTRAINTS\n${constraints}` : "CALLER CONSTRAINTS\nNone supplied.",
     `RETRIEVED DURABLE KNOWLEDGE\n${durable.map((item) => `- ${item.title}: ${item.summary}\n  Why: ${item.whyIncluded}`).join("\n")}`,
     `CHALLENGES TO CARRY FORWARD\n${challenges.length ? challenges.map((item) => `- ${item.title}: ${item.reason}`).join("\n") : "- No active challenge matched this task."}`,
+    reconstructionPathways.some((pathway) => pathway.selected) ? `RECONSTRUCTION PATHWAYS\n${reconstructionPathways.filter((pathway) => pathway.selected).map((pathway) => `- ${pathway.authority}: ${pathway.sharedMechanism}. ${pathway.contribution} Boundary: ${pathway.domainLimitations}`).join("\n")}` : "RECONSTRUCTION PATHWAYS\nNone used.",
     "INSTRUCTIONS\nUse this packet as context, verify time-sensitive facts, distinguish facts from assumptions, and do not treat retrieved precedent as a prediction.",
   ].join("\n\n");
   const approvedPrinciples = durable.filter((item) => {
     const source = nodesFor(state).find((node) => node.id === item.id);
-    return source?.type === "principle" || source?.type === "pattern" || item.authorityLevel !== "Observation";
+    return source?.type === "principle" || source?.type === "pattern" || source?.type === "adapted transfer";
   }).map(({ id, title, summary, whyIncluded }) => ({ id, title, summary, whyIncluded }));
   const supportingCases = durable.filter((item) => {
     const source = nodesFor(state).find((node) => node.id === item.id);
@@ -330,7 +403,8 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
     supportingCases,
     challenges,
     excluded,
-    budget: { used: durable.length, limit: 4, estimatedTokens: Math.ceil(compiledPrompt.length / 4) },
+    reconstructionPathways,
+    budget: { used: durable.length, limit: itemLimit, estimatedTokens: Math.ceil(compiledPrompt.length / 4), requestedTokens },
     compiledPrompt,
     contextPacket: compiledPrompt,
     receipt: {
@@ -338,10 +412,11 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
       tool: "atlas_build_context_packet",
       proposedBy: "Campus Atlas deterministic retrieval",
       createdAt: new Date().toISOString(),
-      checks: ["Canonical workspace state loaded", "Project scope applied", "Only approved knowledge received retrieval authority", "Packet budget enforced", "Local context kept temporary", "Inclusion and exclusion reasons attached"],
+      checks: ["Canonical workspace state loaded", "Active project scope applied", "Domain and mechanism fit checked", "Only approved knowledge received retrieval authority", "Transfer authority boundary checked", "Packet token budget enforced", "Local context kept temporary", "Inclusion and exclusion reasons attached"],
       humanApprovalRequired: false,
       inclusions: durable.map((item) => ({ id: item.id, reason: item.whyIncluded })),
       exclusions: excluded.map((item) => ({ id: item.id, reason: item.whyExcluded })),
+      labelsApplied: [...new Set(eligible.flatMap((item) => item.labels))].slice(0, 8),
     },
   };
 }
@@ -351,7 +426,7 @@ function retrievePrecedents(state: AtlasState, input: Record<string, unknown>) {
   const project = String(input.project || "Sports Engine");
   return {
     task,
-    project: blueprintFor(project).project,
+    project: blueprintFor(project, state).project,
     precedents: rankedNodes(state, task, project).filter(({ node }) => node.status === "approved").slice(0, 5).map(({ node, score }) => ({
       id: node.id,
       title: node.title,
@@ -373,7 +448,7 @@ function securityStatus(env: ActionEnv) {
   return {
     externalWrites: env.CAMPUS_ATLAS_ACTION_KEY ? "bearer_required" : "disabled",
     writeSecretConfigured: Boolean(env.CAMPUS_ATLAS_ACTION_KEY),
-    protectedRoutes: ["/api/candidates", "/api/outcomes", "atlas_capture_candidate", "atlas_record_outcome"],
+    protectedRoutes: ["/api/candidates", "/api/outcomes", "/api/events", "atlas_capture_candidate", "atlas_record_outcome", "atlas_submit_case_event"],
     promotionPolicy: "Human approval inside Campus Atlas only",
     publicDemo,
     browserStatePersistence: publicDemo ? "session_scoped_d1" : "hosted_d1",
@@ -418,7 +493,16 @@ async function captureCandidate(db: D1Database, input: Record<string, unknown>, 
     history: [{ id: `history-${Date.now()}`, date: "Now", label: "Candidate captured", detail: "External write created proposed knowledge only; no promotion authority was granted." }],
   };
   const receipt: ActionReceipt = { id: `RCP-${Date.now().toString(36).toUpperCase()}`, tool: "atlas_capture_candidate", createdAt: new Date().toISOString(), idempotencyKey: key, checks: ["Required fields validated", "Idempotency key checked", "Status forced to proposed", "Promotion authority denied"], effect: objectType === "case" ? "Created proposed case in the Case ledger for human review" : "Created proposed Observation for human review", targetId: id };
-  const next: AtlasState = { ...loaded, nodes: [...nodesFor(loaded), node], externalReceipts: [...receipts, receipt] };
+  const timestamp = new Date().toISOString();
+  const projectKey = normalizeProject(String(input.project || "sports"));
+  const canonicalCase = objectType === "case" ? {
+    id, project: projectKey, origin: "API-created", title: String(input.title), createdAt: timestamp, state: "Captured", confidence: Number(input.confidence || 60), outcomeState: "Pending", governanceState: "Draft", retrievalEligible: false,
+    experience: String(input.summary), task: String(input.summary), localContext: "", thesis: "Awaiting research audit.", facts: [], estimates: [], assumptions: [], unknowns: [], counterarguments: [], fragility: "Not yet audited", completeness: 20, outcome: "", postmortem: { happened: "", failed: "", held: "", underweighted: "", change: "", evidence: [] }, metadata: { Origin: "API-created", "Governance state": "Draft" },
+  } : null;
+  const canonicalEvidence = objectType === "case" ? { id: `evidence-${Date.now().toString(36)}`, project: projectKey, caseId: id, recordType: "Capture", content: String(input.summary), source: String(input.source), fidelity: "Exact", confidence: Number(input.confidence || 60), role: "Context", creator: "API sidecar", timestamp, approvalState: "Draft", retrievalEligible: false, metadata: { Origin: "API-created" } } : null;
+  const canonicalKnowledge = objectType === "knowledge" ? { id, project: projectKey, type: "Principle", title: String(input.title), content: String(input.summary), status: "Pending", scope: String(input.project || "Project"), confidence: Number(input.confidence || 60), humanApproval: null, supportingCaseIds: [], evidenceIds: [], challengingEvidenceIds: [], revisionHistory: ["Proposed through the API sidecar."], retrievalHistory: [], retrievalEligible: false, metadata: { Origin: "API-created", "Governance state": "Pending" } } : null;
+  const activity = { id: `activity-${Date.now().toString(36)}`, project: projectKey, actor: "API sidecar", action: objectType === "case" ? "Case captured" : "Knowledge proposed", targetId: id, targetTitle: String(input.title), timestamp, previousState: "No record", newState: objectType === "case" ? "Captured" : "Pending review", consequence: "Retrieval did not change because no knowledge was approved." };
+  const next: AtlasState = { ...loaded, nodes: [...nodesFor(loaded), node], cases: canonicalCase ? [canonicalCase, ...(Array.isArray(loaded.cases) ? loaded.cases : [])] : loaded.cases, evidence: canonicalEvidence ? [canonicalEvidence, ...(Array.isArray(loaded.evidence) ? loaded.evidence : [])] : loaded.evidence, knowledge: canonicalKnowledge ? [canonicalKnowledge, ...(Array.isArray(loaded.knowledge) ? loaded.knowledge : [])] : loaded.knowledge, activities: [activity, ...(Array.isArray(loaded.activities) ? loaded.activities : [])], externalReceipts: [...receipts, receipt] };
   await saveAtlasState(db, next, workspaceId || undefined);
   return { data: { created: true, candidate: node, receipt }, status: 201 };
 }
@@ -452,7 +536,11 @@ async function recordOutcome(db: D1Database, input: Record<string, unknown>, wor
   const receipt: ActionReceipt = { id: `RCP-${Date.now().toString(36).toUpperCase()}`, tool: "atlas_record_outcome", createdAt: new Date().toISOString(), idempotencyKey: key, checks: ["Target exists", "Outcome preserved as evidence event", "No score changed directly", "Promotion authority unchanged"], effect: "Attached reality evidence and opened human review", targetId };
   const outcomeHistory = { id: `history-${Date.now().toString(36)}`, date: "Now", label: "Outcome recorded", detail: `${String(input.result)}. ${String(input.reasoningAssessment)}` };
   const nextNodes = nodesFor(loaded).map((node) => node.id === targetId ? { ...node, status: "challenged", history: [outcomeHistory, ...(Array.isArray(node.history) ? node.history : [])], lineage: [...(node.lineage || []), "Outcome recorded through Campus Atlas sidecar"] } : node);
-  const next: AtlasState = { ...loaded, nodes: nextNodes, reviews: [...(Array.isArray(loaded.reviews) ? loaded.reviews : []), review], externalReceipts: [...receipts, receipt] };
+  const timestamp = new Date().toISOString();
+  const evidenceRecord = { id: `evidence-${Date.now().toString(36)}`, project: target.project, caseId: targetId, recordType: "Outcome", content: String(input.result), source: String(input.source), fidelity: "Exact", confidence: Number(input.confidence || 80), role: "Contradicts", creator: "API sidecar", timestamp, approvalState: "Approved", retrievalEligible: true, metadata: { "Outcome status": "Recorded" } };
+  const nextCases = Array.isArray(loaded.cases) ? loaded.cases.map((item) => String(item.id) === targetId ? { ...item, outcome: String(input.result), outcomeState: "Recorded", state: "Needs audit", governanceState: "Challenged" } : item) : loaded.cases;
+  const activity = { id: `activity-${Date.now().toString(36)}`, project: target.project, actor: "API sidecar", action: "Outcome recorded", targetId, targetTitle: target.title, timestamp, previousState: "Needs outcome", newState: "Needs audit", consequence: "Reality evidence was attached; retrieval authority did not change." };
+  const next: AtlasState = { ...loaded, nodes: nextNodes, cases: nextCases, evidence: [evidenceRecord, ...(Array.isArray(loaded.evidence) ? loaded.evidence : [])], reviews: [...(Array.isArray(loaded.reviews) ? loaded.reviews : []), review], activities: [activity, ...(Array.isArray(loaded.activities) ? loaded.activities : [])], externalReceipts: [...receipts, receipt] };
   await saveAtlasState(db, next, workspaceId || undefined);
   return { data: { created: true, review, receipt }, status: 201 };
 }
@@ -486,6 +574,9 @@ async function submitCaseEvent(db: D1Database, input: Record<string, unknown>, w
   let nextNodes = nodesFor(loaded);
   let nextReviews = reviews;
   let nextConnections = connections;
+  let nextEvidence = Array.isArray(loaded.evidence) ? loaded.evidence : [];
+  let nextKnowledge = Array.isArray(loaded.knowledge) ? loaded.knowledge : [];
+  let nextCases = Array.isArray(loaded.cases) ? loaded.cases : [];
   let proposal: AtlasNode | null = null;
   if (eventType === "proposed_learning") {
     proposal = {
@@ -507,12 +598,17 @@ async function submitCaseEvent(db: D1Database, input: Record<string, unknown>, w
     };
     nextNodes = [...nextNodes, proposal];
     nextConnections = [...connections, { id: `edge-${now}`, from: targetId, to: proposal.id, type: "Derived From", reason: String(input.connectionReason || "The proposed learning was reconstructed from this audited Case."), approved: false, inferred: true }];
+    nextKnowledge = [{ id: proposal.id, project: target.project, type: "Principle", title: proposal.title, content: proposal.summary, status: "Pending", scope: String(input.scope || target.project), confidence, humanApproval: null, supportingCaseIds: [targetId], evidenceIds: [], challengingEvidenceIds: [], revisionHistory: ["Proposed through the API sidecar."], retrievalHistory: [], retrievalEligible: false, metadata: { Origin: "API-created", "Governance state": "Pending" } }, ...nextKnowledge];
+    nextReviews = [{ id: `review-${now}`, project: target.project, type: "Proposed principle", title: proposal.title, proposal: proposal.summary, why: String(input.connectionReason || "Proposed from an API-submitted case event."), sourceCaseId: targetId, supportEvidenceIds: [], challengeEvidenceIds: [], affectedKnowledgeId: proposal.id, blueprintEffect: "None unless separately authorized.", confidence, retrievalEffect: "No effect until human approval.", crossProjectConsequence: "None.", status: "Pending" }, ...nextReviews];
+    nextCases = nextCases.map((item) => String(item.id) === targetId ? { ...item, state: "Awaiting review", governanceState: "Pending", proposedKnowledgeId: proposal?.id } : item);
   } else {
     const action = eventType === "correction" ? "Revise" : String(input.effect || "support") === "challenge" ? "Challenge" : "Reinforce";
     nextReviews = [...reviews, { id: `event-${now}`, nodeId: targetId, action, rationale: String(input.content), evidence: String(input.title || eventType), source: String(input.source), strength: String(input.strength || "Moderate"), scope: String(input.scope || "This Case"), confidence, project: target.project, relatedNodeId: targetId, createdAt: new Date().toISOString(), eventType }];
     nextNodes = nextNodes.map((node) => node.id === targetId ? { ...node, history: [{ id: `history-${now}`, date: "Now", label: eventType === "correction" ? "Correction proposed" : "Evidence added", detail: String(input.content) }, ...(Array.isArray(node.history) ? node.history : [])] } : node);
+    nextEvidence = [{ id: `evidence-${now}`, project: target.project, caseId: targetId, recordType: eventType === "correction" ? "Correction" : "Evidence", content: String(input.content), source: String(input.source), fidelity: "Exact", confidence, role: eventType === "correction" ? "Refines" : String(input.effect || "support") === "challenge" ? "Challenges" : "Supports", creator: "API sidecar", timestamp: new Date().toISOString(), approvalState: eventType === "correction" ? "Approved" : "Pending", retrievalEligible: eventType === "correction", metadata: { Origin: "API-created" } }, ...nextEvidence];
   }
-  const next: AtlasState = { ...loaded, nodes: nextNodes, reviews: nextReviews, connections: nextConnections, externalReceipts: [...receipts, receipt] };
+  const activity = { id: `activity-${now}`, project: target.project, actor: "API sidecar", action: eventType === "proposed_learning" ? "Principle proposed" : eventType === "correction" ? "Correction added" : "Evidence added", targetId, targetTitle: target.title, timestamp: new Date().toISOString(), previousState: "Case record", newState: eventType === "proposed_learning" ? "Awaiting review" : "Evidence updated", consequence: "No retrieval authority was granted automatically." };
+  const next: AtlasState = { ...loaded, nodes: nextNodes, cases: nextCases, evidence: nextEvidence, knowledge: nextKnowledge, reviews: nextReviews, connections: nextConnections, activities: [activity, ...(Array.isArray(loaded.activities) ? loaded.activities : [])], externalReceipts: [...receipts, receipt] };
   await saveAtlasState(db, next, workspaceId || undefined);
   return { data: { created: true, eventType, proposal, receipt }, status: 201 };
 }
@@ -522,7 +618,7 @@ const tools = [
     name: "atlas_build_context_packet",
     title: "Build Context Packet",
     description: "Assemble the smallest useful, inspectable context from one Campus Atlas project for a new ChatGPT task.",
-    inputSchema: { type: "object", properties: { task: { type: "string", description: "The specific task or question ChatGPT is working on." }, project: { type: "string", description: "The Campus Atlas project, such as Sports Engine." }, localContext: { type: "string", description: "Optional temporary facts or constraints for this task only." }, workspaceId: { type: "string", description: "Optional demo workspace key shown in Campus Atlas so ChatGPT reads the same evolving cases as the browser." } }, required: ["task", "project"], additionalProperties: false },
+    inputSchema: { type: "object", properties: { task: { type: "string", description: "The specific task or question ChatGPT is working on." }, project: { type: "string", description: "The active Campus Atlas project, such as Sports Engine." }, localContext: { type: "string", description: "Optional temporary facts for this task only." }, constraints: { type: "string", description: "Optional caller constraints applied to the compiled packet." }, tokenBudget: { type: "number", minimum: 250, maximum: 2500, description: "Approximate maximum token budget for the packet." }, retrievalScope: { type: "string", enum: ["project", "transfers", "campus"], description: "Current project only, project plus approved transfers, or deliberate Campus exploration." }, workspaceId: { type: "string", description: "Optional demo workspace key shown in Campus Atlas so ChatGPT reads the same evolving cases as the browser." } }, required: ["task", "project"], additionalProperties: false },
     annotations: { readOnlyHint: true, openWorldHint: false, destructiveHint: false },
   },
   {
@@ -579,7 +675,7 @@ async function executeTool(name: string, input: Record<string, unknown>, request
     if (!publicDemo || workspaceId) await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) }, workspaceId || undefined);
     return { data: packet, status: 200 };
   }
-  if (name === "atlas_get_project_blueprint") return { data: blueprintFor(String(input.project || "")), status: 200 };
+  if (name === "atlas_get_project_blueprint") return { data: blueprintFor(String(input.project || ""), state), status: 200 };
   if (name === "atlas_retrieve_precedents") return { data: retrievePrecedents(state, input), status: 200 };
   if (name === "atlas_get_receipt") {
     const receipt = (state.externalReceipts || []).find((item) => item.id === String(input.receiptId));
@@ -596,7 +692,7 @@ async function executeTool(name: string, input: Record<string, unknown>, request
 function openApi(origin: string) {
   return {
     openapi: "3.1.0",
-    info: { title: "Campus Atlas Actions", version: "4.5.0", description: "Governed context retrieval and candidate capture for ChatGPT. Browser and sidecar share one scoped workspace; writes never grant promotion authority." },
+    info: { title: "Campus Atlas Actions", version: "4.6.0", description: "Project-scoped governed context retrieval and proposed writes for ChatGPT. Browser and sidecar share one canonical workspace; models never grant their own promotion authority." },
     servers: [{ url: origin }],
     paths: {
       "/api/context": { post: { operationId: "buildContextPacket", summary: "Build the smallest useful context packet", requestBody: { required: true, content: { "application/json": { schema: tools[0].inputSchema } } }, responses: { "200": { description: "Inspectable context packet" } } } },
@@ -616,7 +712,7 @@ export async function handleAtlasActions(request: Request, env: ActionEnv) {
 
   if (url.pathname === "/openapi.json" || url.pathname === "/.well-known/openapi.json") return json(openApi(url.origin));
   if (url.pathname === "/api/security" && request.method === "GET") return json(securityStatus(env));
-  if (url.pathname === "/privacy") return textResponse("<!doctype html><html><head><title>Campus Atlas Privacy</title><meta name=viewport content='width=device-width,initial-scale=1'><style>body{font:16px/1.6 system-ui;max-width:760px;margin:64px auto;padding:0 24px;color:#172033}h1{font-size:34px}</style></head><body><h1>Campus Atlas privacy</h1><p>In public demo mode, each browser receives an opaque demonstration workspace key. Interactive changes are stored in a session-scoped demo record so the browser and context API can inspect the same evolving cases. That record is separate from the private Campus Atlas workspace.</p><p>Anyone holding a demo workspace key may be able to retrieve that demonstration state, so do not submit secrets, payment data, or sensitive medical information. Temporary Local Context stays attached to its packet unless explicitly captured.</p><p>External candidate and outcome writes require authorization and never promote knowledge. Human approval inside Campus Atlas remains the only promotion authority.</p></body></html>", 200, "text/html; charset=utf-8");
+  if (url.pathname === "/privacy") return textResponse("<!doctype html><html><head><title>Campus Atlas Privacy</title><meta name=viewport content='width=device-width,initial-scale=1'><style>body{font:16px/1.6 system-ui;max-width:760px;margin:64px auto;padding:0 24px;color:#172033}h1{font-size:34px}</style></head><body><h1>Campus Atlas privacy</h1><p>In public demo mode, each browser receives an opaque demonstration workspace key. Interactive changes are stored in a session-scoped demo record so the browser and context API inspect the same evolving project-scoped cases. That record is separate from the private Campus Atlas workspace.</p><p>Anyone holding a demo workspace key may be able to retrieve that demonstration state, so do not submit secrets, payment data, or sensitive medical information. Temporary Local Context stays attached to its packet unless explicitly captured.</p><p>External case, evidence, correction, and outcome writes require authorization and never promote knowledge. Human approval inside Campus Atlas remains the only promotion authority.</p></body></html>", 200, "text/html; charset=utf-8");
 
   if (url.pathname === "/api/context" && request.method === "POST") {
     const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
@@ -628,7 +724,12 @@ export async function handleAtlasActions(request: Request, env: ActionEnv) {
     if (!publicDemo || workspaceId) await saveAtlasState(env.DB, { ...state, contextPackets: [...(Array.isArray(state.contextPackets) ? state.contextPackets : []), packet].slice(-25) }, workspaceId || undefined);
     return json(packet);
   }
-  if (url.pathname === "/api/blueprint" && request.method === "GET") return json(blueprintFor(url.searchParams.get("project") || ""));
+  if (url.pathname === "/api/blueprint" && request.method === "GET") {
+    const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
+    const input = { workspaceId: url.searchParams.get("workspaceId") || "" };
+    const workspaceId = workspaceFor(request, input, publicDemo);
+    return json(blueprintFor(url.searchParams.get("project") || "", await stateFor(env.DB, publicDemo, workspaceId)));
+  }
   if (url.pathname === "/api/precedents" && request.method === "POST") {
     const input = await request.json() as Record<string, unknown>;
     const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
@@ -676,7 +777,7 @@ export async function handleAtlasActions(request: Request, env: ActionEnv) {
   if (rpc.method?.startsWith("notifications/")) return new Response(null, { status: 202, headers: { "access-control-allow-origin": "*" } });
   const ok = (result: unknown) => json({ jsonrpc: "2.0", id: rpc.id ?? null, result });
   const fail = (code: number, message: string) => json({ jsonrpc: "2.0", id: rpc.id ?? null, error: { code, message } });
-  if (rpc.method === "initialize") return ok({ protocolVersion: String((rpc.params as { protocolVersion?: string } | undefined)?.protocolVersion || "2025-06-18"), capabilities: { tools: { listChanged: false } }, serverInfo: { name: "Campus Atlas", version: "4.5.0" } });
+  if (rpc.method === "initialize") return ok({ protocolVersion: String((rpc.params as { protocolVersion?: string } | undefined)?.protocolVersion || "2025-06-18"), capabilities: { tools: { listChanged: false } }, serverInfo: { name: "Campus Atlas", version: "4.6.0" } });
   if (rpc.method === "tools/list") return ok({ tools });
   if (rpc.method === "tools/call") {
     const params = (rpc.params || {}) as { name?: string; arguments?: Record<string, unknown> };
