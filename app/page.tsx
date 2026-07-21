@@ -8,7 +8,7 @@ type PromotionLevel = "Observation" | "Candidate Pattern" | "Validated Principle
 type ReviewAction = "Reinforce" | "Challenge" | "Revise" | "Narrow Scope" | "Supersede" | "Merge" | "Retire";
 type EdgeType = "Supports" | "Challenges" | "Revises" | "Applies To" | "Derived From" | "Shares Principle With" | "Supersedes" | "Constrained By";
 type GraphView = "connections" | "lineage" | "challenges" | "influence";
-type MobileSurface = "ask" | "projects" | "atlas" | "review";
+type MobileSurface = "home" | "ask" | "projects" | "atlas" | "review";
 type CaptureAction = "thesis" | "outcome" | "postmortem" | "correction" | "evidence" | "packet";
 type SportsWorkspaceView = "cases" | "knowledge" | "blueprint";
 type LocalKind = "Objective" | "Temporary fact" | "Constraint" | "Assumption" | "Exclusion" | "Time horizon" | "Current condition" | "User instruction" | "Missing information";
@@ -56,16 +56,19 @@ type HandoffPacket = {
   excluded: Array<{ id: string; title: string; whyExcluded: string }>;
   budget: { used: number; limit: number; estimatedTokens: number };
   compiledPrompt: string;
-  receipt: { id: string; tool: string; proposedBy: string; createdAt: string; checks: string[]; humanApprovalRequired: boolean };
+  approvedPrinciples?: Array<{ id: string; title: string; summary: string; whyIncluded: string }>;
+  supportingCases?: Array<{ id: string; title: string; summary: string; whyIncluded: string }>;
+  contextPacket?: string;
+  receipt: { id: string; tool: string; proposedBy: string; createdAt: string; checks: string[]; humanApprovalRequired: boolean; inclusions?: Array<{ id: string; reason: string }>; exclusions?: Array<{ id: string; reason: string }> };
 };
 
 const projects: Project[] = [
   { key: "hq", label: "Headquarters", short: "HQ", color: "#a78bfa", rooms: 2, description: "Campus governance and promotion", capabilityCount: 1 },
   { key: "sports", label: "Sports Engine", short: "SE", color: "#4d7cfe", rooms: 4, description: "Research, pricing, and calibration", capabilityCount: 7 },
-  { key: "training", label: "Health + Training", short: "HT", color: "#27d4c7", rooms: 3, description: "Load, recovery, and performance", capabilityCount: 2 },
+  { key: "training", label: "Hockey Development", short: "HD", color: "#27d4c7", rooms: 3, description: "Game transfer, recovery, and performance", capabilityCount: 2 },
   { key: "lessons", label: "Lessons Division", short: "LD", color: "#f4b860", rooms: 3, description: "Learning paths and reconstruction", capabilityCount: 2 },
   { key: "human", label: "Human Systems Lab", short: "HS", color: "#f58aa8", rooms: 2, description: "Patterns, experiments, and updates", capabilityCount: 1 },
-  { key: "finance", label: "Finance", short: "FI", color: "#77d68b", rooms: 2, description: "Decisions, assumptions, and outcomes", capabilityCount: 1 },
+  { key: "finance", label: "Archive", short: "AR", color: "#77d68b", rooms: 2, description: "Earlier governed project records", capabilityCount: 1 },
 ];
 
 const levels: PromotionLevel[] = ["Observation", "Candidate Pattern", "Validated Principle", "Whiteboard Method", "Core Lens"];
@@ -173,7 +176,7 @@ const sportsCapabilities = [
   { name: "Explainable precedent retrieval", rule: "Return why each case is relevant", evidence: "Live packet with typed paths and exclusions", tested: "Heavy-favorite defensive-wall query", limit: "Seeded corpus", next: "Five independent case families" },
   { name: "Outcome post-mortems", rule: "Grade outcome and process separately", evidence: "England–Ghana reality-linked case", tested: "England 0–0 Ghana", limit: "Manual outcome entry", next: "Three repeated closed loops" },
   { name: "Confidence calibration", rule: "Scores derive from evidence events", evidence: "Support/challenge/revision ledger", tested: "Knowledge Review", limit: "Early calibration", next: "Brier-style history" },
-  { name: "Reusable principle promotion", rule: "Human approval after lineage review", evidence: "England–Ghana + Cape Verde evidence path", tested: "V4.3 promotion loop", limit: "One mature proof", next: "Independent cross-case confirmation" },
+  { name: "Reusable principle promotion", rule: "Human approval after lineage review", evidence: "England–Ghana + Cape Verde evidence path", tested: "V4.5 promotion loop", limit: "One mature proof", next: "Independent cross-case confirmation" },
 ];
 
 export default function Home() {
@@ -210,14 +213,15 @@ export default function Home() {
   const [saveStatus, setSaveStatus] = useState<"loading" | "saved" | "saving" | "error">("loading");
   const [persistenceMode, setPersistenceMode] = useState<"hosted" | "demo">("hosted");
   const [workspaceId, setWorkspaceId] = useState("");
-  const [handoffTask, setHandoffTask] = useState("Research deGrom over 6.5 strikeouts without repeating past innings assumptions.");
+  const [handoffTask, setHandoffTask] = useState("How should Sports Engine evaluate a heavy favorite against a possible defensive wall?");
   const [handoffProject, setHandoffProject] = useState("Sports Engine");
   const [handoffLocal, setHandoffLocal] = useState("");
   const [handoffResult, setHandoffResult] = useState<HandoffPacket | null>(null);
   const [handoffHistory, setHandoffHistory] = useState<HandoffPacket[]>([]);
   const [handoffStatus, setHandoffStatus] = useState<"idle" | "building" | "ready" | "error">("idle");
   const [manualCopyOpen, setManualCopyOpen] = useState(false);
-  const [mobileSurface, setMobileSurface] = useState<MobileSurface>("ask");
+  const [proofBaseline, setProofBaseline] = useState<HandoffPacket | null>(null);
+  const [mobileSurface, setMobileSurface] = useState<MobileSurface>("home");
 
   useEffect(() => {
     let active = true;
@@ -243,6 +247,7 @@ export default function Home() {
         setHandoffHistory(restoredPackets);
         setHandoffResult(restoredPackets[restoredPackets.length - 1]);
       }
+      if (data.proofBaseline?.packetId) setProofBaseline(data.proofBaseline as HandoffPacket);
     }).finally(() => { if (active) setHydrated(true); });
     return () => { active = false; };
   }, []);
@@ -251,13 +256,13 @@ export default function Home() {
     if (!hydrated) return;
     const timer = window.setTimeout(() => {
       setSaveStatus("saving");
-      const state = { schemaVersion: 43, workspaceId, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts, contextPackets: handoffHistory.slice(-5) };
+      const state = { schemaVersion: 45, workspaceId, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts, contextPackets: handoffHistory.slice(-5), proofBaseline };
       void fetch("/api/state", { method: "POST", headers: { "content-type": "application/json", ...(workspaceId ? { "x-atlas-workspace": workspaceId } : {}) }, body: JSON.stringify(state) })
         .then(async (response) => { if (!response.ok) throw new Error("save failed"); const result = await response.json(); if (typeof result.workspaceId === "string") setWorkspaceId(result.workspaceId); setSaveStatus("saved"); })
         .catch(() => setSaveStatus("error"));
     }, 450);
     return () => window.clearTimeout(timer);
-  }, [hydrated, persistenceMode, workspaceId, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts, handoffHistory]);
+  }, [hydrated, persistenceMode, workspaceId, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts, handoffHistory, proofBaseline]);
 
   const selected = nodes.find((node) => node.id === selectedId) ?? nodes[0];
   const selectedConfidence = confidenceFor(selected.id, reviews);
@@ -297,7 +302,7 @@ export default function Home() {
   function openPacket(event?: FormEvent) { event?.preventDefault(); setHandoffTask(query || handoffTask); focusSurface("ask", "chatgpt-handoff"); }
 
   function currentWorkspaceState() {
-    return { schemaVersion: 43, workspaceId, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts, contextPackets: handoffHistory.slice(-5) };
+    return { schemaVersion: 45, workspaceId, nodes, reviews, connections, packet, workspaceName, exampleMode, aiReceipts, contextPackets: handoffHistory.slice(-5), proofBaseline };
   }
 
   async function syncWorkspaceState() {
@@ -371,14 +376,34 @@ export default function Home() {
     setReviewOpen(false); setReviewPreview(null); flash("Review event preserved · ledger, history, and connection updated");
   }
 
-  function approvePromotion(node: KnowledgeNode) {
+  async function approvePromotion(node: KnowledgeNode) {
+    if (node.id === "pattern-format" && node.status !== "approved") {
+      setHandoffStatus("building");
+      try {
+        const syncedWorkspaceId = await syncWorkspaceState();
+        const task = "How should Sports Engine evaluate a heavy favorite against a possible defensive wall?";
+        const response = await fetch("/api/context", { method: "POST", headers: { "content-type": "application/json", ...(syncedWorkspaceId ? { "x-atlas-workspace": syncedWorkspaceId } : {}) }, body: JSON.stringify({ task, project: "Sports Engine", workspaceId: syncedWorkspaceId }) });
+        if (response.ok) {
+          const baseline = await response.json() as HandoffPacket;
+          setProofBaseline(baseline);
+          setHandoffHistory((current) => [...current, baseline].slice(-5));
+          setHandoffTask(task);
+          setHandoffProject("Sports Engine");
+          setHandoffResult(null);
+        }
+      } catch {
+        // Promotion remains available even if the optional proof snapshot cannot be captured.
+      } finally {
+        setHandoffStatus("idle");
+      }
+    }
     const index = levels.indexOf(node.level); const next = levels[Math.min(levels.length - 1, index + 1)];
     const approvedProposals = Object.entries(proposalStates).filter(([, state]) => state === "approved");
     const proposalTargets = ["decision-england", "core-reality", "precedent-cape-verde"];
     const newEdges = approvedProposals.map(([id], idx) => ({ id: `promoted-${Date.now()}-${id}`, from: node.id, to: proposalTargets[idx] ?? "core-reality", type: proposalTypes[id], reason: "Connection approved during human promotion review.", approved: true } as Connection));
     setConnections((current) => [...current, ...newEdges]);
     setNodes((current) => current.map((item) => item.id === node.id ? { ...item, level: next, status: "approved", history: [{ id: `h-${Date.now()}`, date: "Now", label: `Promoted to ${next}`, detail: "Human approval recorded after lineage, evidence, counter-evidence, and connection review." }, ...item.history] } : item));
-    setPromotionOpen(false); flash(`Human approval recorded · promoted to ${next}`);
+    setPromotionOpen(false); flash(`Human approval recorded · ${node.id === "pattern-format" ? "Ask Atlas can now prove the retrieval change" : `promoted to ${next}`}`);
   }
 
   function openCapture(key: ProjectKey = project === "all" ? "sports" : project, action: CaptureAction = "thesis", targetId = "") {
@@ -453,22 +478,24 @@ export default function Home() {
   function resetDemo() {
     setNodes(initialNodes); setReviews(seedReviews); setConnections(initialConnections);
     setPacket({ id: "PKT-0042", question: "", local: [], excludedIds: ["principle-fast"] });
-    setAiReceipts([]); setHandoffHistory([]); setHandoffResult(null); setWorkspaceName("Amy Campus"); setExampleMode(true); setSelectedId("pattern-format"); setProject("all");
-    const resetState = { schemaVersion: 43, workspaceId, nodes: initialNodes, reviews: seedReviews, connections: initialConnections, packet: { id: "PKT-0042", question: "", local: [], excludedIds: ["principle-fast"] }, workspaceName: "Amy Campus", exampleMode: true, aiReceipts: [], contextPackets: [] };
+    setAiReceipts([]); setHandoffHistory([]); setHandoffResult(null); setProofBaseline(null); setWorkspaceName("Amy Campus"); setExampleMode(true); setSelectedId("pattern-format"); setProject("all");
+    const resetState = { schemaVersion: 45, workspaceId, nodes: initialNodes, reviews: seedReviews, connections: initialConnections, packet: { id: "PKT-0042", question: "", local: [], excludedIds: ["principle-fast"] }, workspaceName: "Amy Campus", exampleMode: true, aiReceipts: [], contextPackets: [], proofBaseline: null };
     void fetch("/api/state?replace=true", { method: "POST", headers: { "content-type": "application/json", ...(workspaceId ? { "x-atlas-workspace": workspaceId } : {}) }, body: JSON.stringify(resetState) });
     flash("Judge demo reset to its seeded starting state");
   }
 
-  if (sportsOpen) return <><SportsEngineV43
+  if (sportsOpen) return <><SportsEngineV45
     nodes={nodes}
     reviews={reviews}
     connections={connections}
     handoffResult={handoffResult}
     handoffHistory={handoffHistory}
+    proofBaseline={proofBaseline}
     handoffStatus={handoffStatus}
     workspaceId={workspaceId}
     lastCapture={captureReceipt}
     onBack={() => setSportsOpen(false)}
+    onAskAtlas={() => { setSportsOpen(false); setMobileSurface("ask"); window.setTimeout(() => document.getElementById("chatgpt-handoff")?.scrollIntoView({ behavior: "smooth", block: "start" }), 30); }}
     onCapture={(action, targetId = "") => openCapture("sports", action, targetId)}
     onBuildPacket={(task) => { setHandoffProject("Sports Engine"); setHandoffTask(task); void requestHandoff(task, "Sports Engine", ""); }}
     onInspectKnowledge={(nodeId) => { setSportsOpen(false); setSelectedId(nodeId); setProject("sports"); focusSurface("atlas", "atlas-workspace"); }}
@@ -478,34 +505,38 @@ export default function Home() {
 
   return (
     <main className={`app-shell mobile-${mobileSurface}`}>
+      <aside className="desktop-nav" aria-label="Campus Atlas workspace navigation"><button className="desktop-brand" onClick={() => focusSurface("home", "top")}><span>CA</span><strong>Campus Atlas</strong></button><nav><button className={mobileSurface === "home" ? "active" : ""} onClick={() => focusSurface("home", "top")}><span>⌂</span>Home</button><button className={mobileSurface === "projects" ? "active" : ""} onClick={() => focusSurface("projects", "projects")}><span>▦</span>Projects</button><button onClick={() => openCapture("sports", "thesis")}><span>＋</span>Capture</button><button className={mobileSurface === "review" ? "active" : ""} onClick={() => focusSurface("review", "promotion-queue")}><span>✓</span>Review</button><button className={mobileSurface === "ask" ? "active" : ""} onClick={() => focusSurface("ask", "chatgpt-handoff")}><span>✦</span>Ask Atlas</button></nav><div><span className="live-dot" />Sidecar live<small>UI + API share one governed state</small></div></aside>
       <header className="topbar">
-        <a className="brand" href="#top" onClick={() => setMobileSurface("ask")}><span className="brand-mark">CA</span><span><strong>Campus Atlas</strong><small>Connected reasoning for ChatGPT Projects</small></span></a>
-        <nav><button onClick={() => focusSurface("ask", "chatgpt-handoff")}>Ask Atlas</button><button onClick={() => focusSurface("review", "promotion-queue")}>Review Inbox</button><button onClick={() => focusSurface("atlas", "atlas-workspace")}>Explore Atlas</button><button onClick={() => openProject("sports")}>Sports Engine</button></nav>
+        <a className="brand" href="#top" onClick={() => setMobileSurface("home")}><span className="brand-mark">CA</span><span><strong>Campus Atlas</strong><small>Governed reasoning sidecar</small></span></a>
+        <nav><button onClick={() => focusSurface("home", "top")}>Home</button><button onClick={() => focusSurface("projects", "projects")}>Projects</button><button onClick={() => openCapture("sports", "thesis")}>Capture</button><button onClick={() => focusSurface("review", "promotion-queue")}>Review</button><button onClick={() => focusSurface("ask", "chatgpt-handoff")}>Ask Atlas</button></nav>
         <div className="topbar-actions"><span className={`save-state ${saveStatus}`}>{saveStatus === "saved" ? persistenceMode === "demo" ? "✓ Browser + API synced" : "✓ Saved" : saveStatus === "saving" ? "Syncing…" : saveStatus === "error" ? "Sync failed" : "Loading…"}</span><button className="primary-button" onClick={() => setCampusOpen(true)}>＋ Create your campus</button></div>
       </header>
 
       <nav className="mobile-dock" aria-label="Campus Atlas mobile workspace">
-        <button className={mobileSurface === "ask" ? "active" : ""} aria-pressed={mobileSurface === "ask"} onClick={() => focusSurface("ask", "top")}><span>✦</span>Ask</button>
+        <button className={mobileSurface === "home" ? "active" : ""} aria-pressed={mobileSurface === "home"} onClick={() => focusSurface("home", "top")}><span>⌂</span>Home</button>
         <button className={mobileSurface === "projects" ? "active" : ""} aria-pressed={mobileSurface === "projects"} onClick={() => focusSurface("projects", "projects")}><span>▦</span>Projects</button>
-        <button className={mobileSurface === "atlas" ? "active" : ""} aria-pressed={mobileSurface === "atlas"} onClick={() => focusSurface("atlas", "atlas-workspace")}><span>∞</span>Atlas</button>
+        <button onClick={() => openCapture("sports", "thesis")}><span>＋</span>Capture</button>
         <button className={mobileSurface === "review" ? "active" : ""} aria-pressed={mobileSurface === "review"} onClick={() => focusSurface("review", "promotion-queue")}><span>✓</span>Review</button>
+        <button className={mobileSurface === "ask" ? "active" : ""} aria-pressed={mobileSurface === "ask"} onClick={() => focusSurface("ask", "chatgpt-handoff")}><span>✦</span>Ask</button>
       </nav>
 
       <section className="product-intro" id="top">
-        <div><p className="eyebrow">Durable reasoning infrastructure</p><h1>Your ChatGPT Projects should<br /><em>build on each other.</em></h1><p>ChatGPT helps you think now. Campus Atlas helps your projects build on what happened before—governing which decisions, corrections, and principles deserve to affect what happens next.</p></div>
+        <div><p className="eyebrow">Proof before scale · Campus Atlas V4.5</p><h1>Turn experience into<br /><em>better future context.</em></h1><p>Campus Atlas is a governed reasoning sidecar for AI projects. Cases are audited against reality, people approve what was learned, and only earned knowledge can change what the model retrieves next.</p></div>
         <div className="intro-actions"><button className="primary-button large judge-cta" onClick={() => focusSurface("ask", "chatgpt-handoff")}>Ask Atlas →</button><button className="text-cta" onClick={() => setDemoOpen(true)}>See the Learning Loop</button><small>Simple in conversation. Inspectable underneath.</small></div>
       </section>
 
+      <section className="home-overview" aria-label="Amy Campus activity"><article className="continue-card"><span>Continue working</span><div className="project-emblem">SE</div><div><small>Flagship proof project</small><strong>Sports Engine</strong><p>Open the England/Ghana case and approve one reusable principle.</p></div><button className="primary-button" onClick={() => openProject("sports")}>Open case →</button></article><article><span>Pending review</span><strong>{nodes.find((node) => node.id === "pattern-format")?.status === "approved" ? "Review complete" : "Signal separation"}</strong><p>{nodes.find((node) => node.id === "pattern-format")?.status === "approved" ? "The principle now appears in Knowledge and matching packets." : "England/Ghana produced a proposed learning that still needs a human decision."}</p><button onClick={() => { setSelectedId("pattern-format"); setPromotionOpen(true); }}>{nodes.find((node) => node.id === "pattern-format")?.status === "approved" ? "Inspect approval →" : "Review principle →"}</button></article><article><span>Recent context packet</span><strong>{handoffResult?.packetId ?? "No packet yet"}</strong><p>{handoffResult ? `${handoffResult.budget.used} governed items · ~${handoffResult.budget.estimatedTokens} tokens` : "Ask Atlas to compile the smallest useful context."}</p><button onClick={() => focusSurface("ask", "chatgpt-handoff")}>{handoffResult ? "Inspect packet →" : "Ask Atlas →"}</button></article></section>
+
       <section className="handoff-section" id="chatgpt-handoff">
-        <div className="handoff-heading"><div><span className="example-chip">ChatGPT handoff · live V4.3 flow</span><h2>Ask normally. Atlas brings forward what your projects earned.</h2><p>Describe the next task. Campus Atlas loads the project blueprint, retrieves a small set of relevant precedents and corrections, and returns a concise handoff for ChatGPT.</p></div><div className="connector-state"><span className="live-dot" /><div><strong>Connector-ready</strong><small>6 governed tools · shared workspace key</small></div></div></div>
+        <div className="handoff-heading"><div><span className="example-chip">Ask Atlas · live V4.5 sidecar</span><h2>What are you working on?</h2><p>Ask normally. Atlas progressively loads the project Blueprint, approved principles, relevant Cases, active challenges, exclusions, and a receipt—then returns only the smallest useful packet.</p></div><div className="connector-state"><span className="live-dot" /><div><strong>API sidecar live</strong><small>Governed reads + proposed writes · shared state</small></div></div></div>
         <div className="handoff-grid">
           <form className="handoff-compose" onSubmit={buildHandoff}>
             <div className="compose-title"><span>01</span><div><strong>What are you working on?</strong><small>This should feel like starting a normal ChatGPT conversation.</small></div></div>
-            <label>Project<select value={handoffProject} onChange={(event) => setHandoffProject(event.target.value)}><option>Sports Engine</option><option>Health + Training</option><option>Lessons Division</option><option>Human Systems Lab</option><option>Finance</option></select></label>
+            <label>Project<select value={handoffProject} onChange={(event) => setHandoffProject(event.target.value)}><option>Sports Engine</option><option>Hockey Development</option><option>Lessons Division</option><option>Human Systems Lab</option><option>Headquarters</option></select></label>
             <label>Task<textarea rows={4} value={handoffTask} onChange={(event) => setHandoffTask(event.target.value)} placeholder="Ask the question you would normally ask ChatGPT…" /></label>
             <details className="local-context-control"><summary>＋ Add what matters right now <span>optional · temporary</span></summary><label>Local Context<textarea rows={3} value={handoffLocal} onChange={(event) => setHandoffLocal(event.target.value)} placeholder="Current conditions, constraints, exclusions, or user instructions…" /></label><small>This stays inside this packet. It will not enter durable knowledge automatically.</small></details>
             <div className="quick-prompts"><span>Try one</span><button type="button" onClick={() => setHandoffTask("Research deGrom over 6.5 strikeouts. Verify workload stability before estimating probability.")}>Strikeout prop</button><button type="button" onClick={() => setHandoffTask("Evaluate a heavy soccer favorite against a possible defensive wall without treating control, scoring, and market coverage as one signal.")}>Signal separation</button></div>
-            <button className="primary-button large wide" disabled={handoffStatus === "building" || handoffTask.trim().length < 8}>{handoffStatus === "building" ? "Building the smallest useful context…" : "Build ChatGPT handoff →"}</button>
+            <button className="primary-button large wide" disabled={handoffStatus === "building" || handoffTask.trim().length < 8}>{handoffStatus === "building" ? "Building the smallest useful context…" : "Build Context Packet →"}</button>
             {handoffStatus === "error" && <div className="inline-error">The packet could not be built. Your task is still here—try again.</div>}
           </form>
 
@@ -513,6 +544,7 @@ export default function Home() {
             {!handoffResult ? <><div className="output-placeholder"><span className="atlas-spark">✦</span><p className="eyebrow">What happens underneath</p><h3>One request. Three quiet steps.</h3></div><div className="handoff-steps"><article><span>1</span><div><strong>Load the blueprint</strong><p>Apply the rules and capabilities this project has earned.</p></div></article><article><span>2</span><div><strong>Retrieve with reasons</strong><p>Carry forward useful precedent, corrections, and active challenges.</p></div></article><article><span>3</span><div><strong>Compile the handoff</strong><p>Give ChatGPT only the smallest useful context—not the entire graph.</p></div></article></div><details className="connect-details"><summary>How this connects to ChatGPT <span>＋</span></summary><p>V4.3 exposes an HTTPS MCP endpoint at <code>/mcp</code> plus an OpenAPI fallback. Supply the demo <code>workspaceId</code> so ChatGPT reads the same evolving case ledger as the browser. Read tools retrieve context; authorized write tools create review candidates; promotion stays inside Atlas.</p></details></> : <><div className="output-ready"><div><span className="ready-check">✓</span><div><p>Ready for ChatGPT</p><h3>{handoffResult.packetId}</h3></div></div><span>{handoffResult.budget.used}/{handoffResult.budget.limit} items · ~{handoffResult.budget.estimatedTokens} tokens</span></div><div className="blueprint-loaded"><span>Blueprint loaded</span><strong>{handoffResult.blueprint.project} {handoffResult.blueprint.version}</strong><p>{handoffResult.blueprint.rules[0]}</p></div><div className="retrieval-results"><div className="result-section-title"><span>Retrieved durable knowledge</span><b>{handoffResult.durableKnowledge.length} with reasons</b></div>{handoffResult.durableKnowledge.slice(0, 3).map((item) => <details key={item.id}><summary><span>{item.usefulness}</span><div><strong>{item.title}</strong><small>{item.fidelity} · {item.authorityLevel} · {item.confidence}% source confidence</small></div><i>⌄</i></summary><p>{item.whyIncluded}</p><small>Path: {item.connectionPath.join(" → ")}</small></details>)}</div>{handoffResult.challenges.length > 0 && <div className="carried-challenge"><span>Challenge carried forward</span><strong>{handoffResult.challenges[0].title}</strong><p>{handoffResult.challenges[0].reason}</p></div>}<div className="handoff-actions"><button className="primary-button" onClick={copyHandoff}>Copy for ChatGPT</button><button className="ghost-button" onClick={() => setPacketOpen(true)}>Inspect packet anatomy</button><button className="text-cta" onClick={() => focusSurface("atlas", "atlas-workspace")}>Trace it in Atlas</button></div>{manualCopyOpen && <div className="manual-copy"><span>Select and copy this handoff</span><textarea readOnly rows={7} value={handoffResult.compiledPrompt} onFocus={(event) => event.currentTarget.select()} /></div>}<details className="work-receipt"><summary>AI Work Receipt <span>{handoffResult.receipt.checks.length} checks passed</span></summary>{handoffResult.receipt.checks.map((check) => <p key={check}>✓ {check}</p>)}<small>{handoffResult.receipt.tool} · {handoffResult.receipt.id}</small></details></>}
           </div>
         </div>
+        {handoffResult && proofBaseline && handoffResult.packetId !== proofBaseline.packetId && handoffResult.task === proofBaseline.task && <div className="handoff-proof"><div className="proof-heading"><div><span>Governed retrieval proof</span><h3>The same task changed after human approval.</h3></div><b>Before → Approval → After</b></div><PacketProof before={proofBaseline} after={handoffResult} /></div>}
       </section>
 
       <section className="home-loop" aria-label="Campus Atlas learning mechanism">
@@ -522,7 +554,7 @@ export default function Home() {
 
       <section className="demo-banner"><div><span className="example-chip">{persistenceMode === "demo" ? "Public demo · browser + API synced" : "Example workspace"}</span><strong>{workspaceName}</strong><p>{persistenceMode === "demo" ? "Your interactions persist in an isolated demonstration workspace shared by this browser and the Atlas sidecar. The private Campus Atlas workspace remains separate." : exampleMode ? "A polished campus showing how multiple projects connect—and how one project develops specialized capabilities." : "Your campus shell is ready. Amy Campus remains the reference example."}</p></div>{exampleMode ? <span className="explore-note">Explore the governed learning loop ↘</span> : <button onClick={() => { setWorkspaceName("Amy Campus"); setExampleMode(true); }}>Restore Amy Campus example</button>}</section>
 
-      <section className="project-strip" id="projects"><div className="strip-heading"><div><p>Projects inside this campus</p><h2>Each project keeps its own blueprint and capabilities.</h2></div><span>{projects.length} projects · 16 rooms</span></div><div className="project-cards">{projects.filter((item) => item.key !== "hq").map((item) => <button key={item.key} className={`project-card ${item.key === "sports" ? "featured" : ""}`} onClick={() => openProject(item.key)} style={{ "--project-color": item.color } as React.CSSProperties}><span className="project-card-icon">{item.short}</span><span><small>{item.rooms} rooms · {item.capabilityCount} capabilities</small><strong>{item.label}</strong><p>{item.description}</p></span><i>{item.key === "sports" ? "Open flagship example →" : "View in Atlas →"}</i></button>)}</div></section>
+      <section className="project-strip" id="projects"><div className="strip-heading"><div><p>Projects inside this campus</p><h2>Each project keeps its own Blueprint and earned capabilities.</h2></div><span>5 projects · one shared governance layer</span></div><div className="project-cards">{[projects[1], projects[2], projects[3], projects[4], projects[0]].map((item) => <button key={item.key} className={`project-card ${item.key === "sports" ? "featured" : ""}`} onClick={() => openProject(item.key)} style={{ "--project-color": item.color } as React.CSSProperties}><span className="project-card-icon">{item.short}</span><span><small>{item.key === "sports" ? "Flagship proof project" : `${item.rooms} rooms · ${item.capabilityCount} capabilities`}</small><strong>{item.label}</strong><p>{item.description}</p></span><i>{item.key === "sports" ? "Open England/Ghana proof →" : "View project lineage →"}</i></button>)}</div></section>
 
       <section className="workspace" id="atlas-workspace">
         <aside className="room-panel panel"><div className="panel-heading"><div><p>Workspace</p><h2>{workspaceName}</h2><small>{exampleMode ? "Example campus" : "Personal campus"}</small></div><span className="castle">⌂</span></div><button className={`room-button ${project === "all" ? "active" : ""}`} onClick={() => setProject("all")}><span className="room-icon all">∞</span><span><strong>All projects</strong><small>Cross-project view</small></span><b>{nodes.length}</b></button><div className="room-list">{projects.map((item) => <button key={item.key} className={`room-button ${project === item.key ? "active" : ""}`} onClick={() => item.key === "sports" ? openProject(item.key) : setProject(item.key)}><span className="room-icon" style={{ "--room-color": item.color } as React.CSSProperties}>{item.short}</span><span><strong>{item.label}</strong><small>{item.rooms} rooms</small></span><b>{nodes.filter((node) => node.project === item.key).length}</b></button>)}</div><div className="governance-note"><span>Authority comes from lineage</span><p>Scores summarize preserved events. They never promote knowledge by themselves.</p></div></aside>
@@ -708,21 +740,23 @@ function caseIsComplete(node: KnowledgeNode) {
 function caseStage(node: KnowledgeNode) {
   const hasOutcome = caseIsComplete(node);
   const hasPostmortem = node.history.some((item) => /post-mortem|revision|revise/i.test(`${item.label} ${item.detail}`));
-  if (!hasOutcome) return { key: "active", label: "Active research", tone: "active" };
-  if (!hasPostmortem) return { key: "audit", label: "Needs post-mortem", tone: "audit" };
-  return { key: "complete", label: "Completed", tone: "complete" };
+  if (!hasOutcome) return { key: "active", label: "Needs Evidence", tone: "active" };
+  if (!hasPostmortem) return { key: "audit", label: "Ready to Audit", tone: "audit" };
+  return { key: "complete", label: "Closed", tone: "complete" };
 }
 
-function SportsEngineV43({ nodes, reviews, connections, handoffResult, handoffHistory, handoffStatus, workspaceId, lastCapture, onBack, onCapture, onBuildPacket, onInspectKnowledge, onPromote, toast }: {
+function SportsEngineV45({ nodes, reviews, connections, handoffResult, handoffHistory, proofBaseline, handoffStatus, workspaceId, lastCapture, onBack, onAskAtlas, onCapture, onBuildPacket, onInspectKnowledge, onPromote, toast }: {
   nodes: KnowledgeNode[];
   reviews: ReviewEvent[];
   connections: Connection[];
   handoffResult: HandoffPacket | null;
   handoffHistory: HandoffPacket[];
+  proofBaseline: HandoffPacket | null;
   handoffStatus: "idle" | "building" | "ready" | "error";
   workspaceId: string;
   lastCapture: CaptureReceiptState | null;
   onBack: () => void;
+  onAskAtlas: () => void;
   onCapture: (action: CaptureAction, targetId?: string) => void;
   onBuildPacket: (task: string) => void;
   onInspectKnowledge: (nodeId: string) => void;
@@ -730,7 +764,8 @@ function SportsEngineV43({ nodes, reviews, connections, handoffResult, handoffHi
   toast: string;
 }) {
   const cases = nodes.filter((node) => node.project === "sports" && node.type === "decision").sort((a, b) => Number(b.history[0]?.date === "Now") - Number(a.history[0]?.date === "Now"));
-  const knowledge = nodes.filter((node) => node.project === "sports" && node.type !== "decision" && node.status !== "retired").sort((a, b) => b.reconstructionValue - a.reconstructionValue);
+  const allSportsKnowledge = nodes.filter((node) => node.project === "sports" && node.type !== "decision" && node.status !== "retired").sort((a, b) => b.reconstructionValue - a.reconstructionValue);
+  const knowledge = allSportsKnowledge.filter((node) => node.status === "approved" && (node.type === "principle" || node.type === "pattern"));
   const [view, setView] = useState<SportsWorkspaceView>("cases");
   const [selectedCaseId, setSelectedCaseId] = useState(cases[0]?.id ?? "decision-england");
   const [selectedKnowledgeId, setSelectedKnowledgeId] = useState(knowledge[0]?.id ?? "pattern-format");
@@ -748,20 +783,21 @@ function SportsEngineV43({ nodes, reviews, connections, handoffResult, handoffHi
 
   const selectedCase = cases.find((node) => node.id === selectedCaseId) ?? cases[0];
   const selectedKnowledge = knowledge.find((node) => node.id === selectedKnowledgeId) ?? knowledge[0];
+  const signalPrinciple = nodes.find((node) => node.id === "pattern-format");
   const completedCases = cases.filter(caseIsComplete);
   const activeCases = cases.filter((node) => !caseIsComplete(node));
   const promotedKnowledge = knowledge.filter((node) => node.status === "approved" && levels.indexOf(node.level) >= levels.indexOf("Validated Principle"));
-  const candidateKnowledge = knowledge.filter((node) => node.status === "proposed" || node.level === "Candidate Pattern");
+  const candidateKnowledge = allSportsKnowledge.filter((node) => node.status === "proposed" || (node.level === "Candidate Pattern" && node.status !== "approved"));
   const recentWork = [...nodes.filter((node) => node.project === "sports")]
     .flatMap((node) => node.history.slice(0, 2).map((item) => ({ ...item, node })))
     .sort((a, b) => Number(b.date === "Now") - Number(a.date === "Now"))
     .slice(0, 6);
   const caseGroups = [
-    { key: "active", label: "Active research", items: cases.filter((item) => caseStage(item).key === "active") },
-    { key: "audit", label: "Needs post-mortem", items: cases.filter((item) => caseStage(item).key === "audit") },
-    { key: "complete", label: "Completed", items: cases.filter((item) => caseStage(item).key === "complete") },
+    { key: "active", label: "Needs Evidence", items: cases.filter((item) => caseStage(item).key === "active") },
+    { key: "audit", label: "Ready to Audit", items: cases.filter((item) => caseStage(item).key === "audit") },
+    { key: "complete", label: "Closed", items: cases.filter((item) => caseStage(item).key === "complete") },
   ].filter((group) => group.items.length);
-  const previousPacket = handoffHistory.length > 1 ? handoffHistory[handoffHistory.length - 2] : null;
+  const previousPacket = proofBaseline ?? (handoffHistory.length > 1 ? handoffHistory[handoffHistory.length - 2] : null);
   const previousIds = new Set(previousPacket?.durableKnowledge.map((item) => item.id) ?? []);
   const newlyRetrieved = handoffResult?.durableKnowledge.filter((item) => !previousIds.has(item.id)) ?? [];
 
@@ -771,27 +807,27 @@ function SportsEngineV43({ nodes, reviews, connections, handoffResult, handoffHi
     <header className="sports-workspace-topbar">
       <button className="brand brand-button" onClick={onBack}><span className="brand-mark">CA</span><span><strong>Campus Atlas</strong><small>Amy Campus · demonstration workspace</small></span></button>
       <div className="sports-workspace-location"><span>Projects</span><i>›</i><strong>Sports Engine</strong></div>
-      <div className="sports-workspace-actions"><span className="workspace-live"><i /> Browser + sidecar synced</span><button className="ghost-button" onClick={onBack}>← Amy Campus</button></div>
+      <div className="sports-workspace-actions"><span className="workspace-live"><i /> UI + API sidecar synced</span><button className="ghost-button" onClick={onAskAtlas}>✦ Ask Atlas</button><button className="ghost-button" onClick={onBack}>← Amy Campus</button></div>
     </header>
 
     <section className="sports-workspace-hero">
       <div className="sports-project-identity"><span className="project-emblem">SE</span><div><p>Flagship project · Sports analytics</p><h1>Sports Engine</h1><span>Research decisions, test them against reality, and let earned lessons change what comes next.</span></div></div>
-      <div className="sports-hero-actions"><button className="ghost-button" onClick={() => { setView("cases"); window.setTimeout(() => document.getElementById("case-retrieval-test")?.scrollIntoView({ behavior: "smooth", block: "center" }), 20); }}>Test retrieval</button><button className="primary-button sports-new-case" onClick={() => onCapture("thesis")}><span>＋</span> New case</button></div>
+      <div className="sports-hero-actions"><button className="ghost-button" onClick={onAskAtlas}>Ask Atlas</button><button className="ghost-button" onClick={() => { setView("cases"); window.setTimeout(() => document.getElementById("case-retrieval-test")?.scrollIntoView({ behavior: "smooth", block: "center" }), 20); }}>Test retrieval</button><button className="primary-button sports-new-case" onClick={() => onCapture("thesis")}><span>＋</span> New case</button></div>
     </section>
 
     <nav className="sports-workspace-tabs" aria-label="Sports Engine workspace areas">
       {([
         ["cases", "Cases", `${activeCases.length} active · ${completedCases.length} completed`],
-        ["knowledge", "Knowledge", `${knowledge.length} evidence objects`],
+        ["knowledge", "Knowledge", `${knowledge.length} approved principles`],
         ["blueprint", "Blueprint", `${promotedKnowledge.length} promoted principles`],
       ] as [SportsWorkspaceView, string, string][]).map(([key, label, meta]) => <button key={key} className={view === key ? "active" : ""} onClick={() => setView(key)}><strong>{label}</strong><small>{meta}</small></button>)}
     </nav>
 
     <section className="sports-live-summary" aria-label="Live Sports Engine summary">
       <button onClick={() => setView("cases")}><span>Audited cases</span><strong>{cases.length}</strong><small>Open the actual case records →</small></button>
-      <button onClick={() => setView("knowledge")}><span>Knowledge objects</span><strong>{knowledge.length}</strong><small>Evidence, corrections, precedents →</small></button>
+      <button onClick={() => setView("knowledge")}><span>Approved principles</span><strong>{knowledge.length}</strong><small>Earned understanding only →</small></button>
       <button onClick={() => setView("blueprint")}><span>Earned capabilities</span><strong>{sportsCapabilities.length}</strong><small>Inspect the evidence ledger →</small></button>
-      <button onClick={() => { setView("knowledge"); setSelectedKnowledgeId("pattern-format"); }}><span>Promotion candidates</span><strong>{candidateKnowledge.length}</strong><small>See what is blocked and why →</small></button>
+      <button onClick={() => candidateKnowledge[0] ? onPromote(candidateKnowledge[0].id) : setView("knowledge")}><span>Pending reviews</span><strong>{candidateKnowledge.length}</strong><small>{candidateKnowledge.length ? "Decide what earns authority →" : "Review queue is clear"}</small></button>
     </section>
 
     {view === "cases" && selectedCase && <section className="sports-view sports-cases-view">
@@ -808,14 +844,14 @@ function SportsEngineV43({ nodes, reviews, connections, handoffResult, handoffHi
       <article className="case-record">
         <header className="case-record-header"><div><div className="case-record-meta"><span className={`case-status ${caseStage(selectedCase).tone}`}>{caseStage(selectedCase).label}</span><small>{selectedCase.room} · {fidelityFor(selectedCase)} source</small></div><h2>{selectedCase.title}</h2><p>{selectedCase.summary}</p></div><div className="case-quick-actions"><button onClick={() => onCapture("outcome", selectedCase.id)}>Record outcome</button><button onClick={() => onCapture("postmortem", selectedCase.id)}>Run post-mortem</button><button onClick={() => onCapture("evidence", selectedCase.id)}>＋ Evidence</button><button onClick={() => onCapture("correction", selectedCase.id)}>△ Correction</button></div></header>
         <div className="case-spine">
-          <CaseRecordSection number="01" title="Thesis"><p>{selectedCase.summary}</p><div className="record-tags"><span>Observation authority</span><span>{selectedCase.sources[0] ?? "Direct capture"}</span></div></CaseRecordSection>
-          <CaseRecordSection number="02" title="Research audit"><div className="audit-grid"><div><span>Research state</span><strong className={selectedCase.sourceFidelity >= 90 ? "good" : "amber"}>{selectedCase.sourceFidelity >= 90 ? "Audited" : "Partial"}</strong></div><div><span>Source fidelity</span><strong>{selectedCase.sourceFidelity}%</strong></div><div><span>Decision impact</span><strong>{selectedCase.decisionImpact}</strong></div><div><span>Reconstruction value</span><strong>{selectedCase.reconstructionValue}</strong></div></div><p className="record-note">These summarize preserved evidence. They do not create authority or promotion by themselves.</p></CaseRecordSection>
-          <CaseRecordSection number="03" title="Evidence ledger"><EvidenceLedger node={selectedCase} reviews={reviews} /></CaseRecordSection>
-          <CaseRecordSection number="04" title="Connections"><ConnectionLedger node={selectedCase} nodes={nodes} connections={connections} /></CaseRecordSection>
-          <CaseRecordSection number="05" title="Outcome"><RecordHistory node={selectedCase} pattern={/outcome|reality/i} empty="No outcome yet. Recording reality will move this case to Completed." /><button className="inline-record-action" onClick={() => onCapture("outcome", selectedCase.id)}>＋ Record outcome</button></CaseRecordSection>
-          <CaseRecordSection number="06" title="Post-mortem"><RecordHistory node={selectedCase} pattern={/post-mortem|revision|revise/i} empty="No post-mortem yet. The outcome and reasoning review stay separate." /><button className="inline-record-action" onClick={() => onCapture("postmortem", selectedCase.id)}>＋ Run post-mortem</button></CaseRecordSection>
-          <CaseRecordSection number="07" title="Promotion status"><PromotionInfluence node={selectedCase} nodes={nodes} connections={connections} onPromote={onPromote} /></CaseRecordSection>
-          <CaseRecordSection number="08" title="Future retrieval influence"><div className="retrieval-operating-room" id="case-retrieval-test"><div className="retrieval-receipt"><header><div><span>Case retrieval state</span><strong>{connections.some((edge) => edge.approved && (edge.from === selectedCase.id || edge.to === selectedCase.id)) ? "Eligible through approved paths" : "Waiting for approved connection"}</strong></div><b>{(confidenceFor(selectedCase.id, reviews) / 100).toFixed(2)}</b></header><div><span>✓ Same project</span><span>✓ Typed mechanism</span><span>✓ Reality attached</span><span>✓ High reconstruction value</span></div><p>Packets preserve this case with its outcome, challenge history, connection reason, and source fidelity—not as a prediction.</p></div><section className="case-context-test"><header><div><span className="form-kicker">Live sidecar test</span><h3>Make the next answer use what this project earned.</h3><p>Campus Atlas syncs the current case ledger, then asks the deployed API for the smallest useful packet.</p></div><div className="shared-workspace-key"><span>Shared workspace</span><button type="button" title={workspaceId || "Workspace initializing"} disabled={!workspaceId} onClick={() => { if (workspaceId) void navigator.clipboard.writeText(workspaceId); }}>{workspaceId ? `${workspaceId.slice(0, 12)}…` : "Initializing…"}</button><small>Use the full key as <b>workspaceId</b> in MCP tools.</small></div></header><label>Later question<textarea rows={3} value={packetTask} onChange={(event) => setPacketTask(event.target.value)} /></label><button className="primary-button wide" disabled={handoffStatus === "building" || packetTask.trim().length < 8} onClick={() => onBuildPacket(packetTask)}>{handoffStatus === "building" ? "Syncing cases and building packet…" : "Test future retrieval →"}</button>{handoffStatus === "error" && <div className="inline-error">The packet could not be built. The case ledger has not been changed.</div>}{handoffResult && <div className="context-packet-result case-packet-result"><header><span>Live packet · {handoffResult.packetId}</span><strong>{handoffResult.budget.used} items · ~{handoffResult.budget.estimatedTokens} tokens</strong></header><div>{handoffResult.durableKnowledge.slice(0, 3).map((item) => <article key={item.id} className={newlyRetrieved.some((newItem) => newItem.id === item.id) && previousPacket ? "newly-retrieved" : ""}><b>{item.usefulness}</b><div><strong>{item.title}</strong><p>{item.whyIncluded}</p><small>{item.fidelity} · {item.confidence}% confidence · {item.authorityLevel}</small></div></article>)}</div>{previousPacket && <div className="retrieval-delta"><span>Changed since the previous packet</span><strong>{newlyRetrieved.length ? `${newlyRetrieved.length} newly retrieved item${newlyRetrieved.length === 1 ? "" : "s"}` : "No authority change for this question"}</strong><p>{newlyRetrieved.length ? newlyRetrieved.map((item) => item.title).join(" · ") : "Promote or revise relevant knowledge, then test the same question again."}</p></div>}<footer><span>Excluded: {handoffResult.excluded.slice(0, 2).map((item) => item.title).join(" · ") || "none"}</span><span>Receipt {handoffResult.receipt.id}</span></footer></div>}</section></div></CaseRecordSection>
+          <CaseRecordSection number="01" title="What Happened"><p>{selectedCase.summary}</p><div className="record-tags"><span>Original reasoning</span><span>{selectedCase.sources[0] ?? "Direct capture"}</span></div></CaseRecordSection>
+          <CaseRecordSection number="02" title="Evidence"><EvidenceLedger node={selectedCase} reviews={reviews} /></CaseRecordSection>
+          <CaseRecordSection number="03" title="Outcome"><RecordHistory node={selectedCase} pattern={/outcome|reality/i} empty="No outcome yet. Recording reality will move this case to Ready to Audit." /><button className="inline-record-action" onClick={() => onCapture("outcome", selectedCase.id)}>＋ Record outcome</button></CaseRecordSection>
+          <CaseRecordSection number="04" title="Reasoning Audit"><div className="audit-conclusion"><span>Audit conclusion</span><strong>{selectedCase.id === "decision-england" ? "Four different signals were treated as one." : "Outcome and reasoning quality are graded separately."}</strong><p>{selectedCase.id === "decision-england" ? "Favorite quality, territorial control, scoring probability, and handicap coverage can diverge. The 0–0 outcome exposed why each must be audited independently." : "The audit preserves what held, what failed, and which assumption should change next time."}</p></div><div className="audit-grid"><div><span>Research state</span><strong className={selectedCase.sourceFidelity >= 90 ? "good" : "amber"}>{selectedCase.sourceFidelity >= 90 ? "Audited" : "Partial"}</strong></div><div><span>Evidence coverage</span><strong>{selectedCase.sourceFidelity}%</strong></div><div><span>Decision impact</span><strong>{selectedCase.decisionImpact}</strong></div><div><span>Reconstruction value</span><strong>{selectedCase.reconstructionValue}</strong></div></div></CaseRecordSection>
+          <CaseRecordSection number="05" title="Connections"><ConnectionLedger node={selectedCase} nodes={nodes} connections={connections} /></CaseRecordSection>
+          <CaseRecordSection number="06" title="Proposed Learning"><PromotionInfluence node={selectedCase} nodes={nodes} connections={connections} onPromote={onPromote} /></CaseRecordSection>
+          <CaseRecordSection number="07" title="Approval">{signalPrinciple ? <div className={`approval-decision ${signalPrinciple.status === "approved" ? "approved" : "pending"}`}><div><span>{signalPrinciple.status === "approved" ? "Human approved" : "Review pending"}</span><strong>{signalPrinciple.title}</strong><p>{signalPrinciple.status === "approved" ? "This principle is now eligible for future retrieval and appears in Knowledge." : "Knowledge remains unchanged until a person reviews the evidence, challenge, scope, and lineage."}</p></div><button className={signalPrinciple.status === "approved" ? "ghost-button" : "primary-button"} onClick={() => onPromote(signalPrinciple.id)}>{signalPrinciple.status === "approved" ? "Inspect approval" : "Review and approve →"}</button></div> : <div className="record-empty">No reusable principle is ready for review.</div>}</CaseRecordSection>
+          <CaseRecordSection number="08" title="Impact"><div className="retrieval-operating-room" id="case-retrieval-test"><div className="retrieval-receipt"><header><div><span>Future reasoning state</span><strong>{signalPrinciple?.status === "approved" ? "Knowledge may now change matching packets" : "Candidate excluded until approval"}</strong></div><b>{signalPrinciple?.status === "approved" ? "ON" : "HOLD"}</b></header><div><span>✓ Same project</span><span>✓ Typed mechanism</span><span>✓ Reality attached</span><span>{signalPrinciple?.status === "approved" ? "✓ Human approved" : "○ Approval required"}</span></div><p>The case never enters a packet as a prediction. Atlas carries its approved learning, challenge history, scope, and retrieval reason.</p></div><section className="case-context-test"><header><div><span className="form-kicker">Live API sidecar proof</span><h3>Run the same task and show exactly what changed.</h3><p>The UI calls the deployed context API against the same governed workspace. Approval—not a hardcoded toggle—changes retrieval eligibility.</p></div><div className="shared-workspace-key"><span>Shared workspace</span><button type="button" title={workspaceId || "Workspace initializing"} disabled={!workspaceId} onClick={() => { if (workspaceId) void navigator.clipboard.writeText(workspaceId); }}>{workspaceId ? `${workspaceId.slice(0, 12)}…` : "Initializing…"}</button><small>Use the full key as <b>workspaceId</b> in MCP tools.</small></div></header><label>Same future task<textarea rows={3} value={packetTask} onChange={(event) => setPacketTask(event.target.value)} /></label><button className="primary-button wide" disabled={handoffStatus === "building" || packetTask.trim().length < 8} onClick={() => onBuildPacket(packetTask)}>{handoffStatus === "building" ? "Syncing governance state and building packet…" : "Build Context Packet →"}</button>{handoffStatus === "error" && <div className="inline-error">The packet could not be built. The case ledger has not been changed.</div>}{handoffResult && <PacketProof before={previousPacket} after={handoffResult} />}</section></div></CaseRecordSection>
         </div>
       </article>
     </section>}
@@ -829,8 +865,28 @@ function SportsEngineV43({ nodes, reviews, connections, handoffResult, handoffHi
       <div className="blueprint-operating-rule"><div><p>Project Blueprint · live methodology</p><h2>What completed cases have taught Sports Engine to do.</h2></div><span>{promotedKnowledge.length} principles currently hold retrieval authority</span></div><div className="blueprint-method">{["Research", "Audit", "Price", "Decide", "Outcome", "Post-mortem", "Promote"].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, "0")}</span><strong>{step}</strong>{index < 6 && <i>→</i>}</div>)}</div><div className="blueprint-content"><section><div className="workspace-section-heading"><div><p>Capability ledger</p><h2>Evidence behind each earned capability</h2></div><b>{sportsCapabilities.length}</b></div><div className="capability-ledger v43">{sportsCapabilities.map((capability, index) => <details key={capability.name} open={index === 3 || index === 4}><summary><span>{String(index + 1).padStart(2, "0")}</span><strong>{capability.name}</strong><i>Inspect evidence</i></summary><div><p><b>Blueprint rule</b>{capability.rule}</p><p><b>Evidence earned from</b>{capability.evidence}</p><p><b>Last tested</b>{capability.tested}</p><p><b>Current limitation</b>{capability.limit}</p><p><b>Next proof required</b>{capability.next}</p></div></details>)}</div></section><aside><div className="workspace-section-heading"><div><p>Retrieval authority</p><h2>Promoted principles</h2></div><b>{promotedKnowledge.length}</b></div><div className="blueprint-authority-list">{promotedKnowledge.map((item) => <article key={item.id}><span>✓ {item.level}</span><strong>{item.title}</strong><p>{item.lineage.slice(-2).join(" → ")}</p><button onClick={() => { setSelectedKnowledgeId(item.id); setView("knowledge"); }}>Inspect earned evidence →</button></article>)}</div><div className="workspace-section-heading compact"><div><p>Blueprint changes</p><h2>Promotion pipeline</h2></div></div>{candidateKnowledge.map((item) => { const metrics = metricsFor(item.id, reviews); return <article className="blueprint-candidate" key={item.id}><span>{item.level}</span><strong>{item.title}</strong><p>{metrics.unresolved ? `${metrics.unresolved} unresolved challenge blocks promotion.` : "Evidence is ready for human review."}</p><div><small>{metrics.supporting} support</small><small>{metrics.challenging} challenge</small><small>{item.sourceFidelity}% fidelity</small></div><button onClick={() => onPromote(item.id)}>Review evidence and lineage →</button></article>; })}<div className="blueprint-rule"><span>Constitutional rule</span><p>No capability is earned because a number increased. Every Blueprint change must reconstruct the cases, evidence, challenges, and approval that produced it.</p></div></aside></div>
     </section>}
 
+    {view === "blueprint" && <section className="cross-project-transfer"><div><span>Proposed cross-project transfer</span><h2>Transfer the reasoning mechanism—not the sports conclusion.</h2><p>Sports Engine learned to separate correlated signals. Lessons Division can reuse that mechanism by separating engagement from actual learning transfer.</p></div><div className="transfer-path"><article><span>Sports Engine</span><strong>Separate correlated signals</strong><small>Human-approved mechanism</small></article><i>→</i><article><span>Lessons Division</span><strong>Separate engagement from learning transfer</strong><small>Proposed only · local review required</small></article></div><button className="ghost-button" onClick={() => onInspectKnowledge("pattern-format")}>Inspect shared mechanism →</button></section>}
+
     {toast && <div className="toast">✓ {toast}</div>}
   </main>;
+}
+
+function PacketProof({ before, after }: { before: HandoffPacket | null; after: HandoffPacket }) {
+  const [mobileProofView, setMobileProofView] = useState<"before" | "after" | "changes">("changes");
+  const beforeIds = new Set(before?.durableKnowledge.map((item) => item.id) ?? []);
+  const additions = after.durableKnowledge.filter((item) => !beforeIds.has(item.id));
+  const principle = additions.find((item) => item.id === "pattern-format") ?? additions[0];
+  const renderPacket = (packet: HandoffPacket | null, label: string) => <article className="proof-packet"><header><span>{label}</span><b>{packet ? `${packet.budget.used} items · ~${packet.budget.estimatedTokens} tokens` : "Not captured"}</b></header>{packet ? <><div className="proof-blueprint"><span>Blueprint</span><strong>{packet.blueprint.project} {packet.blueprint.version}</strong></div><div className="proof-items">{packet.durableKnowledge.slice(0, 4).map((item) => <div key={item.id} className={item.id === "pattern-format" ? "signal-principle" : ""}><span>{item.usefulness}</span><p><strong>{item.title}</strong><small>{item.whyIncluded}</small></p></div>)}</div><footer>Receipt {packet.receipt.id}</footer></> : <div className="proof-empty">Build a baseline packet before approval to compare exact API responses.</div>}</article>;
+  return <div className="packet-proof-shell">
+    <div className="proof-mobile-toggle" aria-label="Before and after packet view"><button className={mobileProofView === "before" ? "active" : ""} onClick={() => setMobileProofView("before")}>Before</button><button className={mobileProofView === "after" ? "active" : ""} onClick={() => setMobileProofView("after")}>After</button><button className={mobileProofView === "changes" ? "active" : ""} onClick={() => setMobileProofView("changes")}>Changes</button></div>
+    <div className={`proof-grid mobile-proof-${mobileProofView}`}>
+      <div className="proof-before">{renderPacket(before, "Before approval")}</div>
+      <section className="proof-change"><span>What changed</span><strong>{principle ? `＋ ${principle.title}` : "No retrieval authority changed"}</strong><p>{principle ? "Newly eligible because a person approved the England/Ghana learning after reviewing its evidence, challenge, scope, and lineage." : "The receipt shows no new inclusion for this task."}</p>{principle && <div><small>Reason for inclusion</small><b>{principle.whyIncluded}</b></div>}<div><small>Changed reasoning</small><b>{principle ? "Favorite strength, control, scoring probability, and market coverage must now be evaluated separately." : "No change."}</b></div></section>
+      <div className="proof-after">{renderPacket(after, "After approval")}</div>
+    </div>
+    <details className="receipt-inspector"><summary><span>Retrieval Receipt</span><strong>{after.receipt.checks.length} governance checks · inspect why</strong></summary><div className="receipt-checks">{after.receipt.checks.map((check) => <p key={check}>✓ {check}</p>)}</div><div className="receipt-decisions"><section><span>Included</span>{after.durableKnowledge.map((item) => <p key={item.id}><strong>{item.title}</strong>{item.whyIncluded}</p>)}</section><section><span>Excluded</span>{after.excluded.map((item) => <p key={item.id}><strong>{item.title}</strong>{item.whyExcluded}</p>)}</section></div></details>
+    <details className="api-json"><summary><span>JSON API response</span><strong>POST /api/context · same reasoning as UI</strong></summary><pre>{JSON.stringify(after, null, 2)}</pre></details>
+  </div>;
 }
 
 function CaseRecordSection({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
@@ -856,7 +912,7 @@ function RecordHistory({ node, pattern, empty }: { node: KnowledgeNode; pattern:
 }
 
 function PromotionInfluence({ node, nodes, connections, onPromote }: { node: KnowledgeNode; nodes: KnowledgeNode[]; connections: Connection[]; onPromote: (nodeId: string) => void }) {
-  const linked = connections.filter((edge) => edge.from === node.id || edge.to === node.id).map((edge) => nodes.find((item) => item.id === (edge.from === node.id ? edge.to : edge.from))).filter((item): item is KnowledgeNode => Boolean(item && item.level !== "Observation"));
+  const linked = [...new Map(connections.filter((edge) => edge.from === node.id || edge.to === node.id).map((edge) => nodes.find((item) => item.id === (edge.from === node.id ? edge.to : edge.from))).filter((item): item is KnowledgeNode => Boolean(item && item.level !== "Observation")).map((item) => [item.id, item])).values()];
   if (!linked.length) return <div className="record-empty">No reusable principle has been proposed from this case yet.</div>;
   return <div className="promotion-influence">{linked.map((item) => <article key={item.id}><div><span>{item.level}</span><strong>{item.title}</strong><p>{item.status === "approved" ? "Human approved · may influence later retrieval." : "Candidate only · visible but no retrieval authority yet."}</p></div><button onClick={() => onPromote(item.id)}>{item.status === "approved" ? "Inspect lineage" : "Review candidate"} →</button></article>)}</div>;
 }

@@ -43,7 +43,7 @@ const worker = {
       return handleStructure(request, env.OPENAI_API_KEY);
     }
 
-    if (["/mcp", "/openapi.json", "/.well-known/openapi.json", "/privacy", "/api/context", "/api/blueprint", "/api/precedents", "/api/candidates", "/api/outcomes", "/api/receipts", "/api/security"].includes(url.pathname)) {
+    if (["/mcp", "/openapi.json", "/.well-known/openapi.json", "/privacy", "/api/context", "/api/blueprint", "/api/precedents", "/api/candidates", "/api/outcomes", "/api/events", "/api/receipts", "/api/security"].includes(url.pathname)) {
       return handleAtlasActions(request, { DB: env.DB, CAMPUS_ATLAS_ACTION_KEY: env.CAMPUS_ATLAS_ACTION_KEY, CAMPUS_ATLAS_PUBLIC_DEMO: env.CAMPUS_ATLAS_PUBLIC_DEMO });
     }
 

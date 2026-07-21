@@ -56,32 +56,33 @@ test("renders development preview metadata", async () => {
   assert.match(await response.text(), developmentPreviewMeta);
 });
 
-test("mobile navigation focuses one workspace instead of stacking the full Atlas", async () => {
+test("mobile and desktop expose the same five V4.5 destinations", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.match(page, /aria-label="Campus Atlas mobile workspace"/);
+  assert.match(page, />Home<\/button>/);
   assert.match(page, />Ask<\/button>/);
   assert.match(page, />Projects<\/button>/);
-  assert.match(page, />Atlas<\/button>/);
+  assert.match(page, />Capture<\/button>/);
   assert.match(page, />Review<\/button>/);
+  assert.match(page, /aria-label="Campus Atlas workspace navigation"/);
   assert.match(css, /\.mobile-ask \.workspace/);
-  assert.match(css, /\.mobile-atlas \.project-strip/);
+  assert.match(css, /\.mobile-home \.handoff-section/);
   assert.match(css, /\.mobile-review \.workspace/);
+  assert.match(css, /grid-template-columns:repeat\(5,1fr\)/);
 });
 
-test("project capture stays contextual instead of becoming a duplicate destination", async () => {
+test("Capture remains a direct action while Cases stay the project center", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
 
-  assert.doesNotMatch(page, /className="nav-capture"/);
-  assert.doesNotMatch(page, /className="mobile-capture"/);
-  assert.doesNotMatch(page, /className="floating-capture"/);
   assert.match(page, /SportsWorkspaceView = "cases" \| "knowledge" \| "blueprint"/);
   assert.doesNotMatch(page, /\["workbench", "Workbench"/);
   assert.match(page, /case workspace/);
   assert.match(page, /Every action lands here/);
-  assert.match(page, /Live sidecar test/);
-  assert.match(page, /Test future retrieval/);
+  assert.match(page, /Live API sidecar proof/);
+  assert.match(page, /Build Context Packet/);
+  assert.match(page, /openCapture\("sports", "thesis"\)/);
   assert.match(css, /\.sports-workspace-tabs/);
 });
 
@@ -95,7 +96,7 @@ test("capture migrates older device records and shows validation failures", asyn
   assert.match(page, /No additional connection/);
 });
 
-test("V4.3 exposes the complete governed Sports Engine workspace lifecycle", async () => {
+test("V4.5 exposes the complete governed Sports Engine proof lifecycle", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
 
   for (const action of [
@@ -115,14 +116,13 @@ test("V4.3 exposes the complete governed Sports Engine workspace lifecycle", asy
     "Available to future retrieval",
   ]) assert.match(page, new RegExp(stage));
 
-  assert.match(page, /Change Receipt · V4\.3/);
   assert.match(page, /Create a new case/);
   assert.match(page, /Update the selected case/);
-  assert.match(page, /Thesis/);
-  assert.match(page, /Research audit/);
-  assert.match(page, /Evidence ledger/);
-  assert.match(page, /Promotion status/);
-  assert.match(page, /Future retrieval influence/);
+  for (const section of ["What Happened", "Evidence", "Outcome", "Reasoning Audit", "Connections", "Proposed Learning", "Approval", "Impact"]) assert.match(page, new RegExp(section));
+  assert.match(page, /PacketProof/);
+  assert.match(page, /Retrieval Receipt/);
+  assert.match(page, /JSON API response/);
+  assert.match(page, /Proposed cross-project transfer/);
   assert.match(page, /relatedId && relatedId !== target\.id/);
   assert.match(page, /approved: false, inferred: true/);
   assert.match(page, /Approve this connection/);
@@ -191,6 +191,11 @@ test("builds a useful context handoff while keeping Local Context temporary", as
   assert.equal(packet.localContext.captureRequiredForDurability, true);
   assert.ok(packet.durableKnowledge.length > 0 && packet.durableKnowledge.length <= 4);
   assert.ok(packet.durableKnowledge.every((item) => item.whyIncluded && item.connectionPath.length >= 3));
+  assert.ok(Array.isArray(packet.approvedPrinciples));
+  assert.ok(Array.isArray(packet.supportingCases));
+  assert.equal(packet.contextPacket, packet.compiledPrompt);
+  assert.equal(packet.receipt.inclusions.length, packet.durableKnowledge.length);
+  assert.equal(packet.receipt.exclusions.length, packet.excluded.length);
   assert.match(packet.compiledPrompt, /CHALLENGES TO CARRY FORWARD/);
   assert.ok(packet.receipt.checks.includes("Packet budget enforced"));
 
@@ -203,7 +208,29 @@ test("builds a useful context handoff while keeping Local Context temporary", as
   assert.equal(persisted.state.contextPackets.at(-1).packetId, packet.packetId);
 });
 
-test("exposes six governed MCP tools with explicit safety annotations", async () => {
+test("human approval changes the next packet for the same Sports Engine task", async () => {
+  const worker = await builtWorker("approval-proof");
+  const DB = memoryD1();
+  const env = { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
+  const ctx = { waitUntil() {}, passThroughOnException() {} };
+  const task = "How should Sports Engine evaluate a heavy favorite against a possible defensive wall?";
+  const baseNodes = [
+    { id: "core", project: "hq", type: "principle", title: "Reality corrects the model", summary: "Outcomes revise reasoning.", status: "approved", level: "Core Lens", sources: ["Constitution"], sourceFidelity: 95, reconstructionValue: 90, lineage: ["Approved"] },
+    { id: "pattern-format", project: "sports", type: "pattern", title: "Separate dominance signals from market coverage", summary: "Heavy favorite quality, control, scoring, and handicap coverage can diverge against a defensive wall.", status: "proposed", level: "Candidate Pattern", sources: ["England Ghana post-mortem"], sourceFidelity: 91, reconstructionValue: 98, lineage: ["Case", "Audit", "Proposed"] },
+  ];
+  const save = (nodes) => worker.fetch(new Request("http://localhost/api/state?replace=true", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ nodes, reviews: [], connections: [] }) }), env, ctx);
+  const build = async () => (await worker.fetch(new Request("http://localhost/api/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ task, project: "Sports Engine" }) }), env, ctx)).json();
+  await save(baseNodes);
+  const before = await build();
+  await save(baseNodes.map((node) => node.id === "pattern-format" ? { ...node, status: "approved", level: "Validated Principle" } : node));
+  const after = await build();
+  assert.equal(before.durableKnowledge.some((item) => item.id === "pattern-format"), false);
+  assert.equal(after.durableKnowledge.some((item) => item.id === "pattern-format"), true);
+  assert.equal(after.approvedPrinciples.some((item) => item.id === "pattern-format"), true);
+  assert.ok(after.receipt.inclusions.some((item) => item.id === "pattern-format"));
+});
+
+test("exposes seven governed MCP tools with explicit safety annotations", async () => {
   const worker = await builtWorker("mcp-list");
   const DB = memoryD1();
   const response = await worker.fetch(
@@ -217,9 +244,10 @@ test("exposes six governed MCP tools with explicit safety annotations", async ()
   );
   assert.equal(response.status, 200);
   const rpc = await response.json();
-  assert.equal(rpc.result.tools.length, 6);
+  assert.equal(rpc.result.tools.length, 7);
   assert.ok(rpc.result.tools.every((tool) => typeof tool.annotations.readOnlyHint === "boolean"));
   assert.equal(rpc.result.tools.find((tool) => tool.name === "atlas_capture_candidate").annotations.readOnlyHint, false);
+  assert.equal(rpc.result.tools.find((tool) => tool.name === "atlas_submit_case_event").annotations.readOnlyHint, false);
 });
 
 test("MCP writes create proposed knowledge and replay safely", async () => {
@@ -410,9 +438,10 @@ test("publishes an OpenAPI fallback and privacy policy", async () => {
   const env = { DB, ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } };
   const ctx = { waitUntil() {}, passThroughOnException() {} };
   const schema = await (await worker.fetch(new Request("http://localhost/openapi.json"), env, ctx)).json();
-  assert.equal(schema.info.version, "4.3.0");
+  assert.equal(schema.info.version, "4.5.0");
   assert.ok(schema.paths["/api/context"]);
   assert.ok(schema.paths["/api/candidates"]);
+  assert.ok(schema.paths["/api/events"]);
   const privacy = await worker.fetch(new Request("http://localhost/privacy"), env, ctx);
   assert.equal(privacy.status, 200);
   assert.match(await privacy.text(), /External candidate and outcome writes require authorization and never promote knowledge/);

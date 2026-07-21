@@ -48,6 +48,7 @@ const fallbackNodes: AtlasNode[] = [
   {
     id: "core-reality",
     project: "hq",
+    type: "principle",
     title: "Reality corrects the model",
     summary: "Outcomes and explicit corrections outrank elegant inference. Durable claims remain traceable to evidence.",
     status: "approved",
@@ -61,6 +62,7 @@ const fallbackNodes: AtlasNode[] = [
   {
     id: "correction-total",
     project: "sports",
+    type: "correction",
     title: "Market options were overstated",
     summary: "The available total was corrected by the user. Future retrieval must distinguish researched markets from currently offered markets.",
     status: "approved",
@@ -74,6 +76,7 @@ const fallbackNodes: AtlasNode[] = [
   {
     id: "pattern-format",
     project: "sports",
+    type: "pattern",
     title: "Separate dominance signals from market coverage",
     summary: "A strong favorite can control a match without producing the scoring volume or margin required by a handicap-and-total thesis.",
     status: "proposed",
@@ -87,6 +90,7 @@ const fallbackNodes: AtlasNode[] = [
   {
     id: "decision-england",
     project: "sports",
+    type: "decision",
     title: "England -1.5 & Over 3.5 vs Ghana",
     summary: "England was approximately -525. The thesis treated favorite strength, match control, scoring probability, and handicap coverage as if they were the same signal.",
     status: "challenged",
@@ -100,6 +104,7 @@ const fallbackNodes: AtlasNode[] = [
   {
     id: "precedent-cape-verde",
     project: "sports",
+    type: "observation",
     title: "Cape Verde defensive-wall counterexample",
     summary: "A perceived quality gap did not guarantee repeated scoring. The case exposes the same defensive-wall failure mode without pretending the events were identical.",
     status: "approved",
@@ -113,6 +118,7 @@ const fallbackNodes: AtlasNode[] = [
   {
     id: "principle-workload",
     project: "sports",
+    type: "principle",
     title: "Workload stability gates strikeout overs",
     summary: "Before pricing pitcher strikeouts, verify recent pitch counts, manager constraints, and a realistic innings range.",
     status: "approved",
@@ -126,6 +132,7 @@ const fallbackNodes: AtlasNode[] = [
   {
     id: "precedent-pitcher-set",
     project: "sports",
+    type: "observation",
     title: "Ace-versus-lineup strikeout precedent set",
     summary: "Two comparable strikeout props held, while the failed case overestimated innings because pitch-count stability was never verified.",
     status: "approved",
@@ -140,7 +147,7 @@ const fallbackNodes: AtlasNode[] = [
 
 const sportsBlueprint = {
   project: "Sports Engine",
-  version: "V4.3",
+  version: "V4.5",
   purpose: "Turn audited sports cases into compact, inspectable reasoning that can improve later research without generating picks automatically.",
   rules: [
     "Classify the research state before assigning confidence.",
@@ -156,7 +163,7 @@ const sportsBlueprint = {
 
 const generalBlueprint = {
   project: "Campus Atlas",
-  version: "V4.3",
+  version: "V4.5",
   purpose: "Carry forward governed, inspectable knowledge across long-running ChatGPT Projects.",
   rules: [
     "Local context stays temporary unless explicitly captured.",
@@ -303,6 +310,14 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
     `CHALLENGES TO CARRY FORWARD\n${challenges.length ? challenges.map((item) => `- ${item.title}: ${item.reason}`).join("\n") : "- No active challenge matched this task."}`,
     "INSTRUCTIONS\nUse this packet as context, verify time-sensitive facts, distinguish facts from assumptions, and do not treat retrieved precedent as a prediction.",
   ].join("\n\n");
+  const approvedPrinciples = durable.filter((item) => {
+    const source = nodesFor(state).find((node) => node.id === item.id);
+    return source?.type === "principle" || source?.type === "pattern" || item.authorityLevel !== "Observation";
+  }).map(({ id, title, summary, whyIncluded }) => ({ id, title, summary, whyIncluded }));
+  const supportingCases = durable.filter((item) => {
+    const source = nodesFor(state).find((node) => node.id === item.id);
+    return source?.type === "decision" || source?.type === "observation";
+  }).map(({ id, title, summary, whyIncluded }) => ({ id, title, summary, whyIncluded }));
   return {
     packetId,
     task,
@@ -311,10 +326,13 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
     blueprint,
     localContext: localContext ? { content: localContext, retention: "Temporary", expiration: "End of task", captureRequiredForDurability: true } : null,
     durableKnowledge: durable,
+    approvedPrinciples,
+    supportingCases,
     challenges,
     excluded,
     budget: { used: durable.length, limit: 4, estimatedTokens: Math.ceil(compiledPrompt.length / 4) },
     compiledPrompt,
+    contextPacket: compiledPrompt,
     receipt: {
       id: receiptId,
       tool: "atlas_build_context_packet",
@@ -322,6 +340,8 @@ export function buildContextPacket(state: AtlasState, input: Record<string, unkn
       createdAt: new Date().toISOString(),
       checks: ["Canonical workspace state loaded", "Project scope applied", "Only approved knowledge received retrieval authority", "Packet budget enforced", "Local context kept temporary", "Inclusion and exclusion reasons attached"],
       humanApprovalRequired: false,
+      inclusions: durable.map((item) => ({ id: item.id, reason: item.whyIncluded })),
+      exclusions: excluded.map((item) => ({ id: item.id, reason: item.whyExcluded })),
     },
   };
 }
@@ -437,6 +457,66 @@ async function recordOutcome(db: D1Database, input: Record<string, unknown>, wor
   return { data: { created: true, review, receipt }, status: 201 };
 }
 
+async function submitCaseEvent(db: D1Database, input: Record<string, unknown>, workspaceId?: string | null) {
+  const missing = requireFields(input, ["targetId", "eventType", "content", "source", "idempotencyKey"]);
+  if (missing.length) return { error: `Missing required fields: ${missing.join(", ")}`, status: 400 };
+  const eventType = String(input.eventType);
+  if (!["evidence", "correction", "proposed_learning"].includes(eventType)) return { error: "eventType must be evidence, correction, or proposed_learning.", status: 400 };
+  const loaded = await stateFor(db, Boolean(workspaceId), workspaceId);
+  const receipts = Array.isArray(loaded.externalReceipts) ? loaded.externalReceipts : [];
+  const key = String(input.idempotencyKey);
+  const existing = receipts.find((receipt) => receipt.idempotencyKey === key);
+  if (existing) return { data: { created: false, idempotentReplay: true, receipt: existing }, status: 200 };
+  const targetId = String(input.targetId);
+  const target = nodesFor(loaded).find((node) => node.id === targetId);
+  if (!target) return { error: "Target Case was not found.", status: 404 };
+  const now = Date.now().toString(36);
+  const confidence = Math.max(0, Math.min(100, Number(input.confidence || 75)));
+  const receipt: ActionReceipt = {
+    id: `RCP-${now.toUpperCase()}`,
+    tool: "atlas_submit_case_event",
+    createdAt: new Date().toISOString(),
+    idempotencyKey: key,
+    checks: ["Target Case exists", "Event type validated", "Source and confidence preserved", "No durable Knowledge created automatically", "Human review remains required"],
+    effect: eventType === "proposed_learning" ? "Created proposed learning linked to the Case; retrieval authority denied pending human approval" : `Attached ${eventType} to the Case review ledger without changing retrieval authority`,
+    targetId,
+  };
+  const reviews = Array.isArray(loaded.reviews) ? loaded.reviews : [];
+  const connections = Array.isArray(loaded.connections) ? loaded.connections : [];
+  let nextNodes = nodesFor(loaded);
+  let nextReviews = reviews;
+  let nextConnections = connections;
+  let proposal: AtlasNode | null = null;
+  if (eventType === "proposed_learning") {
+    proposal = {
+      id: `proposal-${now}`,
+      project: target.project,
+      room: "Review Queue",
+      type: "pattern",
+      title: String(input.title || "Proposed learning from Case"),
+      summary: String(input.content),
+      status: "proposed",
+      level: "Candidate Pattern",
+      sources: [String(input.source), target.title],
+      sourceFidelity: confidence,
+      reconstructionValue: 70,
+      decisionImpact: 65,
+      scopeStability: 55,
+      lineage: [target.title, "Case audit", "Proposed learning", "Awaiting human approval"],
+      history: [{ id: `history-${now}`, date: "Now", label: "Proposed learning", detail: "Created through the API sidecar without retrieval authority." }],
+    };
+    nextNodes = [...nextNodes, proposal];
+    nextConnections = [...connections, { id: `edge-${now}`, from: targetId, to: proposal.id, type: "Derived From", reason: String(input.connectionReason || "The proposed learning was reconstructed from this audited Case."), approved: false, inferred: true }];
+  } else {
+    const action = eventType === "correction" ? "Revise" : String(input.effect || "support") === "challenge" ? "Challenge" : "Reinforce";
+    nextReviews = [...reviews, { id: `event-${now}`, nodeId: targetId, action, rationale: String(input.content), evidence: String(input.title || eventType), source: String(input.source), strength: String(input.strength || "Moderate"), scope: String(input.scope || "This Case"), confidence, project: target.project, relatedNodeId: targetId, createdAt: new Date().toISOString(), eventType }];
+    nextNodes = nextNodes.map((node) => node.id === targetId ? { ...node, history: [{ id: `history-${now}`, date: "Now", label: eventType === "correction" ? "Correction proposed" : "Evidence added", detail: String(input.content) }, ...(Array.isArray(node.history) ? node.history : [])] } : node);
+  }
+  const next: AtlasState = { ...loaded, nodes: nextNodes, reviews: nextReviews, connections: nextConnections, externalReceipts: [...receipts, receipt] };
+  await saveAtlasState(db, next, workspaceId || undefined);
+  return { data: { created: true, eventType, proposal, receipt }, status: 201 };
+}
+
 const tools = [
   {
     name: "atlas_build_context_packet",
@@ -480,6 +560,13 @@ const tools = [
     inputSchema: { type: "object", properties: { targetId: { type: "string" }, result: { type: "string" }, reasoningAssessment: { type: "string" }, source: { type: "string" }, impactStrength: { type: "string", enum: ["Light", "Moderate", "Strong"] }, scope: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 100 }, idempotencyKey: { type: "string" }, workspaceId: { type: "string", description: "Shared demo workspace key. Required for public-demo writes." } }, required: ["targetId", "result", "reasoningAssessment", "source", "idempotencyKey"], additionalProperties: false },
     annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
   },
+  {
+    name: "atlas_submit_case_event",
+    title: "Submit Evidence, Correction, or Proposed Learning",
+    description: "Attach a governed event to an existing Case. Proposed learning remains review-only and never becomes durable Knowledge automatically.",
+    inputSchema: { type: "object", properties: { targetId: { type: "string" }, eventType: { type: "string", enum: ["evidence", "correction", "proposed_learning"] }, title: { type: "string" }, content: { type: "string" }, source: { type: "string" }, confidence: { type: "number", minimum: 0, maximum: 100 }, effect: { type: "string", enum: ["support", "challenge"] }, connectionReason: { type: "string" }, idempotencyKey: { type: "string" }, workspaceId: { type: "string", description: "Shared demo workspace key. Required for public-demo writes." } }, required: ["targetId", "eventType", "content", "source", "idempotencyKey"], additionalProperties: false },
+    annotations: { readOnlyHint: false, openWorldHint: false, destructiveHint: false },
+  },
 ];
 
 async function executeTool(name: string, input: Record<string, unknown>, request: Request, env: ActionEnv) {
@@ -498,17 +585,18 @@ async function executeTool(name: string, input: Record<string, unknown>, request
     const receipt = (state.externalReceipts || []).find((item) => item.id === String(input.receiptId));
     return receipt ? { data: receipt, status: 200 } : { error: "Receipt not found.", status: 404 };
   }
-  if (["atlas_capture_candidate", "atlas_record_outcome"].includes(name) && !isAuthorized(request, env)) return { error: "Write authorization required.", status: 401 };
-  if (["atlas_capture_candidate", "atlas_record_outcome"].includes(name) && publicDemo && !workspaceId) return { error: "A valid public-demo workspaceId is required for writes.", status: 400 };
+  if (["atlas_capture_candidate", "atlas_record_outcome", "atlas_submit_case_event"].includes(name) && !isAuthorized(request, env)) return { error: "Write authorization required.", status: 401 };
+  if (["atlas_capture_candidate", "atlas_record_outcome", "atlas_submit_case_event"].includes(name) && publicDemo && !workspaceId) return { error: "A valid public-demo workspaceId is required for writes.", status: 400 };
   if (name === "atlas_capture_candidate") return captureCandidate(env.DB, scopedInput, workspaceId);
   if (name === "atlas_record_outcome") return recordOutcome(env.DB, scopedInput, workspaceId);
+  if (name === "atlas_submit_case_event") return submitCaseEvent(env.DB, scopedInput, workspaceId);
   return { error: `Unknown tool: ${name}`, status: 404 };
 }
 
 function openApi(origin: string) {
   return {
     openapi: "3.1.0",
-    info: { title: "Campus Atlas Actions", version: "4.3.0", description: "Governed context retrieval and candidate capture for ChatGPT. Browser and sidecar can share one scoped workspace; writes never grant promotion authority." },
+    info: { title: "Campus Atlas Actions", version: "4.5.0", description: "Governed context retrieval and candidate capture for ChatGPT. Browser and sidecar share one scoped workspace; writes never grant promotion authority." },
     servers: [{ url: origin }],
     paths: {
       "/api/context": { post: { operationId: "buildContextPacket", summary: "Build the smallest useful context packet", requestBody: { required: true, content: { "application/json": { schema: tools[0].inputSchema } } }, responses: { "200": { description: "Inspectable context packet" } } } },
@@ -516,6 +604,7 @@ function openApi(origin: string) {
       "/api/precedents": { post: { operationId: "retrievePrecedents", summary: "Retrieve explainable precedents", requestBody: { required: true, content: { "application/json": { schema: tools[2].inputSchema } } }, responses: { "200": { description: "Ranked precedents" } } } },
       "/api/candidates": { post: { operationId: "captureCandidate", summary: "Capture proposed knowledge for human review", requestBody: { required: true, content: { "application/json": { schema: tools[4].inputSchema } } }, responses: { "201": { description: "Candidate and action receipt" } } } },
       "/api/outcomes": { post: { operationId: "recordOutcome", summary: "Record reality evidence", requestBody: { required: true, content: { "application/json": { schema: tools[5].inputSchema } } }, responses: { "201": { description: "Evidence event and action receipt" } } } },
+      "/api/events": { post: { operationId: "submitCaseEvent", summary: "Attach evidence, a correction, or proposed learning to a Case", requestBody: { required: true, content: { "application/json": { schema: tools[6].inputSchema } } }, responses: { "201": { description: "Governed event or proposed learning plus receipt" } } } },
       "/api/receipts": { get: { operationId: "getAtlasReceipt", summary: "Inspect an action receipt", parameters: [{ name: "id", in: "query", required: true, schema: { type: "string" } }, { name: "workspaceId", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Action receipt" } } } },
     },
   };
@@ -571,6 +660,15 @@ export async function handleAtlasActions(request: Request, env: ActionEnv) {
     const result = await recordOutcome(env.DB, input, workspaceId);
     return "data" in result ? json(result.data, result.status) : json({ error: result.error }, result.status);
   }
+  if (url.pathname === "/api/events" && request.method === "POST") {
+    if (!isAuthorized(request, env)) return json({ error: "Write authorization required." }, 401);
+    const input = await request.json() as Record<string, unknown>;
+    const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
+    const workspaceId = workspaceFor(request, input, publicDemo);
+    if (publicDemo && !workspaceId) return json({ error: "A valid public-demo workspaceId is required for writes." }, 400);
+    const result = await submitCaseEvent(env.DB, input, workspaceId);
+    return "data" in result ? json(result.data, result.status) : json({ error: result.error }, result.status);
+  }
 
   if (url.pathname !== "/mcp") return json({ error: "Not found." }, 404);
   if (request.method !== "POST") return json({ error: "MCP uses POST requests." }, 405, { allow: "POST, OPTIONS" });
@@ -578,7 +676,7 @@ export async function handleAtlasActions(request: Request, env: ActionEnv) {
   if (rpc.method?.startsWith("notifications/")) return new Response(null, { status: 202, headers: { "access-control-allow-origin": "*" } });
   const ok = (result: unknown) => json({ jsonrpc: "2.0", id: rpc.id ?? null, result });
   const fail = (code: number, message: string) => json({ jsonrpc: "2.0", id: rpc.id ?? null, error: { code, message } });
-  if (rpc.method === "initialize") return ok({ protocolVersion: String((rpc.params as { protocolVersion?: string } | undefined)?.protocolVersion || "2025-06-18"), capabilities: { tools: { listChanged: false } }, serverInfo: { name: "Campus Atlas", version: "4.3.0" } });
+  if (rpc.method === "initialize") return ok({ protocolVersion: String((rpc.params as { protocolVersion?: string } | undefined)?.protocolVersion || "2025-06-18"), capabilities: { tools: { listChanged: false } }, serverInfo: { name: "Campus Atlas", version: "4.5.0" } });
   if (rpc.method === "tools/list") return ok({ tools });
   if (rpc.method === "tools/call") {
     const params = (rpc.params || {}) as { name?: string; arguments?: Record<string, unknown> };
