@@ -139,20 +139,72 @@ The previous version already included the premium Campus Atlas visual system, th
 
 ## Local development
 
-Requirements:
+Campus Atlas uses npm and the committed `package-lock.json`. Do not generate a
+pnpm or Yarn lockfile.
 
-- Node.js `>=22.13.0`
-- Linux tooling used by the Sites build scripts
+### Prerequisites
 
-Common commands:
+- Node.js `>=22.13.0`, including npm
+- macOS or Linux for normal development
+- Linux tooling only for the hardened Sites/CI installer: `flock`, GNU
+  `timeout`, `curl`, `sha256sum`, and Bash with `mapfile`
+
+### Installation
+
+On a normal development workstation:
+
+```bash
+npm ci
+```
+
+The Sites/CI environment uses the stricter, integrity-checked installer:
+
+```bash
+npm run install:ci
+```
+
+`install:ci` is intentionally Linux-specific. It validates the locked Vinext
+tarball, serializes installs, and bounds network/install time. Do not use a
+different package manager to work around missing Linux utilities on macOS.
+
+### Development and checks
 
 ```bash
 npm run dev
+npm run typecheck
 npm run lint
 npm test
+npm run build
 ```
 
-The hosted Sites project owns its D1 binding. A live model call additionally requires the `OPENAI_API_KEY` runtime secret. Before exposing write tools publicly, set `CAMPUS_ATLAS_ACTION_KEY` and use a connector-safe authentication policy.
+`npm test` performs a production build before running the compiled-Worker
+contract suite. `npm run build` uses a bounded build when GNU `timeout` is
+available and then validates `dist/server/index.js` plus the packaged Sites
+manifest. On macOS the same build runs without the CI time bound. Generated
+`node_modules`, `.next`, `dist`, `.wrangler`, `.sites-runtime`, local database
+state, and `.env*` files are ignored and must not be committed.
+
+### Cloudflare, D1, and environment variables
+
+`.openai/hosting.json` declares the logical D1 binding `DB`; the hosted Sites
+project owns the real database and deployment wiring. Vite/Wrangler supplies a
+local placeholder binding for development. The tracked migration is under
+`drizzle/`; generate a new migration only after an intentional schema change.
+
+Runtime variables:
+
+- `OPENAI_API_KEY` — optional; enables the live structured capture call.
+  Without it, `/api/structure` returns an explicitly labeled seeded fallback.
+- `CAMPUS_ATLAS_ACTION_KEY` — required to enable external write routes and MCP
+  write tools. When absent, external writes fail closed.
+- `CAMPUS_ATLAS_PUBLIC_DEMO=true` — optional; isolates each browser in an
+  opaque, session-scoped D1 demo workspace.
+
+Wrangler log and Miniflare paths are configured automatically by the local
+scripts. Never commit runtime secrets or local D1 data.
+
+For the complete V4.6 ownership, API, state-flow, and migration baseline, see
+[`docs/V4.6_ARCHITECTURE_AUDIT.md`](docs/V4.6_ARCHITECTURE_AUDIT.md).
 
 ## Acceptance coverage
 

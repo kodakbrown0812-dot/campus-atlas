@@ -278,11 +278,39 @@ test("authorized API case capture updates canonical cases, evidence, activity, a
   await saveState(worker, DB, seedState());
   const response = await worker.fetch(new Request("http://localhost/api/candidates", { method: "POST", headers: { "content-type": "application/json", authorization: "Bearer key" }, body: JSON.stringify({ title: "New soccer case", summary: "A user-created API case with inspectable evidence.", source: "ChatGPT", project: "Sports Engine", objectType: "case", confidence: 74, idempotencyKey: "v46-case-1" }) }), { DB, ASSETS: assets, CAMPUS_ATLAS_ACTION_KEY: "key" }, ctx);
   assert.equal(response.status, 201);
+  const created = await response.json();
   const stored = await (await worker.fetch(new Request("http://localhost/api/state"), { DB, ASSETS: assets }, ctx)).json();
   assert.ok(stored.state.cases.some((item) => item.title === "New soccer case" && item.origin === "API-created"));
   assert.ok(stored.state.evidence.some((item) => item.content.includes("inspectable evidence")));
   assert.ok(stored.state.activities.some((item) => item.action === "Case captured"));
   assert.ok(stored.state.nodes.some((item) => item.title === "New soccer case"));
+  const receipt = await worker.fetch(new Request(`http://localhost/api/receipts?id=${created.receipt.id}`), { DB, ASSETS: assets }, ctx);
+  assert.equal(receipt.status, 200);
+  assert.equal((await receipt.json()).idempotencyKey, "v46-case-1");
+});
+
+test("public demo workspace state is persisted and isolated by opaque workspace key", async () => {
+  const worker = await builtWorker("workspace-isolation");
+  const DB = memoryD1();
+  const workspaceA = "demo-aaaaaaaaaaaaaaaaaaaa";
+  const workspaceB = "demo-bbbbbbbbbbbbbbbbbbbb";
+  const stateA = { ...seedState(), marker: "workspace-a" };
+  const stateB = { ...seedState(), marker: "workspace-b", nodes: seedState().nodes.filter((item) => item.project !== "sports") };
+  for (const [workspaceId, state] of [[workspaceA, stateA], [workspaceB, stateB]]) {
+    const saved = await worker.fetch(new Request("http://localhost/api/state?replace=true", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-atlas-workspace": workspaceId },
+      body: JSON.stringify({ ...state, workspaceId }),
+    }), { DB, ASSETS: assets, CAMPUS_ATLAS_PUBLIC_DEMO: "true" }, ctx);
+    assert.equal(saved.status, 200);
+  }
+  const read = async (workspaceId) => (await (await worker.fetch(new Request("http://localhost/api/state", {
+    headers: { "x-atlas-workspace": workspaceId },
+  }), { DB, ASSETS: assets, CAMPUS_ATLAS_PUBLIC_DEMO: "true" }, ctx)).json()).state;
+  assert.equal((await read(workspaceA)).marker, "workspace-a");
+  assert.equal((await read(workspaceB)).marker, "workspace-b");
+  assert.ok((await read(workspaceA)).nodes.some((item) => item.project === "sports"));
+  assert.equal((await read(workspaceB)).nodes.some((item) => item.project === "sports"), false);
 });
 
 test("writes fail closed and never expose the configured secret", async () => {

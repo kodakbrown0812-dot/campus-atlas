@@ -1,12 +1,11 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useEffect, useState } from "react";
 import {
   ActivityRecord,
   AtlasState,
   BlueprintRule,
   CaseRecord,
-  ConnectionRecord,
   EvidenceRecord,
   GovernanceState,
   KnowledgeRecord,
@@ -100,7 +99,7 @@ export default function CampusAtlas() {
 
   useEffect(() => {
     let current = true;
-    fetch("/api/state").then((response) => response.ok ? response.json() : null).then((result) => {
+    fetch("/api/state").then(async (response) => response.ok ? await response.json() as { workspaceId?: string; state?: AtlasState } : null).then((result) => {
       if (!current) return;
       const workspaceId = typeof result?.workspaceId === "string" ? result.workspaceId : "";
       if (result?.state?.schemaVersion === 46) setState(normalizeState({ ...result.state, workspaceId } as AtlasState));
@@ -121,8 +120,9 @@ export default function CampusAtlas() {
         body: JSON.stringify(state),
       }).then(async (response) => {
         if (!response.ok) throw new Error("save failed");
-        const result = await response.json();
-        if (result.workspaceId && result.workspaceId !== state.workspaceId) setState((current) => ({ ...current, workspaceId: result.workspaceId }));
+        const result = await response.json() as { workspaceId?: string };
+        const workspaceId = result.workspaceId;
+        if (workspaceId && workspaceId !== state.workspaceId) setState((current) => ({ ...current, workspaceId }));
         setSaveState("saved");
       }).catch(() => setSaveState("error"));
     }, 420);
@@ -231,7 +231,7 @@ export default function CampusAtlas() {
     }
     const timestamp = nowLabel();
     changeState((current) => {
-      let next = { ...current };
+      const next = { ...current };
       const terminal = action === "Approve" || action === "Connect" || action === "Merge" ? "Approved" : action === "Challenge" ? "Challenged" : action === "Reject" ? "Rejected" : "Deferred";
       next.reviews = current.reviews.map((item) => item.id === review.id ? { ...item, proposal: editedProposal || item.proposal, status: terminal } : item);
       if (review.id === "review-signal") {
@@ -277,7 +277,7 @@ export default function CampusAtlas() {
     let newState = "Captured";
     let nextAction = "Inspect the record and add an outcome when reality is available.";
     changeState((current) => {
-      let next = { ...current };
+      const next = { ...current };
       if (type === "New case or experience") {
         createdId = `case-${Date.now()}`;
         const record: CaseRecord = { id: createdId, project: activeProject, origin: "User-created", title: content.slice(0, 72), createdAt: timestamp, state: "Captured", confidence: 60, outcomeState: "Pending", governanceState: "Draft", retrievalEligible: false, experience: content, task: content, localContext, thesis: "Awaiting research audit.", facts: [], estimates: [], assumptions: [], unknowns: [], counterarguments: [], fragility: "Not yet audited", completeness: 20, outcome: "", postmortem: { happened: "", failed: "", held: "", underweighted: "", change: "", evidence: [] }, metadata: Object.fromEntries(project.schema.slice(0, 4).map((field) => [field, "Unclassified"])) };
@@ -409,7 +409,7 @@ function ProjectWorkspace(props: {
     <section className="project-header"><div className="project-identity"><span>{project.short}</span><div><p>{project.domain} · Blueprint {rules.find((item) => item.status === "Active")?.version || "Not established"}</p><h1>{project.name}</h1><small>{project.description}</small></div></div><div className="project-primary-actions"><button className="ghost" onClick={onConnections}>⌁ Connections</button><button className="ghost" onClick={onAsk}>✦ Ask Atlas</button><button className="primary" onClick={() => onCapture()}>＋ New Capture</button></div></section>
     <nav className="project-tabs" aria-label={`${project.name} workspace`}><button className={tab === "work" ? "active" : ""} onClick={() => setTab("work")}><strong>Work</strong><small>{activeCount} active cases</small></button><button className={tab === "evidence" ? "active" : ""} onClick={() => setTab("evidence")}><strong>Evidence</strong><small>{evidence.length} ledger records</small></button><button className={tab === "blueprint" ? "active" : ""} onClick={() => setTab("blueprint")}><strong>Blueprint</strong><small>{rules.filter((item) => item.status === "Active").length} active rules</small></button></nav>
     <div className="project-counts"><button onClick={() => setTab("work")}><span>Active work</span><strong>{activeCount}</strong><small>Open exact records</small></button><button onClick={() => reviews[0] && onReview(reviews[0].id)}><span>Pending review</span><strong>{reviews.length}</strong><small>{reviews.length ? "Decision required" : "Queue clear"}</small></button><button onClick={() => setTab("blueprint")}><span>Approved knowledge</span><strong>{approvedCount}</strong><small>Trace earned authority</small></button><button onClick={() => setTab("activity")}><span>Activity</span><strong>{activities.length}</strong><small>Meaningful changes</small></button></div>
-    {tab === "work" && <WorkView state={state} projectKey={projectKey} cases={cases} selected={selectedCase} onSelect={setSelectedCaseId} onCapture={onCapture} onReview={onReview} onAsk={onAsk} onAudit={onAudit} />}
+    {tab === "work" && <WorkView state={state} cases={cases} selected={selectedCase} onSelect={setSelectedCaseId} onCapture={onCapture} onReview={onReview} onAsk={onAsk} onAudit={onAudit} />}
     {tab === "evidence" && <EvidenceView project={project} cases={cases} evidence={evidence} selected={selectedEvidence} onSelect={setSelectedEvidenceId} query={props.evidenceQuery} setQuery={props.setEvidenceQuery} type={props.evidenceType} setType={props.setEvidenceType} role={props.evidenceRole} setRole={props.setEvidenceRole} onCapture={onCapture} />}
     {tab === "blueprint" && <BlueprintView rules={rules} knowledge={knowledge} cases={cases} evidence={evidence} onReview={onReview} reviews={state.reviews} />}
     {tab === "activity" && <section className="workspace-panel activity-panel"><div className="panel-title"><div><p className="eyebrow">Meaningful state changes only</p><h2>Project activity</h2></div><button className="ghost" onClick={() => setTab("work")}>Back to Work</button></div><ActivityList items={activities} /></section>}
@@ -417,7 +417,7 @@ function ProjectWorkspace(props: {
   </div>;
 }
 
-function WorkView({ state, projectKey, cases, selected, onSelect, onCapture, onReview, onAsk, onAudit }: { state: AtlasState; projectKey: ProjectKey; cases: CaseRecord[]; selected: CaseRecord | null; onSelect: (id: string) => void; onCapture: (type?: CaptureType, target?: string) => void; onReview: (id: string) => void; onAsk: () => void; onAudit: (item: CaseRecord) => void }) {
+function WorkView({ state, cases, selected, onSelect, onCapture, onReview, onAsk, onAudit }: { state: AtlasState; cases: CaseRecord[]; selected: CaseRecord | null; onSelect: (id: string) => void; onCapture: (type?: CaptureType, target?: string) => void; onReview: (id: string) => void; onAsk: () => void; onAudit: (item: CaseRecord) => void }) {
   const nextCase = cases.find((item) => !["Approved", "Closed"].includes(item.state));
   return <section className="work-layout workspace-panel"><aside className="work-index"><div className="panel-title small"><div><p className="eyebrow">Operational queue</p><h2>Work</h2></div><button className="icon-button" onClick={() => onCapture()}>＋</button></div>{nextCase && <button className="next-action" onClick={() => onSelect(nextCase.id)}><span>Recommended next action</span><strong>{nextCase.state === "Awaiting review" ? "Govern the proposed lesson" : nextCase.state === "Needs audit" ? "Complete the audit" : "Record the outcome"}</strong><small>{nextCase.title}</small></button>}<div className="work-groups">{["Captured", "Needs outcome", "Needs audit", "Awaiting review", "Approved", "Closed"].map((status) => {
     const grouped = cases.filter((item) => item.state === status);
@@ -481,7 +481,6 @@ function ReviewWorkspace({ state, selectedId, setSelectedId, onDecision, onOpenC
 
 function AtlasWorkspace(props: { state: AtlasState; projectKey: ProjectKey; question: string; setQuestion: (value: string) => void; local: string; setLocal: (value: string) => void; constraints: string; setConstraints: (value: string) => void; budget: number; setBudget: (value: number) => void; scope: "project" | "transfers" | "campus"; setScope: (value: "project" | "transfers" | "campus") => void; status: string; packet: PacketRecord | null; onSubmit: (event: FormEvent<HTMLFormElement>) => void; baseline: PacketRecord | null; graphMode: GraphMode; setGraphMode: (value: GraphMode) => void; selectedConnectionId: string; setSelectedConnectionId: (id: string) => void; selectedNodeId: string; setSelectedNodeId: (id: string) => void; onProject: (key: ProjectKey) => void }) {
   const { state, projectKey, question, setQuestion, local, setLocal, constraints, setConstraints, budget, setBudget, scope, setScope, status, packet, onSubmit, baseline, graphMode, setGraphMode, selectedConnectionId, setSelectedConnectionId, selectedNodeId, setSelectedNodeId, onProject } = props;
-  const project = projectByKey(projectKey);
   return <div className="page-shell atlas-page"><section className="ask-shell"><div className="ask-intro"><p className="eyebrow">Ask inside the active project</p><h1>What are you working on?</h1><p>Get useful help first. Inspect the selected evidence, exclusions, pathways, packet, receipt, and JSON only when you need them.</p></div><form onSubmit={onSubmit} className="ask-form"><div className="active-project-picker"><span>Active project</span><select value={projectKey} onChange={(event) => onProject(event.target.value as ProjectKey)}>{projects.map((item) => <option key={item.key} value={item.key}>{item.name}</option>)}</select><small>Ask Atlas will not silently change this scope.</small></div><textarea aria-label="Question or task" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="Ask the question you would normally ask ChatGPT…" rows={4} /><details className="ask-options"><summary>＋ Local context and retrieval controls</summary><div><label>Temporary local context<textarea value={local} onChange={(event) => setLocal(event.target.value)} rows={3} placeholder="Current facts that should expire after this task…" /></label><label>Constraints<textarea value={constraints} onChange={(event) => setConstraints(event.target.value)} rows={3} /></label><label>Token budget<input type="number" min={250} max={2500} step={50} value={budget} onChange={(event) => setBudget(Number(event.target.value))} /></label><label>Retrieval scope<select value={scope} onChange={(event) => setScope(event.target.value as "project" | "transfers" | "campus")}><option value="project">Current project only</option><option value="transfers">Current project + approved transfers</option><option value="campus">Entire Campus exploration</option></select></label></div></details><button className="primary ask-submit" disabled={status === "loading"}>{status === "loading" ? "Building governed context…" : "Ask Atlas →"}</button>{status === "error" && <p className="form-error">Atlas could not build the packet. Your project state was not changed.</p>}</form>{packet ? <AskResult packet={packet} baseline={baseline} response={packetResponse(packet)} /> : <div className="ask-placeholder"><span>✦</span><strong>Useful response first.</strong><p>Blueprint, approved knowledge, evidence, challenges, exclusions, reconstruction pathways, receipt, and JSON remain underneath.</p></div>}</section><ProjectGraph state={state} projectKey={projectKey} mode={graphMode} setMode={setGraphMode} selectedConnectionId={selectedConnectionId} setSelectedConnectionId={setSelectedConnectionId} selectedNodeId={selectedNodeId} setSelectedNodeId={setSelectedNodeId} /></div>;
 }
 
