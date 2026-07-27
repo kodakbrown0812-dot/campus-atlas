@@ -1,0 +1,126 @@
+Brewers case ingestion and dogfood test
+The material above contains the complete original Rockies–Brewers research conversation. Preserve it verbatim and unchanged as the raw source record. Do not clean, summarize, reorder, or replace it.
+Alongside that raw transcript, create and retain the following structured reconstruction:
+Canonical Atlas case: Rockies–Brewers research evolution and post-mortem
+The Brewers case was the July 24, 2026 Rockies–Brewers betting audit. It demonstrates why Campus Atlas must preserve the evolution of reasoning—including competing theses, market prices, simulations, contradictions, confidence changes, outcomes, and corrections—rather than saving only the final recommendation.
+Initial research pathway
+The first angle was Brewers first five innings, based largely on the apparent starter advantage:
+Patrik Drohan: approximately 3.08 FIP
+Tomoyuki Sugano: approximately 5.39 FIP
+The research then widened to compare:
+Brewers first five
+Brewers −1.5
+Brewers moneyline
+Over/Under 8.5
+Pitcher strikeout props
+Brewers −1.5 was available around 52¢ and initially appeared to be the best bet.
+Deeper Brewers −1.5 audit
+Evidence supporting Milwaukee:
+Milwaukee had swept Colorado earlier in the season and covered −1.5 in all three games: 9–7, 7–1 and 12–4.
+Milwaukee held a substantially stronger record and run differential.
+Colorado’s recent losses had frequently been decisive.
+Milwaukee’s bullpen created a plausible late-separation pathway.
+Evidence challenging Milwaukee:
+Only three of Milwaukee’s previous six games had been multi-run wins.
+Both teams were approximately 53% against the run line.
+Sugano had allowed three runs or fewer in seven of nine starts.
+Colorado retained meaningful outright-win and one-run-cover pathways.
+The simulation estimated:
+Brewers win probability: approximately 68%
+Brewers −1.5 cover probability: approximately 51%
+Sensitivity range: 49–54%
+Expected score: approximately Milwaukee 5.1, Colorado 3.3
+Representative score: Milwaukee 5–3
+Other central scripts: 4–2, 4–3 and 5–2
+Primary modeled failure cluster: Milwaukee wins 4–3 or 5–4
+At 52¢, the wager required approximately 52% probability to break even. The deeper audit therefore downgraded Brewers −1.5 from the leading bet to a Yellow/fair-price lean.
+The important conceptual separation was:
+“Milwaukee is likely to win” and “Milwaukee is likely to win by at least two runs” are different theses.
+
+Alternative-market comparison
+The audit then compared the broader game markets against narrower starter props. That process produced the following ranking:
+Sugano Under 3.5 strikeouts
+Brewers −1.5
+Under 8.5
+Brewers moneyline
+Drohan Under 5.5 strikeouts
+Sugano Under 3.5 strikeouts at 56¢ became the preferred bet.
+Initial supporting evidence included:
+Sugano averaged approximately three strikeouts per start.
+He had recorded 15 strikeouts across his previous five starts.
+Milwaukee projected as a relatively contact-oriented lineup.
+Sugano was making his second start after returning from a back-spasm IL stint.
+A possibly limited workload appeared to reduce his opportunity to reach four strikeouts.
+The first estimate placed the Under around 62–65%, compared with the 56% market price.
+Workload contradiction and confidence revision
+When the workload assumption was examined directly, the research discovered that Sugano had thrown 6⅓ innings on 77 pitches in his first start back from the IL.
+That contradicted one of the wager’s central supporting assumptions. He was not necessarily operating under a meaningfully restricted workload.
+The revised projection became:
+Expected workload: approximately 5⅓ innings
+Likely range: 4⅔–6 innings
+Revised Under probability: approximately 59–62%
+Verdict at 56¢: still playable, but with a thinner edge and clearly not a lock
+The recommendation remained Sugano Under 3.5 Ks even though its supporting evidence had materially weakened.
+Outcome
+Sugano Under 3.5 strikeouts did not hit.
+Sugano recorded:
+5 strikeouts
+5⅓ innings
+93 pitches
+2 runs allowed
+Colorado won 5–2.
+The other primary Milwaukee positions also failed:
+Brewers −1.5 lost
+Brewers first five lost
+Brewers moneyline lost
+The lower-scoring Under 8.5, which had ranked below the preferred bet, was the alternative that hit.
+Post-mortem
+The innings projection was almost exactly correct: Sugano pitched the projected 5⅓ innings. The principal error was estimating how many strikeouts he could generate during that workload. He faced 23 batters and reached five strikeouts through volume and effectiveness.
+The major lessons were:
+The workload contradiction was discovered but did not alter the final decision enough.
+Once Sugano’s previous 6⅓-inning outing became known, the limited-workload thesis should have been substantially weakened, not merely accompanied by a small probability reduction.
+Milwaukee’s contact profile and Sugano’s season-long strikeout average were overweighted.
+Sugano’s current health, recent form, pitch leash and ability to outperform his broader baseline were underweighted.
+Narrower does not automatically mean safer. The strikeout prop isolated one mechanism, but that mechanism depended heavily on an assumption already contradicted by current evidence.
+The Brewers −1.5 audit identified the one-run failure cluster, but its counter-script remained too narrow. Colorado winning outright—particularly by multiple runs—deserved deeper reconstruction.
+“Starter advantage” was treated too confidently. The actual game reversed the anticipated pitching script: Drohan allowed five runs while Sugano allowed two.
+A late contradiction affecting a wager’s central mechanism should trigger a genuine rerank or pass decision, not merely a cosmetic confidence reduction.
+Once the strikeout-under thesis weakened, Atlas should have reranked the alternatives. Under 8.5 may have become the more resilient thesis.
+The loss should increase the future weight assigned to recent workload evidence, current health and leash, outright-underdog scripts, and late-discovered contradictions.
+Complete reasoning pathway
+Brewers F5 starter edge → Brewers −1.5 enthusiasm → historical and simulation challenge → alternative-market comparison → Sugano Under 3.5 Ks → workload contradiction → insufficient confidence reduction → Sugano records five strikeouts and Colorado wins 5–2 → post-mortem strengthens future workload, contradiction and counter-script requirements.
+Provenance and governance requirements
+Keep two connected but distinct layers:
+Raw source record: the original conversation, preserved word-for-word.
+Canonical case: the structured reconstruction above, which can evolve through review and correction.
+Link every structured item back to its originating message or message range, including:
+User intent and scope changes
+Facts and supporting evidence
+Prices and price thresholds
+Estimated probabilities
+Simulations and expected scores
+Competing markets
+Assumptions and failure scripts
+Workload contradiction
+Confidence revision
+Final recommendation
+Outcome
+Post-mortem corrections
+Do not treat the canonical reconstruction as an exact transcript. Mark facts, estimates, assumptions, inferences, recommendations, outcomes, and later corrections distinctly.
+Do not compress the case into:
+Final pick: Sugano Under 3.5 strikeouts — loss.
+
+Atlas dogfood test
+Use this case to test whether Atlas can:
+Reconstruct the pathway without receiving the canonical summary.
+Distinguish Milwaukee winning from Milwaukee covering −1.5.
+Explain why the preferred market changed.
+Surface both supporting and challenging evidence.
+Preserve the wager’s price and changing probability estimate.
+Identify the workload discovery as a material contradiction.
+Explain why the confidence adjustment was insufficient.
+Connect the actual result to the assumptions reality disproved.
+Apply the corrected principles to later pitcher-prop and run-line research.
+Provide direct provenance from its reconstruction back to the original messages.
+The case passes only if Atlas preserves both exact source lineage and governed reconstruction. A plausible summary without traceable reasoning evolution is a failure.
+The one thing I can’t truthfully insert myself is the verbatim original exchange—the transferred context omitted its beginning. Paste the original Brewers conversation immediately above this block so Codex receives the actual unchanged source rather than a reconstructed imitation.

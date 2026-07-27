@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 const developmentPreviewMeta = /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
@@ -52,6 +54,51 @@ function canonicalMemoryD1() {
   };
 }
 
+async function sqliteD1() {
+  const database = new DatabaseSync(":memory:");
+  database.exec("PRAGMA foreign_keys = ON");
+  for (const name of [
+    "0000_gray_lady_vermin.sql",
+    "0001_bored_sage.sql",
+    "0002_remarkable_the_executioner.sql",
+    "0003_small_bromley.sql",
+  ]) {
+    const migration = await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8");
+    for (const statement of migration.split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) {
+      database.exec(statement);
+    }
+  }
+  function prepare(sql) {
+    let values = [];
+    const statement = database.prepare(sql);
+    return {
+      bind(...next) { values = next; return this; },
+      async first() { return statement.get(...values) ?? null; },
+      async all() { return { results: statement.all(...values) }; },
+      async run() {
+        const result = statement.run(...values);
+        return { success: true, changes: Number(result.changes), meta: result };
+      },
+    };
+  }
+  return {
+    prepare,
+    async batch(statements) {
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        database.exec("COMMIT");
+        return results;
+      } catch (error) {
+        database.exec("ROLLBACK");
+        throw error;
+      }
+    },
+    database,
+  };
+}
+
 async function builtWorker(suffix) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set(suffix, `${process.pid}-${Date.now()}-${Math.random()}`);
@@ -95,6 +142,32 @@ async function context(worker, DB, body, extraEnv = {}) {
   const response = await worker.fetch(new Request("http://localhost/api/context", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), { DB, ASSETS: assets, ...extraEnv }, ctx);
   assert.equal(response.status, 200);
   return response.json();
+}
+
+const slice2Headers = {
+  "content-type": "application/json",
+  authorization: "Bearer slice-2-test-key",
+};
+
+async function slice2Request(worker, DB, path, { method = "GET", body, idempotencyKey } = {}) {
+  const response = await worker.fetch(new Request(`http://localhost${path}`, {
+    method,
+    headers: {
+      ...(body === undefined ? {} : slice2Headers),
+      ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  }), { DB, ASSETS: assets, CAMPUS_ATLAS_ACTION_KEY: "slice-2-test-key" }, ctx);
+  const value = await response.json();
+  return { response, value };
+}
+
+async function seedCanonicalProject(worker, DB, id, name) {
+  const result = await slice2Request(worker, DB, `/api/v1/projects/${id}/records/projects`, {
+    method: "POST",
+    body: { id, workspace_id: "primary-campus", name, owner_actor_id: "cody" },
+  });
+  assert.equal(result.response.status, 201);
 }
 
 test("renders the development preview", async () => {
@@ -166,6 +239,885 @@ test("Slice 1 migration contains normalized records without replacing atlas_stat
   assert.match(schema, /export const atlasState/);
   assert.match(classification, /verified_canonical_history/);
   assert.match(classification, /unverified_proposal/);
+});
+
+test("Slice 2 native and imported conversations share one immutable source model", async () => {
+  const worker = await builtWorker("slice2-conversation-model");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+
+  const native = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Native margin discussion", provenance: { source: "campus_atlas_native" } },
+  });
+  assert.equal(native.response.status, 201);
+  assert.equal(native.value.conversation.sourceType, "native");
+  const nativeId = native.value.conversation.id;
+  const appended = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${nativeId}/messages`, {
+    method: "POST",
+    idempotencyKey: "native-message-1",
+    body: {
+      actorType: "user",
+      actorId: "cody",
+      content: "Do not trim this message.  \nThe spacing is source.",
+      originalTimestamp: "2026-07-01T12:00:00-05:00",
+    },
+  });
+  assert.equal(appended.response.status, 201);
+  const appendReplay = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${nativeId}/messages`, {
+    method: "POST",
+    idempotencyKey: "native-message-1",
+    body: { actorType: "user", content: "ignored replay content" },
+  });
+  assert.equal(appendReplay.response.status, 200);
+  assert.equal(appendReplay.value.idempotentReplay, true);
+  const repeatedContent = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${nativeId}/messages`, {
+    method: "POST",
+    idempotencyKey: "native-message-2",
+    body: {
+      actorType: "user",
+      actorId: "cody",
+      content: "Do not trim this message.  \nThe spacing is source.",
+    },
+  });
+  assert.equal(repeatedContent.response.status, 201);
+  assert.equal(repeatedContent.value.message.sequence, 2);
+
+  const rawStructured = JSON.stringify({
+    messages: [
+      { id: "m-1", role: "user", content: "Brewers?  I’m not cleaning this typo...\nfirst-five or -1.5?", timestamp: "2026-07-02T09:01:00-05:00" },
+      { id: "m-2", role: "assistant", content: "Price matters.\n\nKeep the uncertainty.", timestamp: "2026-07-02T09:02:00-05:00" },
+    ],
+  }, null, 2);
+  const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "structured-import-1",
+    body: {
+      format: "json",
+      title: "Imported source",
+      sourceName: "explicit-user-export.json",
+      transcript: rawStructured,
+      provenance: { suppliedBy: "cody" },
+    },
+  });
+  assert.equal(imported.response.status, 201);
+  assert.equal(imported.value.conversation.sourceType, "imported");
+  assert.equal(imported.value.import.messageCount, 2);
+  assert.equal(imported.value.import.diagnostics.exactEnvelopePreserved, true);
+  const importedId = imported.value.conversation.id;
+
+  const duplicate = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "different-key-same-source",
+    body: { format: "json", title: "Duplicate", transcript: rawStructured },
+  });
+  assert.equal(duplicate.response.status, 200);
+  assert.equal(duplicate.value.idempotentReplay, true);
+  assert.equal(duplicate.value.duplicateReason, "exact_source_hash");
+  assert.equal(duplicate.value.conversation.id, importedId);
+
+  const refreshedNative = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${nativeId}`);
+  assert.equal(refreshedNative.value.messages.length, 2);
+  assert.equal(refreshedNative.value.messages[0].exactContent, "Do not trim this message.  \nThe spacing is source.");
+  assert.equal(refreshedNative.value.messages[0].originalTimestamp, "2026-07-01T12:00:00-05:00");
+  const refreshedImport = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${importedId}`);
+  assert.equal(refreshedImport.value.messages[0].exactContent, "Brewers?  I’m not cleaning this typo...\nfirst-five or -1.5?");
+  const source = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${importedId}/source`);
+  assert.equal(source.value.imports[0].rawSource, rawStructured);
+  const genericRead = await slice2Request(worker, DB, "/api/v1/projects/sports/records/messages");
+  assert.equal(genericRead.response.status, 200);
+  assert.equal(genericRead.value.value.length, 4);
+  const genericWrite = await slice2Request(worker, DB, "/api/v1/projects/sports/records/messages", {
+    method: "POST",
+    body: {
+      id: "message:generic-bypass",
+      project_id: "sports",
+      conversation_id: importedId,
+      sequence_number: 99,
+      actor_type: "unknown",
+      exact_content: "bypass",
+      content_hash: "not-canonical",
+    },
+  });
+  assert.equal(genericWrite.response.status, 409);
+
+  assert.throws(
+    () => DB.database.prepare("UPDATE messages SET exact_content = 'mutated' WHERE conversation_id = ?").run(importedId),
+    /immutable/i,
+  );
+  assert.throws(
+    () => DB.database.prepare("DELETE FROM conversation_imports WHERE conversation_id = ?").run(importedId),
+    /immutable/i,
+  );
+});
+
+test("Slice 2 migration is additive and enforces immutable source records", async () => {
+  const migration = await readFile(new URL("../drizzle/0002_remarkable_the_executioner.sql", import.meta.url), "utf8");
+  const invariantMigration = await readFile(new URL("../drizzle/0003_small_bromley.sql", import.meta.url), "utf8");
+  for (const name of [
+    "conversation_imports",
+    "conversation_case_links",
+    "case_boundary_proposals",
+    "case_boundary_operations",
+  ]) {
+    assert.match(migration, new RegExp(`CREATE TABLE .${name}.`));
+  }
+  assert.match(migration, /ADD `assignment_state`/);
+  assert.match(migration, /messages_immutable_update/);
+  assert.match(migration, /messages_immutable_delete/);
+  assert.match(migration, /conversation_imports_immutable_update/);
+  assert.match(migration, /WHERE "conversation_case_links"\."ended_at" IS NULL/);
+  assert.match(invariantMigration, /conversation_case_links_one_active/);
+  assert.match(invariantMigration, /"relationship_state" = 'active'/);
+  assert.doesNotMatch(migration, /DROP TABLE `atlas_state`/);
+});
+
+test("Slice 2 text imports preserve the raw envelope and diagnose their parser", async () => {
+  const worker = await builtWorker("slice2-text-import");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const raw = "Cody: broad slate first\nstill broad  \nAmy: compare first-five and −1.5\nDo not normalize − or whitespace.";
+  const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "text-import-1",
+    body: { format: "text", title: "Text envelope", transcript: raw },
+  });
+  assert.equal(imported.response.status, 201);
+  assert.equal(imported.value.import.messageCount, 2);
+  assert.equal(imported.value.import.diagnostics.parser, "slice2-text-v1");
+  const source = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${imported.value.conversation.id}/source`);
+  assert.equal(source.value.imports[0].rawSource, raw);
+});
+
+test("Slice 2 preserves the Brewers reconstruction as one honest, project-scoped source artifact", async () => {
+  const worker = await builtWorker("slice2-brewers-reconstruction");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Development");
+  const fixture = await readFile(
+    new URL("../fixtures/brewers/rockies-brewers-user-reconstruction.txt", import.meta.url),
+    "utf8",
+  );
+  const fixtureContract = JSON.parse(await readFile(
+    new URL("../fixtures/brewers/rockies-brewers-user-reconstruction.json", import.meta.url),
+    "utf8",
+  ));
+  const calculatedHash = createHash("sha256").update(fixture, "utf8").digest("hex");
+  assert.equal(calculatedHash, fixtureContract.sha256);
+  assert.equal(Buffer.byteLength(fixture, "utf8"), fixtureContract.byteLength);
+  assert.equal(fixtureContract.rawTranscriptAvailable, false);
+
+  const importBody = {
+    format: "text",
+    title: fixtureContract.caseObjective,
+    sourceName: fixtureContract.sourceName,
+    sourceType: fixtureContract.sourceType,
+    representationType: fixtureContract.representationType,
+    authorityState: fixtureContract.authorityState,
+    importId: fixtureContract.importId,
+    transcript: fixture,
+    provenance: {
+      ...fixtureContract.provenance,
+      authorityDescription: fixtureContract.authorityDescription,
+      fixtureId: fixtureContract.fixtureId,
+    },
+    metadata: {
+      sourceLayer: "governed_structured_reconstruction",
+      rawSourceLayerAvailable: false,
+    },
+  };
+  const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: fixtureContract.idempotencyKey,
+    body: importBody,
+  });
+  assert.equal(imported.response.status, 201);
+  assert.equal(imported.value.conversation.projectId, fixtureContract.project.id);
+  assert.equal(imported.value.conversation.sourceType, fixtureContract.sourceType);
+  assert.equal(imported.value.import.importId, fixtureContract.importId);
+  assert.equal(imported.value.import.sourceType, fixtureContract.sourceType);
+  assert.equal(imported.value.import.representationType, fixtureContract.representationType);
+  assert.equal(imported.value.import.authorityState, fixtureContract.authorityState);
+  assert.equal(imported.value.import.contentHash, fixtureContract.sha256);
+  assert.equal(imported.value.import.messageCount, fixtureContract.expectedMessageCount);
+  assert.equal(imported.value.import.provenance.originalRawTranscriptAvailable, false);
+  assert.equal(imported.value.import.provenance.notExactTranscript, true);
+  assert.equal(
+    imported.value.import.provenance.historicalRawTranscriptStatus,
+    "unavailable_cannot_truthfully_reconstruct",
+  );
+  assert.equal(imported.value.import.provenance.acceptanceStatus, "deferred_historical_fixture_gap");
+  assert.equal(imported.value.import.provenance.futureReceiptDisclosureRequired, true);
+  assert.equal(fixtureContract.replacementProofPlan.exactSourceFixture, "A future native Atlas conversation.");
+  const conversationId = imported.value.conversation.id;
+
+  const associatedCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: fixtureContract.caseObjective,
+      conversationId,
+      makeActive: true,
+      actorId: "cody",
+      caseCore: {
+        sourceLayer: "governed_structured_reconstruction",
+        rawSourceLayerAvailable: false,
+      },
+    },
+  });
+  assert.equal(associatedCase.response.status, 201);
+  const refreshed = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  assert.equal(refreshed.response.status, 200);
+  assert.equal(refreshed.value.messages.length, 1);
+  assert.equal(refreshed.value.messages[0].exactContent, fixture);
+  assert.equal(refreshed.value.messages[0].actorType, "unknown");
+  assert.equal(refreshed.value.messages[0].metadata.representationType, fixtureContract.representationType);
+  assert.equal(refreshed.value.conversation.activeCaseId, associatedCase.value.case.id);
+  assert.deepEqual(refreshed.value.cases.map((record) => record.id), [associatedCase.value.case.id]);
+
+  const source = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/source`,
+  );
+  assert.equal(source.response.status, 200);
+  assert.equal(source.value.imports.length, 1);
+  assert.equal(source.value.imports[0].rawSource, fixture);
+  assert.equal(source.value.imports[0].contentHash, fixtureContract.sha256);
+  assert.equal(source.value.imports[0].sourceType, fixtureContract.sourceType);
+  assert.equal(source.value.imports[0].representationType, fixtureContract.representationType);
+  assert.equal(source.value.imports[0].authorityState, fixtureContract.authorityState);
+  assert.equal(source.value.imports[0].provenance.suppliedBy, "Cody");
+  assert.match(source.value.imports[0].importedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+  const duplicate = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "brewers-user-reconstruction-same-bytes-v2",
+    body: importBody,
+  });
+  assert.equal(duplicate.response.status, 200);
+  assert.equal(duplicate.value.idempotentReplay, true);
+  assert.equal(duplicate.value.duplicateReason, "exact_source_hash");
+  assert.equal(duplicate.value.conversation.id, conversationId);
+  assert.equal(DB.database.prepare(
+    "SELECT COUNT(*) AS count FROM messages WHERE project_id = ? AND conversation_id = ?",
+  ).get("sports", conversationId).count, 1);
+  assert.equal(DB.database.prepare(
+    "SELECT COUNT(*) AS count FROM conversation_imports WHERE project_id = ? AND conversation_id = ?",
+  ).get("sports", conversationId).count, 1);
+
+  const crossProject = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/hockey/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  assert.equal(crossProject.response.status, 404);
+  for (const table of ["events", "reasoning_nodes", "findings", "mechanisms", "governance_events"]) {
+    assert.equal(
+      DB.database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE project_id = ?`).get("sports").count,
+      0,
+      `${table} must not be inferred or promoted from the reconstruction fixture`,
+    );
+  }
+  const attemptedPromotion = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "brewers-unreviewed-authority-attempt",
+    body: {
+      format: "text",
+      title: "Unreviewed authority attempt",
+      transcript: "A supplied artifact cannot approve itself.",
+      authorityState: "approved_project_wide",
+    },
+  });
+  assert.equal(attemptedPromotion.response.status, 400);
+  assert.throws(
+    () => DB.database.prepare("UPDATE conversation_imports SET raw_source = 'rewritten' WHERE conversation_id = ?").run(conversationId),
+    /immutable/i,
+  );
+});
+
+test.skip("DEFERRED historical Brewers fixture gap: verbatim raw transcript is unavailable");
+test.skip("DEFERRED historical Brewers fixture gap: original user and assistant sequence is unavailable");
+test.skip("DEFERRED historical Brewers fixture gap: original source-span lineage is unavailable");
+test.skip("DEFERRED historical Brewers fixture gap: independent reconstruction from missing raw source is impossible");
+test.skip("DEFERRED historical Brewers fixture gap: raw-derived Atlas comparison cannot be performed");
+
+test("Slice 2 events can remain unassigned or chat-only and resolve exact message spans", async () => {
+  const worker = await builtWorker("slice2-event-source");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Development");
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Exact source test" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const content = "Raw team quality is not the same as run-line value.";
+  const message = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}/messages`, {
+    method: "POST",
+    idempotencyKey: "source-message",
+    body: { actorType: "user", actorId: "cody", content },
+  });
+  const messageId = message.value.message.id;
+  const start = content.indexOf("run-line");
+  const exactSourceSpan = content.slice(start, start + "run-line value".length);
+  const unassigned = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      type: "thesis",
+      assignmentState: "unassigned",
+      exactSourceSpan,
+      sourceSpans: [{ messageId, start, end: start + exactSourceSpan.length }],
+    },
+  });
+  assert.equal(unassigned.response.status, 201);
+  assert.equal(unassigned.value.event.caseId, null);
+  assert.equal(unassigned.value.event.assignmentState, "unassigned");
+  assert.equal(unassigned.value.event.sourceLinks[0].href, `#message-${encodeURIComponent(messageId)}`);
+
+  const chatOnly = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      type: "context",
+      assignmentState: "chat_only",
+      exactSourceSpan: "Raw team quality",
+      sourceSpans: [{ messageId, start: 0, end: "Raw team quality".length }],
+    },
+  });
+  assert.equal(chatOnly.response.status, 201);
+  assert.equal(chatOnly.value.event.assignmentState, "chat_only");
+
+  const invalidSpan = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      type: "correction",
+      assignmentState: "unassigned",
+      exactSourceSpan: "fabricated source",
+      sourceSpans: [{ messageId, start: 0, end: 4 }],
+    },
+  });
+  assert.equal(invalidSpan.response.status, 400);
+
+  const crossProject = await slice2Request(worker, DB, `/api/v1/projects/hockey/conversations/${conversationId}`);
+  assert.equal(crossProject.response.status, 404);
+});
+
+test("Slice 2 preserves canonical IDs while encoding route and fragment boundaries", async () => {
+  const worker = await builtWorker("slice2-reserved-id-links");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const conversationId = "conversation:source / v1?mode=exact#anchor&scope=case";
+  const messageId = "message:source / v1?part=1#exact&raw=true";
+  const caseId = "case:margin / v1?draft=yes#case&owner=Cody";
+  const eventId = "event:source / v1?kind=context#exact&state=raw";
+  const sourceSpanId = "source-span:message / v1?chars=:/?#[]@!$&'()*+,;=";
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { id: conversationId, title: "Reserved ID contract" },
+  });
+  assert.equal(conversation.value.conversation.id, conversationId);
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "reserved-message",
+      body: { id: messageId, actorType: "user", content: "exact source" },
+    },
+  );
+  assert.equal(message.value.message.id, messageId);
+  const createdCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { id: caseId, objective: "Reserved route ID", conversationId },
+  });
+  assert.equal(createdCase.value.case.id, caseId);
+
+  const fetchedConversation = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  assert.equal(fetchedConversation.response.status, 200);
+  assert.equal(fetchedConversation.value.conversation.id, conversationId);
+  assert.equal(fetchedConversation.value.messages[0].id, messageId);
+  const fetchedCase = await slice2Request(worker, DB, `/api/v1/projects/sports/cases/${encodeURIComponent(caseId)}`);
+  assert.equal(fetchedCase.response.status, 200);
+  assert.equal(fetchedCase.value.case.id, caseId);
+
+  const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      id: eventId,
+      conversationId,
+      type: "context",
+      assignmentState: "unassigned",
+      exactSourceSpan: "exact source",
+      sourceSpans: [{ id: sourceSpanId, messageId, start: 0, end: "exact source".length }],
+    },
+  });
+  assert.equal(event.response.status, 201);
+  assert.equal(event.value.event.id, eventId);
+  assert.equal(event.value.event.sourceLinks[0].messageId, messageId);
+  assert.equal(event.value.event.sourceLinks[0].href, `#message-${encodeURIComponent(messageId)}`);
+  assert.equal(event.value.event.sourceLinks[0].span.id, sourceSpanId);
+  assert.equal(DB.database.prepare("SELECT id FROM messages WHERE id = ?").get(messageId).id, messageId);
+  assert.equal(DB.database.prepare("SELECT id FROM events WHERE id = ?").get(eventId).id, eventId);
+  assert.equal(
+    JSON.parse(DB.database.prepare("SELECT metadata FROM events WHERE id = ?").get(eventId).metadata).sourceSpans[0].id,
+    sourceSpanId,
+  );
+});
+
+test("Slice 2 enforces one active case and conversation-scoped case assignments", async () => {
+  const worker = await builtWorker("slice2-case-association-invariants");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Case association invariants" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const firstCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "First active case", conversationId, makeActive: true },
+  });
+  const secondCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Second active case", conversationId, makeActive: true },
+  });
+  assert.equal(firstCase.response.status, 201);
+  assert.equal(secondCase.response.status, 201);
+  const links = DB.database.prepare(
+    "SELECT case_id, relationship_state FROM conversation_case_links WHERE conversation_id = ? AND ended_at IS NULL",
+  ).all(conversationId);
+  assert.equal(links.filter((link) => link.relationship_state === "active").length, 1);
+  assert.equal(links.find((link) => link.relationship_state === "active").case_id, secondCase.value.case.id);
+  const refreshed = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  assert.equal(refreshed.value.conversation.activeCaseId, secondCase.value.case.id);
+  assert.deepEqual(
+    new Set(refreshed.value.cases.map((record) => record.id)),
+    new Set([firstCase.value.case.id, secondCase.value.case.id]),
+  );
+
+  const unrelatedCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Not associated with this conversation" },
+  });
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "case-association-source",
+      body: { actorType: "user", content: "Keep assignments inside the conversation boundary." },
+    },
+  );
+  const invalidAssignment = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      caseId: unrelatedCase.value.case.id,
+      type: "context",
+      assignmentState: "assigned",
+      exactSourceSpan: "conversation boundary",
+      sourceSpans: [{
+        messageId: message.value.message.id,
+        start: "Keep assignments inside the ".length,
+        end: "Keep assignments inside the conversation boundary".length,
+      }],
+    },
+  });
+  assert.equal(invalidAssignment.response.status, 400);
+
+  const unassigned = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      type: "context",
+      assignmentState: "unassigned",
+      exactSourceSpan: "conversation boundary",
+      sourceSpans: [{
+        messageId: message.value.message.id,
+        start: "Keep assignments inside the ".length,
+        end: "Keep assignments inside the conversation boundary".length,
+      }],
+    },
+  });
+  const invalidBoundaryTarget = await slice2Request(worker, DB, "/api/v1/projects/sports/case-boundaries/proposals", {
+    method: "POST",
+    body: {
+      conversationId,
+      operationType: "attach",
+      sourceCaseIds: [],
+      targetCaseId: unrelatedCase.value.case.id,
+      eventIds: [unassigned.value.event.id],
+      reason: "This target was never associated with the conversation.",
+    },
+  });
+  assert.equal(invalidBoundaryTarget.response.status, 400);
+});
+
+test("Slice 2 case moves preserve attachment lineage and reverse without rewriting history", async () => {
+  const worker = await builtWorker("slice2-boundary-history");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Boundary history" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const message = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}/messages`, {
+    method: "POST",
+    idempotencyKey: "boundary-source",
+    body: { actorType: "user", content: "Move this exact event only after a proposal." },
+  });
+  const messageId = message.value.message.id;
+  const caseA = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Original margin case", conversationId, makeActive: true, actorId: "cody" },
+  });
+  const caseB = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Narrow comparison case", conversationId, actorId: "cody" },
+  });
+  const selected = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/active-case`,
+    {
+      method: "POST",
+      body: { caseId: caseB.value.case.id, actorId: "cody", reason: "Continue in the narrower case." },
+    },
+  );
+  assert.equal(selected.response.status, 200);
+  assert.equal(selected.value.activeCaseId, caseB.value.case.id);
+  const continuity = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+  assert.equal(continuity.value.conversation.activeCaseId, caseB.value.case.id);
+  assert.deepEqual(new Set(continuity.value.cases.map((record) => record.id)), new Set([caseA.value.case.id, caseB.value.case.id]));
+  const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      caseId: caseA.value.case.id,
+      type: "decision",
+      assignmentState: "assigned",
+      exactSourceSpan: "Move this exact event",
+      sourceSpans: [{ messageId, start: 0, end: "Move this exact event".length }],
+    },
+  });
+  const eventId = event.value.event.id;
+  const proposal = await slice2Request(worker, DB, "/api/v1/projects/sports/case-boundaries/proposals", {
+    method: "POST",
+    body: {
+      conversationId,
+      operationType: "move",
+      sourceCaseIds: [caseA.value.case.id],
+      targetCaseId: caseB.value.case.id,
+      eventIds: [eventId],
+      actorId: "cody",
+      reason: "This event belongs to the narrower comparison case.",
+    },
+  });
+  assert.equal(proposal.response.status, 201);
+  assert.equal(proposal.value.proposal.changed, false);
+  let detail = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+  assert.equal(detail.value.events[0].caseId, caseA.value.case.id);
+
+  const applied = await slice2Request(worker, DB, `/api/v1/projects/sports/case-boundaries/proposals/${proposal.value.proposal.id}/apply`, {
+    method: "POST",
+    body: { actorId: "cody", reason: "Apply reviewed move." },
+  });
+  assert.equal(applied.response.status, 200);
+  detail = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+  assert.equal(detail.value.events[0].caseId, caseB.value.case.id);
+  let attachments = DB.database.prepare(
+    "SELECT case_id, attachment_state, ended_at FROM case_event_attachments WHERE event_id = ? ORDER BY created_at",
+  ).all(eventId);
+  assert.equal(attachments.length, 2);
+  assert.ok(attachments[0].ended_at);
+  assert.equal(attachments[1].case_id, caseB.value.case.id);
+  assert.equal(attachments[1].ended_at, null);
+
+  const reversed = await slice2Request(worker, DB, `/api/v1/projects/sports/case-boundaries/operations/${applied.value.operation.id}/reverse`, {
+    method: "POST",
+    body: { actorId: "cody", reason: "The original case boundary was correct." },
+  });
+  assert.equal(reversed.response.status, 200);
+  detail = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+  assert.equal(detail.value.events[0].caseId, caseA.value.case.id);
+  assert.equal(detail.value.boundaryHistory.length, 2);
+  attachments = DB.database.prepare(
+    "SELECT case_id, attachment_state, ended_at FROM case_event_attachments WHERE event_id = ? ORDER BY created_at",
+  ).all(eventId);
+  assert.equal(attachments.length, 3);
+  assert.equal(attachments[2].case_id, caseA.value.case.id);
+  assert.equal(attachments[2].attachment_state, "restored");
+  assert.equal(attachments[2].ended_at, null);
+});
+
+test("Slice 2 requires newer boundary operations to reverse before older history", async () => {
+  const worker = await builtWorker("slice2-boundary-reversal-order");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Boundary reversal order" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "reversal-order-source",
+      body: { actorType: "user", content: "Move this event through reviewed case boundaries." },
+    },
+  );
+  const cases = [];
+  for (const objective of ["Original case", "Second case", "Third case"]) {
+    const created = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+      method: "POST",
+      body: { objective, conversationId, makeActive: objective === "Original case" },
+    });
+    cases.push(created.value.case);
+  }
+  const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      caseId: cases[0].id,
+      type: "context",
+      assignmentState: "assigned",
+      exactSourceSpan: "Move this event",
+      sourceSpans: [{ messageId: message.value.message.id, start: 0, end: "Move this event".length }],
+    },
+  });
+  const move = async (sourceCaseId, targetCaseId, reason) => {
+    const proposal = await slice2Request(worker, DB, "/api/v1/projects/sports/case-boundaries/proposals", {
+      method: "POST",
+      body: {
+        conversationId,
+        operationType: "move",
+        sourceCaseIds: [sourceCaseId],
+        targetCaseId,
+        eventIds: [event.value.event.id],
+        reason,
+      },
+    });
+    return slice2Request(
+      worker,
+      DB,
+      `/api/v1/projects/sports/case-boundaries/proposals/${encodeURIComponent(proposal.value.proposal.id)}/apply`,
+      { method: "POST", body: { reason: `Apply: ${reason}` } },
+    );
+  };
+  const firstMove = await move(cases[0].id, cases[1].id, "Move to the second reviewed case.");
+  const secondMove = await move(cases[1].id, cases[2].id, "Move to the third reviewed case.");
+  const staleReverse = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/case-boundaries/operations/${encodeURIComponent(firstMove.value.operation.id)}/reverse`,
+    { method: "POST", body: { reason: "Attempt to reverse stale history." } },
+  );
+  assert.equal(staleReverse.response.status, 400);
+
+  const reverseSecond = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/case-boundaries/operations/${encodeURIComponent(secondMove.value.operation.id)}/reverse`,
+    { method: "POST", body: { reason: "Reverse the newest operation first." } },
+  );
+  assert.equal(reverseSecond.response.status, 200);
+  const reverseFirst = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/case-boundaries/operations/${encodeURIComponent(firstMove.value.operation.id)}/reverse`,
+    { method: "POST", body: { reason: "Now reverse the older operation." } },
+  );
+  assert.equal(reverseFirst.response.status, 200);
+  const detail = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  assert.equal(detail.value.events[0].caseId, cases[0].id);
+  assert.equal(detail.value.boundaryHistory.length, 4);
+});
+
+test("Slice 2 attach, unassign, and chat-only proposals remain explicit and reversible", async () => {
+  const worker = await builtWorker("slice2-assignment-proposals");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Assignment proposals" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const message = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}/messages`, {
+    method: "POST",
+    idempotencyKey: "assignment-source",
+    body: { actorType: "user", content: "Keep this item unassigned until the case boundary is reviewed." },
+  });
+  const caseRecord = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Reviewed assignment target", conversationId, makeActive: true },
+  });
+  const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      type: "context",
+      assignmentState: "unassigned",
+      exactSourceSpan: "Keep this item unassigned",
+      sourceSpans: [{ messageId: message.value.message.id, start: 0, end: "Keep this item unassigned".length }],
+    },
+  });
+  const proposeAndApply = async (operationType, sourceCaseIds, targetCaseId) => {
+    const proposal = await slice2Request(worker, DB, "/api/v1/projects/sports/case-boundaries/proposals", {
+      method: "POST",
+      body: {
+        conversationId,
+        operationType,
+        sourceCaseIds,
+        targetCaseId,
+        eventIds: [event.value.event.id],
+        reason: `Review ${operationType} assignment.`,
+      },
+    });
+    assert.equal(proposal.response.status, 201);
+    const before = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+    const applied = await slice2Request(worker, DB, `/api/v1/projects/sports/case-boundaries/proposals/${proposal.value.proposal.id}/apply`, {
+      method: "POST",
+      body: { reason: `Apply ${operationType} after review.` },
+    });
+    assert.equal(applied.response.status, 200);
+    return { before: before.value.events[0], operation: applied.value.operation };
+  };
+
+  const attached = await proposeAndApply("attach", [], caseRecord.value.case.id);
+  assert.equal(attached.before.assignmentState, "unassigned");
+  let detail = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+  assert.equal(detail.value.events[0].assignmentState, "assigned");
+  assert.equal(detail.value.events[0].caseId, caseRecord.value.case.id);
+
+  const unassigned = await proposeAndApply("unassign", [caseRecord.value.case.id], null);
+  detail = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+  assert.equal(detail.value.events[0].assignmentState, "unassigned");
+  assert.equal(detail.value.events[0].caseId, null);
+
+  const chatOnly = await proposeAndApply("chat_only", [], null);
+  detail = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+  assert.equal(detail.value.events[0].assignmentState, "chat_only");
+  const reversed = await slice2Request(worker, DB, `/api/v1/projects/sports/case-boundaries/operations/${chatOnly.operation.id}/reverse`, {
+    method: "POST",
+    body: { reason: "Return the event to unassigned state." },
+  });
+  assert.equal(reversed.response.status, 200);
+  detail = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+  assert.equal(detail.value.events[0].assignmentState, "unassigned");
+  assert.equal(detail.value.boundaryHistory.length, 4);
+  assert.equal(unassigned.before.assignmentState, "assigned");
+});
+
+test("Slice 2 split and merge remain proposals until explicitly applied", async () => {
+  const worker = await builtWorker("slice2-split-merge");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Split and merge boundaries" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const message = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}/messages`, {
+    method: "POST",
+    idempotencyKey: "split-source",
+    body: { actorType: "user", content: "first-five question and later full-game margin question" },
+  });
+  const messageId = message.value.message.id;
+  const sourceCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Broad Brewers slate", conversationId, makeActive: true },
+  });
+  const splitCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "First-five subcase", conversationId },
+  });
+  const mergeTarget = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Margin decision", conversationId },
+  });
+  const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      caseId: sourceCase.value.case.id,
+      type: "objective",
+      assignmentState: "assigned",
+      exactSourceSpan: "first-five question",
+      sourceSpans: [{ messageId, start: 0, end: "first-five question".length }],
+    },
+  });
+  const split = await slice2Request(worker, DB, "/api/v1/projects/sports/case-boundaries/proposals", {
+    method: "POST",
+    body: {
+      conversationId,
+      operationType: "split",
+      sourceCaseIds: [sourceCase.value.case.id],
+      targetCaseId: splitCase.value.case.id,
+      eventIds: [event.value.event.id],
+      reason: "Propose a narrower first-five case.",
+    },
+  });
+  assert.equal(split.value.proposal.state, "proposed");
+  let detail = await slice2Request(worker, DB, `/api/v1/projects/sports/conversations/${conversationId}`);
+  assert.equal(detail.value.events[0].caseId, sourceCase.value.case.id);
+  const appliedSplit = await slice2Request(worker, DB, `/api/v1/projects/sports/case-boundaries/proposals/${split.value.proposal.id}/apply`, {
+    method: "POST",
+    body: { reason: "Apply reviewed split." },
+  });
+  assert.equal(appliedSplit.response.status, 200);
+
+  const merge = await slice2Request(worker, DB, "/api/v1/projects/sports/case-boundaries/proposals", {
+    method: "POST",
+    body: {
+      conversationId,
+      operationType: "merge",
+      sourceCaseIds: [splitCase.value.case.id],
+      targetCaseId: mergeTarget.value.case.id,
+      eventIds: [],
+      reason: "Propose merging the resolved subcase into the margin decision.",
+    },
+  });
+  assert.equal(merge.value.proposal.state, "proposed");
+  const beforeMerge = await slice2Request(worker, DB, `/api/v1/projects/sports/cases/${splitCase.value.case.id}`);
+  assert.equal(beforeMerge.value.case.status, "active");
+  const appliedMerge = await slice2Request(worker, DB, `/api/v1/projects/sports/case-boundaries/proposals/${merge.value.proposal.id}/apply`, {
+    method: "POST",
+    body: { reason: "Apply reviewed merge." },
+  });
+  assert.equal(appliedMerge.response.status, 200);
+  const afterMerge = await slice2Request(worker, DB, `/api/v1/projects/sports/cases/${splitCase.value.case.id}`);
+  assert.equal(afterMerge.value.case.status, "merged");
+  const reversedMerge = await slice2Request(worker, DB, `/api/v1/projects/sports/case-boundaries/operations/${appliedMerge.value.operation.id}/reverse`, {
+    method: "POST",
+    body: { reason: "Restore the split case." },
+  });
+  assert.equal(reversedMerge.response.status, 200);
+  const restoredCase = await slice2Request(worker, DB, `/api/v1/projects/sports/cases/${splitCase.value.case.id}`);
+  assert.equal(restoredCase.value.case.status, "active");
 });
 
 test("V4.6 global and project navigation is quiet and project scoped", async () => {

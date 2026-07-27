@@ -5,6 +5,7 @@ import { handleAtlasState } from "./atlas-state";
 import { handleStructure } from "./ai-structure";
 import { handleAtlasActions } from "./atlas-actions";
 import { handleCanonicalRecords } from "./canonical-records";
+import { handleConversationCases } from "./conversation-cases";
 
 interface Env {
   ASSETS: Fetcher;
@@ -42,6 +43,10 @@ const worker = {
 
     if (url.pathname === "/api/structure") {
       return handleStructure(request, env.OPENAI_API_KEY);
+    }
+
+    if (/^\/api\/v1\/projects\/[^/]+\/(?:conversations|cases|events|case-boundaries)(?:\/|$)/.test(url.pathname)) {
+      return handleConversationCases(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (url.pathname.startsWith("/api/v1/projects/") && url.pathname.includes("/records/")) {

@@ -42,6 +42,30 @@ export const conversations = sqliteTable("conversations", {
   ...timestamps,
 }, (table) => [uniqueIndex("conversations_project_import").on(table.projectId, table.importId)]);
 
+export const conversationImports = sqliteTable("conversation_imports", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  conversationId: text("conversation_id").notNull().references(() => conversations.id),
+  importId: text("import_id").notNull(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  sourceType: text("source_type").notNull(),
+  representationType: text("representation_type").notNull(),
+  authorityState: text("authority_state").notNull().default("observed"),
+  provenance: text("provenance").notNull().default("{}"),
+  sourceFormat: text("source_format").notNull(),
+  sourceName: text("source_name"),
+  rawSource: text("raw_source").notNull(),
+  contentHash: text("content_hash").notNull(),
+  messageCount: integer("message_count").notNull(),
+  duplicateCount: integer("duplicate_count").notNull().default(0),
+  diagnostics: text("diagnostics").notNull().default("{}"),
+  importedAt: text("imported_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("conversation_imports_project_import").on(table.projectId, table.importId),
+  uniqueIndex("conversation_imports_project_idempotency").on(table.projectId, table.idempotencyKey),
+  uniqueIndex("conversation_imports_project_content_hash").on(table.projectId, table.contentHash),
+]);
+
 export const messages = sqliteTable("messages", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull().references(() => projects.id),
@@ -53,12 +77,13 @@ export const messages = sqliteTable("messages", {
   originalTimestamp: text("original_timestamp"),
   ingestedAt: text("ingested_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   sourceReference: text("source_reference"),
+  sourceMessageKey: text("source_message_key"),
   contentHash: text("content_hash").notNull(),
   legacyReference: text("legacy_reference"),
   metadata: text("metadata").notNull().default("{}"),
 }, (table) => [
   uniqueIndex("messages_conversation_sequence").on(table.conversationId, table.sequenceNumber),
-  uniqueIndex("messages_conversation_hash").on(table.conversationId, table.contentHash),
+  uniqueIndex("messages_conversation_source_key").on(table.conversationId, table.sourceMessageKey),
 ]);
 
 export const cases = sqliteTable("cases", {
@@ -100,10 +125,31 @@ export const events = sqliteTable("events", {
   extractionVersion: text("extraction_version").notNull(),
   confidence: integer("confidence"),
   authorityState: text("authority_state").notNull().default("observed"),
+  assignmentState: text("assignment_state").notNull().default("unassigned"),
   version: integer("version").notNull().default(1),
   legacyReference: text("legacy_reference"),
   metadata: text("metadata").notNull().default("{}"),
 });
+
+export const conversationCaseLinks = sqliteTable("conversation_case_links", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  conversationId: text("conversation_id").notNull().references(() => conversations.id),
+  caseId: text("case_id").notNull().references(() => cases.id),
+  relationshipState: text("relationship_state").notNull().default("associated"),
+  linkedBy: text("linked_by").notNull(),
+  linkReason: text("link_reason"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  endedAt: text("ended_at"),
+  supersedesLinkId: text("supersedes_link_id"),
+}, (table) => [
+  uniqueIndex("conversation_case_links_active")
+    .on(table.conversationId, table.caseId)
+    .where(sql`${table.endedAt} IS NULL`),
+  uniqueIndex("conversation_case_links_one_active")
+    .on(table.conversationId)
+    .where(sql`${table.endedAt} IS NULL AND ${table.relationshipState} = 'active'`),
+]);
 
 export const caseEventAttachments = sqliteTable("case_event_attachments", {
   id: text("id").primaryKey(),
@@ -116,6 +162,37 @@ export const caseEventAttachments = sqliteTable("case_event_attachments", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   endedAt: text("ended_at"),
   supersedesAttachmentId: text("supersedes_attachment_id"),
+});
+
+export const caseBoundaryProposals = sqliteTable("case_boundary_proposals", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  conversationId: text("conversation_id").notNull().references(() => conversations.id),
+  operationType: text("operation_type").notNull(),
+  sourceCaseIds: text("source_case_ids").notNull().default("[]"),
+  targetCaseId: text("target_case_id").references(() => cases.id),
+  eventIds: text("event_ids").notNull().default("[]"),
+  proposalState: text("proposal_state").notNull().default("proposed"),
+  proposedBy: text("proposed_by").notNull(),
+  proposalReason: text("proposal_reason").notNull(),
+  appliedOperationId: text("applied_operation_id"),
+  metadata: text("metadata").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  resolvedAt: text("resolved_at"),
+});
+
+export const caseBoundaryOperations = sqliteTable("case_boundary_operations", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  conversationId: text("conversation_id").notNull().references(() => conversations.id),
+  proposalId: text("proposal_id").references(() => caseBoundaryProposals.id),
+  operationType: text("operation_type").notNull(),
+  operationPayload: text("operation_payload").notNull(),
+  appliedBy: text("applied_by").notNull(),
+  operationReason: text("operation_reason").notNull(),
+  reverseOfOperationId: text("reverse_of_operation_id"),
+  reversedByOperationId: text("reversed_by_operation_id"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
 export const reasoningNodes = sqliteTable("reasoning_nodes", {
