@@ -18,6 +18,40 @@ function memoryD1() {
   };
 }
 
+function canonicalMemoryD1() {
+  const tables = new Map();
+  const table = (name) => {
+    if (!tables.has(name)) tables.set(name, []);
+    return tables.get(name);
+  };
+  return {
+    prepare(sql) {
+      let values = [];
+      return {
+        bind(...next) { values = next; return this; },
+        async first() {
+          const name = sql.match(/FROM\s+([a-z_]+)/i)?.[1];
+          if (!name) return null;
+          if (/idempotency_key\s*=\s*\?/i.test(sql)) {
+            return table(name).find((row) => row.project_id === values[0] && row.idempotency_key === values[1]) ?? null;
+          }
+          return table(name).find((row) => row.id === values[0] && (name === "projects" ? row.id : row.project_id) === values[1]) ?? null;
+        },
+        async all() {
+          const name = sql.match(/FROM\s+([a-z_]+)/i)?.[1];
+          return { results: name ? table(name).filter((row) => (name === "projects" ? row.id : row.project_id) === values[0]).slice(0, values[1]) : [] };
+        },
+        async run() {
+          const name = sql.match(/INSERT INTO\s+([a-z_]+)/i)?.[1];
+          const columns = sql.match(/\(([^)]+)\)\s+VALUES/i)?.[1].split(",").map((value) => value.trim());
+          if (name && columns) table(name).push(Object.fromEntries(columns.map((column, index) => [column, values[index]])));
+          return { success: true };
+        },
+      };
+    },
+  };
+}
+
 async function builtWorker(suffix) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set(suffix, `${process.pid}-${Date.now()}-${Math.random()}`);
@@ -68,6 +102,70 @@ test("renders the development preview", async () => {
   const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), { ASSETS: assets }, ctx);
   assert.equal(response.status, 200);
   assert.match(await response.text(), developmentPreviewMeta);
+});
+
+test("Slice 1 canonical API enforces project scope and idempotent writes", async () => {
+  const worker = await builtWorker("canonical-records");
+  const DB = canonicalMemoryD1();
+  const env = { DB, ASSETS: assets, CAMPUS_ATLAS_ACTION_KEY: "slice-1-test-key" };
+  const writeHeaders = { "content-type": "application/json", authorization: "Bearer slice-1-test-key" };
+
+  const createProject = await worker.fetch(new Request("http://localhost/api/v1/projects/sports/records/projects", {
+    method: "POST",
+    headers: writeHeaders,
+    body: JSON.stringify({ id: "sports", workspace_id: "primary-campus", name: "Sports Engine", owner_actor_id: "cody" }),
+  }), env, ctx);
+  assert.equal(createProject.status, 201);
+
+  const project = await worker.fetch(new Request("http://localhost/api/v1/projects/sports/records/projects/sports"), env, ctx);
+  assert.equal(project.status, 200);
+  assert.equal((await project.json()).value.name, "Sports Engine");
+
+  const otherProject = await worker.fetch(new Request("http://localhost/api/v1/projects/hockey/records/projects/sports"), env, ctx);
+  assert.equal(otherProject.status, 404);
+
+  const governanceBody = {
+    id: "gov:approval-1",
+    project_id: "sports",
+    actor_id: "cody",
+    action: "approve",
+    target_type: "mechanism",
+    target_id: "mechanism:margin",
+    retrieval_effect: "eligible_project_wide",
+  };
+  const governanceRequest = () => new Request("http://localhost/api/v1/projects/sports/records/governance_events", {
+    method: "POST",
+    headers: { ...writeHeaders, "idempotency-key": "approve-margin-v1" },
+    body: JSON.stringify(governanceBody),
+  });
+  assert.equal((await worker.fetch(governanceRequest(), env, ctx)).status, 201);
+  const replay = await worker.fetch(governanceRequest(), env, ctx);
+  assert.equal(replay.status, 201);
+  assert.equal((await replay.json()).idempotentReplay, true);
+
+  const crossProject = await worker.fetch(new Request("http://localhost/api/v1/projects/hockey/records/governance_events", {
+    method: "POST",
+    headers: { ...writeHeaders, "idempotency-key": "bad-scope" },
+    body: JSON.stringify(governanceBody),
+  }), env, ctx);
+  assert.equal(crossProject.status, 400);
+});
+
+test("Slice 1 migration contains normalized records without replacing atlas_state", async () => {
+  const migration = await readFile(new URL("../drizzle/0001_bored_sage.sql", import.meta.url), "utf8");
+  const schema = await readFile(new URL("../db/schema.ts", import.meta.url), "utf8");
+  const classification = await readFile(new URL("../worker/legacy-classification.ts", import.meta.url), "utf8");
+  for (const name of [
+    "projects", "conversations", "messages", "events", "cases", "case_event_attachments",
+    "reasoning_nodes", "reasoning_node_versions", "findings", "finding_versions",
+    "mechanisms", "mechanism_versions", "governance_events", "roadways",
+    "roadway_versions", "packets", "packet_items", "receipts", "handoffs",
+  ]) {
+    assert.match(migration, new RegExp(`CREATE TABLE .${name}.`));
+  }
+  assert.match(schema, /export const atlasState/);
+  assert.match(classification, /verified_canonical_history/);
+  assert.match(classification, /unverified_proposal/);
 });
 
 test("V4.6 global and project navigation is quiet and project scoped", async () => {
