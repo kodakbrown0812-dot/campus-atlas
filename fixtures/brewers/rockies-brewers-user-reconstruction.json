@@ -1,0 +1,26 @@
+{
+  "fixtureId": "fixture:brewers-user-reconstruction-v1",
+  "importId": "import:brewers-user-reconstruction-v1",
+  "idempotencyKey": "brewers-user-reconstruction-v1",
+  "sourceName": "rockies-brewers-user-reconstruction.txt",
+  "sha256": "f8c7cd6d4cbcfc7e1b6cb9fec48185313e96bbe30c13d4a361374cd54f584b5e",
+  "byteLength": 8553,
+  "sourceType": "user_supplied_case_reconstruction",
+  "representationType": "Reconstructed",
+  "authorityState": "observed",
+  "authorityDescription": "User-supplied source artifact; not automatically governed mechanism authority.",
+  "provenance": {
+    "suppliedBy": "Cody",
+    "suppliedDuring": "Slice 2 implementation",
+    "classification": "user_supplied_case_reconstruction",
+    "originalRawTranscriptAvailable": false,
+    "notExactTranscript": true
+  },
+  "project": {
+    "id": "sports",
+    "name": "Sports Engine"
+  },
+  "caseObjective": "Rockies–Brewers research evolution and post-mortem",
+  "expectedMessageCount": 1,
+  "rawTranscriptAvailable": false
+}

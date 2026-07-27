@@ -15,6 +15,13 @@
       "when": 1785128957771,
       "tag": "0001_bored_sage",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1785142247411,
+      "tag": "0002_remarkable_the_executioner",
+      "breakpoints": true
     }
   ]
 }

@@ -5,8 +5,9 @@ export const AUTHORITY_STATES = [
 ] as const;
 
 export const CANONICAL_RECORD_TYPES = [
-  "projects", "conversations", "messages", "events", "cases",
-  "case_event_attachments", "reasoning_nodes", "reasoning_node_versions",
+  "projects", "conversations", "conversation_imports", "messages", "events", "cases",
+  "conversation_case_links", "case_event_attachments", "case_boundary_proposals",
+  "case_boundary_operations", "reasoning_nodes", "reasoning_node_versions",
   "findings", "finding_versions", "mechanisms", "mechanism_versions",
   "governance_events", "roadways", "roadway_versions", "packets",
   "packet_items", "receipts", "handoffs",
@@ -16,8 +17,44 @@ export type CanonicalRecordType = typeof CANONICAL_RECORD_TYPES[number];
 type CanonicalRow = Record<string, unknown> & { id: string; project_id?: string };
 
 const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{2,95}$/i;
-const RECORD_ID_PATTERN = /^[a-z0-9][a-z0-9:_-]{2,127}$/i;
+const RECORD_ID_PATTERN = /^[a-z0-9][^\u0000-\u001f\u007f]{2,127}$/i;
 const tableNames = new Set<string>(CANONICAL_RECORD_TYPES);
+const SLICE_2_DOMAIN_WRITES = new Set<CanonicalRecordType>([
+  "conversations",
+  "conversation_imports",
+  "messages",
+  "events",
+  "cases",
+  "conversation_case_links",
+  "case_event_attachments",
+  "case_boundary_proposals",
+  "case_boundary_operations",
+]);
+const ORDER_COLUMNS: Record<CanonicalRecordType, string> = {
+  projects: "created_at",
+  conversations: "created_at",
+  conversation_imports: "imported_at",
+  messages: "ingested_at",
+  events: "ingested_at",
+  cases: "created_at",
+  conversation_case_links: "created_at",
+  case_event_attachments: "created_at",
+  case_boundary_proposals: "created_at",
+  case_boundary_operations: "created_at",
+  reasoning_nodes: "created_at",
+  reasoning_node_versions: "created_at",
+  findings: "created_at",
+  finding_versions: "created_at",
+  mechanisms: "created_at",
+  mechanism_versions: "created_at",
+  governance_events: "created_at",
+  roadways: "created_at",
+  roadway_versions: "created_at",
+  packets: "created_at",
+  packet_items: "sequence_order",
+  receipts: "created_at",
+  handoffs: "handoff_at",
+};
 
 function assertTable(table: string): asserts table is CanonicalRecordType {
   if (!tableNames.has(table)) throw new Error("Unsupported canonical record type.");
@@ -45,7 +82,7 @@ export async function listCanonicalRecords(db: D1Database, table: string, projec
   assertId(projectId, "project ID", PROJECT_ID_PATTERN);
   const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit)));
   const scope = table === "projects" ? "id = ?" : "project_id = ?";
-  const result = await db.prepare(`SELECT * FROM ${table} WHERE ${scope} ORDER BY created_at DESC LIMIT ?`).bind(projectId, safeLimit).all<CanonicalRow>();
+  const result = await db.prepare(`SELECT * FROM ${table} WHERE ${scope} ORDER BY ${ORDER_COLUMNS[table]} DESC LIMIT ?`).bind(projectId, safeLimit).all<CanonicalRow>();
   return result.results ?? [];
 }
 
@@ -105,6 +142,11 @@ export async function handleCanonicalRecords(request: Request, db: D1Database, a
     if (request.method === "POST" && !recordId) {
       if (!actionKey || request.headers.get("authorization") !== `Bearer ${actionKey}`) {
         return Response.json({ error: "Write authorization required." }, { status: 401 });
+      }
+      if (SLICE_2_DOMAIN_WRITES.has(table as CanonicalRecordType)) {
+        return Response.json({
+          error: "This record type is owned by the Slice 2 conversation and case APIs.",
+        }, { status: 409 });
       }
       const body = await request.json() as CanonicalRow;
       const idempotencyKey = request.headers.get("idempotency-key")?.trim();
