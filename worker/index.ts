@@ -4,6 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { handleAtlasState } from "./atlas-state";
 import { handleStructure } from "./ai-structure";
 import { handleAtlasActions } from "./atlas-actions";
+import { handleCanonicalRecords } from "./canonical-records";
 
 interface Env {
   ASSETS: Fetcher;
@@ -41,6 +42,10 @@ const worker = {
 
     if (url.pathname === "/api/structure") {
       return handleStructure(request, env.OPENAI_API_KEY);
+    }
+
+    if (url.pathname.startsWith("/api/v1/projects/") && url.pathname.includes("/records/")) {
+      return handleCanonicalRecords(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (["/mcp", "/openapi.json", "/.well-known/openapi.json", "/privacy", "/api/context", "/api/blueprint", "/api/precedents", "/api/candidates", "/api/outcomes", "/api/events", "/api/receipts", "/api/security"].includes(url.pathname)) {
