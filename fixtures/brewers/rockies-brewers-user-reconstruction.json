@@ -14,7 +14,10 @@
     "suppliedDuring": "Slice 2 implementation",
     "classification": "user_supplied_case_reconstruction",
     "originalRawTranscriptAvailable": false,
-    "notExactTranscript": true
+    "notExactTranscript": true,
+    "historicalRawTranscriptStatus": "unavailable_cannot_truthfully_reconstruct",
+    "acceptanceStatus": "deferred_historical_fixture_gap",
+    "futureReceiptDisclosureRequired": true
   },
   "project": {
     "id": "sports",
@@ -22,5 +25,10 @@
   },
   "caseObjective": "Rockies–Brewers research evolution and post-mortem",
   "expectedMessageCount": 1,
-  "rawTranscriptAvailable": false
+  "rawTranscriptAvailable": false,
+  "replacementProofPlan": {
+    "reconstructionFixturePurpose": "Case continuity, post-mortem structure, contradictions, mechanism formation, and later retrieval.",
+    "exactSourceFixture": "A future native Atlas conversation.",
+    "exactSourceFixturePurpose": "Immutable messages, authorship, sequence, timestamps, source spans, and reconstruction lineage."
+  }
 }

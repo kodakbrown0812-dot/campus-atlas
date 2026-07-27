@@ -442,6 +442,13 @@ test("Slice 2 preserves the Brewers reconstruction as one honest, project-scoped
   assert.equal(imported.value.import.messageCount, fixtureContract.expectedMessageCount);
   assert.equal(imported.value.import.provenance.originalRawTranscriptAvailable, false);
   assert.equal(imported.value.import.provenance.notExactTranscript, true);
+  assert.equal(
+    imported.value.import.provenance.historicalRawTranscriptStatus,
+    "unavailable_cannot_truthfully_reconstruct",
+  );
+  assert.equal(imported.value.import.provenance.acceptanceStatus, "deferred_historical_fixture_gap");
+  assert.equal(imported.value.import.provenance.futureReceiptDisclosureRequired, true);
+  assert.equal(fixtureContract.replacementProofPlan.exactSourceFixture, "A future native Atlas conversation.");
   const conversationId = imported.value.conversation.id;
 
   const associatedCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
@@ -532,11 +539,11 @@ test("Slice 2 preserves the Brewers reconstruction as one honest, project-scoped
   );
 });
 
-test.skip("PENDING raw Brewers: exact raw transcript import");
-test.skip("PENDING raw Brewers: exact user and assistant message sequence preservation");
-test.skip("PENDING raw Brewers: exact source-span links into the original conversation");
-test.skip("PENDING raw Brewers: reconstruction generated independently from the raw conversation");
-test.skip("PENDING raw Brewers: Atlas reconstruction compared with Cody's canonical reconstruction");
+test.skip("DEFERRED historical Brewers fixture gap: verbatim raw transcript is unavailable");
+test.skip("DEFERRED historical Brewers fixture gap: original user and assistant sequence is unavailable");
+test.skip("DEFERRED historical Brewers fixture gap: original source-span lineage is unavailable");
+test.skip("DEFERRED historical Brewers fixture gap: independent reconstruction from missing raw source is impossible");
+test.skip("DEFERRED historical Brewers fixture gap: raw-derived Atlas comparison cannot be performed");
 
 test("Slice 2 events can remain unassigned or chat-only and resolve exact message spans", async () => {
   const worker = await builtWorker("slice2-event-source");
