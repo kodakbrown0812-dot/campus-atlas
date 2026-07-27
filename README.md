@@ -4,6 +4,8 @@ Campus Atlas is a reasoning sidecar for long-running ChatGPT Projects. It preser
 
 **Campus Atlas is the product.** “AI Reasoning Rebar” describes the architecture underneath it. Amy Campus is the example workspace, and Sports Engine is the mature proof project inside that workspace.
 
+The frozen V1.7 implementation authority is [`docs/V1.7_IMPLEMENTATION_BLUEPRINT.md`](docs/V1.7_IMPLEMENTATION_BLUEPRINT.md).
+
 ## V4.3 Build Week proof
 
 V4.3 turns Sports Engine from a presentation page into a working project surface:
