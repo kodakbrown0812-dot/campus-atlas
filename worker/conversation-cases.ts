@@ -71,6 +71,21 @@ async function requireCase(db: D1Database, projectId: string, caseId: string) {
   return record;
 }
 
+async function requireConversationCaseLink(
+  db: D1Database,
+  projectId: string,
+  conversationId: string,
+  caseId: string,
+) {
+  const link = await first<Row>(db.prepare(
+    `SELECT * FROM conversation_case_links
+     WHERE project_id = ? AND conversation_id = ? AND case_id = ? AND ended_at IS NULL
+     LIMIT 1`,
+  ).bind(projectId, conversationId, caseId));
+  if (!link) throw new Error("Case must be associated with this conversation.");
+  return link;
+}
+
 async function requireEvent(db: D1Database, projectId: string, conversationId: string, eventId: string) {
   const record = await first<Row>(db.prepare(
     "SELECT * FROM events WHERE id = ? AND project_id = ? AND conversation_id = ? LIMIT 1",
@@ -539,6 +554,13 @@ async function createCase(db: D1Database, projectId: string, body: Row) {
     ),
   ];
   if (conversationId) {
+    if (body.makeActive === true) {
+      statements.push(db.prepare(
+        `UPDATE conversation_case_links
+         SET relationship_state = 'associated'
+         WHERE project_id = ? AND conversation_id = ? AND ended_at IS NULL AND relationship_state = 'active'`,
+      ).bind(projectId, conversationId));
+    }
     statements.push(db.prepare(
       `INSERT INTO conversation_case_links (
         id, project_id, conversation_id, case_id, relationship_state,
@@ -663,7 +685,10 @@ async function createEvent(db: D1Database, projectId: string, body: Row) {
   const assignmentState = optionalString(body.assignmentState) || "unassigned";
   if (!ASSIGNMENT_STATES.has(assignmentState)) throw new Error("Invalid event assignment state.");
   const caseId = assignmentState === "assigned" ? assertId(body.caseId, "case ID") : null;
-  if (caseId) await requireCase(db, projectId, caseId);
+  if (caseId) {
+    await requireCase(db, projectId, caseId);
+    await requireConversationCaseLink(db, projectId, conversationId, caseId);
+  }
   const id = body.id ? assertId(body.id, "event ID") : canonicalId("event");
   const createdAt = now();
   const statements: D1PreparedStatement[] = [

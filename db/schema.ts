@@ -142,9 +142,14 @@ export const conversationCaseLinks = sqliteTable("conversation_case_links", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   endedAt: text("ended_at"),
   supersedesLinkId: text("supersedes_link_id"),
-}, (table) => [uniqueIndex("conversation_case_links_active")
-  .on(table.conversationId, table.caseId)
-  .where(sql`${table.endedAt} IS NULL`)]);
+}, (table) => [
+  uniqueIndex("conversation_case_links_active")
+    .on(table.conversationId, table.caseId)
+    .where(sql`${table.endedAt} IS NULL`),
+  uniqueIndex("conversation_case_links_one_active")
+    .on(table.conversationId)
+    .where(sql`${table.endedAt} IS NULL AND ${table.relationshipState} = 'active'`),
+]);
 
 export const caseEventAttachments = sqliteTable("case_event_attachments", {
   id: text("id").primaryKey(),

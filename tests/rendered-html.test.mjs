@@ -57,7 +57,12 @@ function canonicalMemoryD1() {
 async function sqliteD1() {
   const database = new DatabaseSync(":memory:");
   database.exec("PRAGMA foreign_keys = ON");
-  for (const name of ["0000_gray_lady_vermin.sql", "0001_bored_sage.sql", "0002_remarkable_the_executioner.sql"]) {
+  for (const name of [
+    "0000_gray_lady_vermin.sql",
+    "0001_bored_sage.sql",
+    "0002_remarkable_the_executioner.sql",
+    "0003_small_bromley.sql",
+  ]) {
     const migration = await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8");
     for (const statement of migration.split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) {
       database.exec(statement);
@@ -348,6 +353,7 @@ test("Slice 2 native and imported conversations share one immutable source model
 
 test("Slice 2 migration is additive and enforces immutable source records", async () => {
   const migration = await readFile(new URL("../drizzle/0002_remarkable_the_executioner.sql", import.meta.url), "utf8");
+  const invariantMigration = await readFile(new URL("../drizzle/0003_small_bromley.sql", import.meta.url), "utf8");
   for (const name of [
     "conversation_imports",
     "conversation_case_links",
@@ -361,6 +367,8 @@ test("Slice 2 migration is additive and enforces immutable source records", asyn
   assert.match(migration, /messages_immutable_delete/);
   assert.match(migration, /conversation_imports_immutable_update/);
   assert.match(migration, /WHERE "conversation_case_links"\."ended_at" IS NULL/);
+  assert.match(invariantMigration, /conversation_case_links_one_active/);
+  assert.match(invariantMigration, /"relationship_state" = 'active'/);
   assert.doesNotMatch(migration, /DROP TABLE `atlas_state`/);
 });
 
@@ -660,6 +668,100 @@ test("Slice 2 preserves canonical IDs while encoding route and fragment boundari
   );
 });
 
+test("Slice 2 enforces one active case and conversation-scoped case assignments", async () => {
+  const worker = await builtWorker("slice2-case-association-invariants");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Case association invariants" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const firstCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "First active case", conversationId, makeActive: true },
+  });
+  const secondCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Second active case", conversationId, makeActive: true },
+  });
+  assert.equal(firstCase.response.status, 201);
+  assert.equal(secondCase.response.status, 201);
+  const links = DB.database.prepare(
+    "SELECT case_id, relationship_state FROM conversation_case_links WHERE conversation_id = ? AND ended_at IS NULL",
+  ).all(conversationId);
+  assert.equal(links.filter((link) => link.relationship_state === "active").length, 1);
+  assert.equal(links.find((link) => link.relationship_state === "active").case_id, secondCase.value.case.id);
+  const refreshed = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  assert.equal(refreshed.value.conversation.activeCaseId, secondCase.value.case.id);
+  assert.deepEqual(
+    new Set(refreshed.value.cases.map((record) => record.id)),
+    new Set([firstCase.value.case.id, secondCase.value.case.id]),
+  );
+
+  const unrelatedCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Not associated with this conversation" },
+  });
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "case-association-source",
+      body: { actorType: "user", content: "Keep assignments inside the conversation boundary." },
+    },
+  );
+  const invalidAssignment = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      caseId: unrelatedCase.value.case.id,
+      type: "context",
+      assignmentState: "assigned",
+      exactSourceSpan: "conversation boundary",
+      sourceSpans: [{
+        messageId: message.value.message.id,
+        start: "Keep assignments inside the ".length,
+        end: "Keep assignments inside the conversation boundary".length,
+      }],
+    },
+  });
+  assert.equal(invalidAssignment.response.status, 400);
+
+  const unassigned = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      type: "context",
+      assignmentState: "unassigned",
+      exactSourceSpan: "conversation boundary",
+      sourceSpans: [{
+        messageId: message.value.message.id,
+        start: "Keep assignments inside the ".length,
+        end: "Keep assignments inside the conversation boundary".length,
+      }],
+    },
+  });
+  const invalidBoundaryTarget = await slice2Request(worker, DB, "/api/v1/projects/sports/case-boundaries/proposals", {
+    method: "POST",
+    body: {
+      conversationId,
+      operationType: "attach",
+      sourceCaseIds: [],
+      targetCaseId: unrelatedCase.value.case.id,
+      eventIds: [unassigned.value.event.id],
+      reason: "This target was never associated with the conversation.",
+    },
+  });
+  assert.equal(invalidBoundaryTarget.response.status, 400);
+});
+
 test("Slice 2 case moves preserve attachment lineage and reverse without rewriting history", async () => {
   const worker = await builtWorker("slice2-boundary-history");
   const DB = await sqliteD1();
@@ -756,6 +858,96 @@ test("Slice 2 case moves preserve attachment lineage and reverse without rewriti
   assert.equal(attachments[2].case_id, caseA.value.case.id);
   assert.equal(attachments[2].attachment_state, "restored");
   assert.equal(attachments[2].ended_at, null);
+});
+
+test("Slice 2 requires newer boundary operations to reverse before older history", async () => {
+  const worker = await builtWorker("slice2-boundary-reversal-order");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Boundary reversal order" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "reversal-order-source",
+      body: { actorType: "user", content: "Move this event through reviewed case boundaries." },
+    },
+  );
+  const cases = [];
+  for (const objective of ["Original case", "Second case", "Third case"]) {
+    const created = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+      method: "POST",
+      body: { objective, conversationId, makeActive: objective === "Original case" },
+    });
+    cases.push(created.value.case);
+  }
+  const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      caseId: cases[0].id,
+      type: "context",
+      assignmentState: "assigned",
+      exactSourceSpan: "Move this event",
+      sourceSpans: [{ messageId: message.value.message.id, start: 0, end: "Move this event".length }],
+    },
+  });
+  const move = async (sourceCaseId, targetCaseId, reason) => {
+    const proposal = await slice2Request(worker, DB, "/api/v1/projects/sports/case-boundaries/proposals", {
+      method: "POST",
+      body: {
+        conversationId,
+        operationType: "move",
+        sourceCaseIds: [sourceCaseId],
+        targetCaseId,
+        eventIds: [event.value.event.id],
+        reason,
+      },
+    });
+    return slice2Request(
+      worker,
+      DB,
+      `/api/v1/projects/sports/case-boundaries/proposals/${encodeURIComponent(proposal.value.proposal.id)}/apply`,
+      { method: "POST", body: { reason: `Apply: ${reason}` } },
+    );
+  };
+  const firstMove = await move(cases[0].id, cases[1].id, "Move to the second reviewed case.");
+  const secondMove = await move(cases[1].id, cases[2].id, "Move to the third reviewed case.");
+  const staleReverse = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/case-boundaries/operations/${encodeURIComponent(firstMove.value.operation.id)}/reverse`,
+    { method: "POST", body: { reason: "Attempt to reverse stale history." } },
+  );
+  assert.equal(staleReverse.response.status, 400);
+
+  const reverseSecond = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/case-boundaries/operations/${encodeURIComponent(secondMove.value.operation.id)}/reverse`,
+    { method: "POST", body: { reason: "Reverse the newest operation first." } },
+  );
+  assert.equal(reverseSecond.response.status, 200);
+  const reverseFirst = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/case-boundaries/operations/${encodeURIComponent(firstMove.value.operation.id)}/reverse`,
+    { method: "POST", body: { reason: "Now reverse the older operation." } },
+  );
+  assert.equal(reverseFirst.response.status, 200);
+  const detail = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  assert.equal(detail.value.events[0].caseId, cases[0].id);
+  assert.equal(detail.value.boundaryHistory.length, 4);
 });
 
 test("Slice 2 attach, unassign, and chat-only proposals remain explicit and reversible", async () => {

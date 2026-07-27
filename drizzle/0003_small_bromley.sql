@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `conversation_case_links_one_active` ON `conversation_case_links` (`conversation_id`) WHERE "conversation_case_links"."ended_at" IS NULL AND "conversation_case_links"."relationship_state" = 'active';

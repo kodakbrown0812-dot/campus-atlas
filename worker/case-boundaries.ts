@@ -64,6 +64,21 @@ async function requireCase(db: D1Database, projectId: string, caseId: string) {
   return record;
 }
 
+async function requireConversationCaseLink(
+  db: D1Database,
+  projectId: string,
+  conversationId: string,
+  caseId: string,
+) {
+  const link = await first<Row>(db.prepare(
+    `SELECT * FROM conversation_case_links
+     WHERE project_id = ? AND conversation_id = ? AND case_id = ? AND ended_at IS NULL
+     LIMIT 1`,
+  ).bind(projectId, conversationId, caseId));
+  if (!link) throw new Error("Case must be associated with this conversation.");
+  return link;
+}
+
 async function requireEvent(db: D1Database, projectId: string, conversationId: string, eventId: string) {
   const record = await first<Row>(db.prepare(
     "SELECT * FROM events WHERE id = ? AND project_id = ? AND conversation_id = ? LIMIT 1",
@@ -80,8 +95,14 @@ export async function createBoundaryProposal(db: D1Database, projectId: string, 
   let eventIds = stringArray(body.eventIds ?? [], "event IDs");
   const sourceCaseIds = stringArray(body.sourceCaseIds ?? [], "source case IDs");
   const targetCaseId = body.targetCaseId ? assertId(body.targetCaseId, "target case ID") : null;
-  for (const caseId of sourceCaseIds) await requireCase(db, projectId, caseId);
-  if (targetCaseId) await requireCase(db, projectId, targetCaseId);
+  for (const caseId of sourceCaseIds) {
+    await requireCase(db, projectId, caseId);
+    await requireConversationCaseLink(db, projectId, conversationId, caseId);
+  }
+  if (targetCaseId) {
+    await requireCase(db, projectId, targetCaseId);
+    await requireConversationCaseLink(db, projectId, conversationId, targetCaseId);
+  }
   if (["attach", "move", "split", "merge"].includes(operationType) && !targetCaseId) {
     throw new Error("Target case is required for this boundary operation.");
   }
@@ -253,7 +274,7 @@ export async function applyBoundaryProposal(db: D1Database, projectId: string, p
 
 export async function reverseBoundaryOperation(db: D1Database, projectId: string, operationId: string, body: Row) {
   const operation = await first<Row>(db.prepare(
-    "SELECT * FROM case_boundary_operations WHERE id = ? AND project_id = ? LIMIT 1",
+    "SELECT rowid AS operation_order, * FROM case_boundary_operations WHERE id = ? AND project_id = ? LIMIT 1",
   ).bind(operationId, projectId));
   if (!operation) throw new Error("Boundary operation not found.");
   if (operation.reversed_by_operation_id) throw new Error("Boundary operation was already reversed.");
@@ -261,15 +282,45 @@ export async function reverseBoundaryOperation(db: D1Database, projectId: string
   const payload = parseJson<{
     beforeEvents: Array<{ id: string; caseId: string | null; assignmentState: string; activeAttachmentId: string | null }>;
     beforeCases: Array<{ id: string; status: string; closedAt: string | null }>;
-  }>(operation.operation_payload, { beforeEvents: [], beforeCases: [] });
+    after: { caseId: string | null; assignmentState: string };
+    createdAttachmentIds: string[];
+  }>(operation.operation_payload, {
+    beforeEvents: [],
+    beforeCases: [],
+    after: { caseId: null, assignmentState: "unassigned" },
+    createdAttachmentIds: [],
+  });
   const reversedAt = now();
   const reverseId = canonicalId("boundary-operation");
   const statements: D1PreparedStatement[] = [];
   const restoredAttachmentIds: string[] = [];
+  const laterOperations = await all<Row>(db.prepare(
+    `SELECT * FROM case_boundary_operations
+     WHERE project_id = ? AND conversation_id = ? AND rowid > ?
+       AND reverse_of_operation_id IS NULL AND reversed_by_operation_id IS NULL`,
+  ).bind(projectId, operation.conversation_id, operation.operation_order));
   for (const before of payload.beforeEvents) {
+    const hasNewerOperation = laterOperations.some((later) =>
+      parseJson<{ beforeEvents?: Array<{ id: string }> }>(later.operation_payload, {})
+        .beforeEvents?.some((event) => event.id === before.id),
+    );
+    if (hasNewerOperation) {
+      throw new Error("Cannot reverse a boundary operation before newer event operations are reversed.");
+    }
+    const currentEvent = await requireEvent(db, projectId, String(operation.conversation_id), before.id);
     const currentAttachment = await first<Row>(db.prepare(
       "SELECT * FROM case_event_attachments WHERE project_id = ? AND event_id = ? AND ended_at IS NULL ORDER BY created_at DESC LIMIT 1",
     ).bind(projectId, before.id));
+    const currentMatchesOperation = currentEvent.case_id === payload.after.caseId
+      && currentEvent.assignment_state === payload.after.assignmentState
+      && (
+        payload.after.assignmentState !== "assigned"
+          ? !currentAttachment
+          : Boolean(currentAttachment)
+      );
+    if (!currentMatchesOperation) {
+      throw new Error("Cannot reverse a boundary operation after newer event state exists.");
+    }
     if (currentAttachment) {
       statements.push(db.prepare(
         "UPDATE case_event_attachments SET ended_at = ? WHERE id = ? AND project_id = ? AND ended_at IS NULL",
