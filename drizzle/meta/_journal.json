@@ -50,6 +50,13 @@
       "when": 1785215013776,
       "tag": "0006_opposite_roland_deschain",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785219055189,
+      "tag": "0007_harsh_makkari",
+      "breakpoints": true
     }
   ]
 }

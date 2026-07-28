@@ -7,6 +7,9 @@ Campus Atlas is a reasoning sidecar for long-running ChatGPT Projects. It preser
 The frozen V1.7 implementation authority is [`docs/V1.7_IMPLEMENTATION_BLUEPRINT.md`](docs/V1.7_IMPLEMENTATION_BLUEPRINT.md).
 Slice 3 checkpoint and governance behavior is documented in
 [`docs/V1.7_SLICE_3_FINDINGS_GOVERNANCE.md`](docs/V1.7_SLICE_3_FINDINGS_GOVERNANCE.md).
+Slice 4 roadway selection, candidate treatment, packet compilation, and receipt
+behavior is documented in
+[`docs/V1.7_SLICE_4_ROADWAYS_PACKETS.md`](docs/V1.7_SLICE_4_ROADWAYS_PACKETS.md).
 
 ## V4.3 Build Week proof
 

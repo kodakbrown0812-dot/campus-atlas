@@ -20,6 +20,9 @@ export default async function ConversationsPage({
           </div>
           <span className={styles.status}>Slice 2 canonical state</span>
         </header>
+        <Link className={styles.textLink} href={`/projects/${encodeURIComponent(projectId)}/ask`}>
+          Open Slice 4 reconstruction verification →
+        </Link>
         <ConversationList projectId={projectId} />
       </div>
     </main>

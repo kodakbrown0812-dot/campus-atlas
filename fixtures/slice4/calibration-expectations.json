@@ -1,0 +1,72 @@
+{
+  "authority": "Expected treatments recorded before executing Slice 4 calibration fixtures.",
+  "fixtures": {
+    "same_topic_wrong_mechanism": {
+      "expectedRoadway": "Margin / Run-Line Value",
+      "expectedTreatment": "Exclude",
+      "reason": "Entity or topic overlap cannot replace direct mechanism fit."
+    },
+    "different_vocabulary_same_mechanism": {
+      "expectedRoadway": "Margin / Run-Line Value",
+      "expectedTreatment": "Use",
+      "reason": "Winning-by-two and one-score language maps to margin mechanics without repeating a canonical mechanism."
+    },
+    "older_outcome_vs_newer_speculation": {
+      "expectedTreatment": "Consider",
+      "expectedOrder": "outcome_before_speculation",
+      "reason": "Reality contact and evidence strength outrank recency alone."
+    },
+    "user_correction_vs_repeated_inference": {
+      "expectedTreatment": "Consider",
+      "expectedOrder": "correction_before_inference",
+      "reason": "The correction remains protected even though neither item has governing approval."
+    },
+    "approved_local_outside_scope": {
+      "expectedTreatment": "Exclude",
+      "reason": "Local authority cannot govern outside its supporting case."
+    },
+    "strong_counterexample": {
+      "expectedTreatment": "Consider",
+      "reason": "The strongest challenge travels with the applicable governing mechanism."
+    },
+    "conflicting_approved_mechanisms": {
+      "expectedTreatment": "Use",
+      "expectedRepresentation": "Conflicted",
+      "reason": "Both approved mechanisms remain visible without silent resolution."
+    },
+    "superseded_live_snapshot": {
+      "expectedTreatment": "Exclude",
+      "reason": "Superseded or stale current state cannot enter Use."
+    },
+    "rejected_resurfacing": {
+      "expectedTreatment": "Exclude",
+      "reason": "Rejected records remain inspectable but cannot govern."
+    },
+    "broad_then_narrow": {
+      "expectedBroadRoadway": "Broad Lock-Finding",
+      "expectedNarrowRoadway": "Margin / Run-Line Value",
+      "reason": "The narrow task must not receive a project-memory dump."
+    },
+    "missing_required_state": {
+      "expectedStatus": "failed",
+      "reason": "Compilation stops honestly when safe current-state reasoning is unavailable."
+    },
+    "minimum_safe_packet": {
+      "expectedStatus": "failed",
+      "reason": "Required checks, corrections, conflicts, and strongest challenge cannot be silently dropped."
+    },
+    "project_isolation": {
+      "expectedTreatment": "absent",
+      "reason": "Semantic similarity cannot retrieve Project A records from Project B."
+    },
+    "brewers_reconstructed_vs_exact": {
+      "expectedBrewersRepresentation": "Reconstructed",
+      "expectedNativeRepresentation": "Exact",
+      "reason": "The unavailable historical transcript limitation remains explicit."
+    },
+    "redundant_approved_mechanisms": {
+      "expectedTreatment": "Exclude",
+      "reason": "Functionally equal redundancy is removed before lower-value content."
+    }
+  }
+}
