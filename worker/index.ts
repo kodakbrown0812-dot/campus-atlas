@@ -8,6 +8,8 @@ import { handleCanonicalRecords } from "./canonical-records";
 import { handleConversationCases } from "./conversation-cases";
 import { handleSlice3 } from "./slice3-api";
 import { handleSlice4 } from "./slice4-api";
+import { handleSlice5 } from "./slice5-api";
+import { TestReceivingModelAdapter } from "./receiving-model";
 
 interface Env {
   ASSETS: Fetcher;
@@ -15,6 +17,7 @@ interface Env {
   OPENAI_API_KEY?: string;
   CAMPUS_ATLAS_ACTION_KEY?: string;
   CAMPUS_ATLAS_PUBLIC_DEMO?: string;
+  ATLAS_TEST_RECEIVING_MODEL_ADAPTER?: TestReceivingModelAdapter;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -57,6 +60,14 @@ const worker = {
 
     if (/^\/api\/v1\/projects\/[^/]+\/(?:roadways|reconstruction|packets|live-state)(?:\/|$)/.test(url.pathname)) {
       return handleSlice4(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+    }
+
+    if (/^\/api\/v1\/projects\/[^/]+\/handoffs(?:\/|$)/.test(url.pathname)) {
+      return handleSlice5(request, env.DB, {
+        actionKey: env.CAMPUS_ATLAS_ACTION_KEY,
+        openAiApiKey: env.OPENAI_API_KEY,
+        testAdapter: env.ATLAS_TEST_RECEIVING_MODEL_ADAPTER,
+      });
     }
 
     if (url.pathname.startsWith("/api/v1/projects/") && url.pathname.includes("/records/")) {

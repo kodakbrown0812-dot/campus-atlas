@@ -18,9 +18,9 @@ export default async function AskPage({
           <div>
             <span className={styles.eyebrow}>Canonical reconstruction</span>
             <h1>Ask with Atlas</h1>
-            <p>Interpret a task, inspect server-side treatment, compile a bounded packet, and read its immutable receipt.</p>
+            <p>Interpret a task, compile governed context, preserve its immutable receipt, hand the saved packet to a receiving model, and inspect the causal handoff receipt.</p>
           </div>
-          <span className={styles.status}>Slice 4 verification</span>
+          <span className={styles.status}>Slice 5 verification</span>
         </header>
         <ReconstructionWorkspace projectId={projectId} />
       </div>
