@@ -10,6 +10,9 @@ Slice 3 checkpoint and governance behavior is documented in
 Slice 4 roadway selection, candidate treatment, packet compilation, and receipt
 behavior is documented in
 [`docs/V1.7_SLICE_4_ROADWAYS_PACKETS.md`](docs/V1.7_SLICE_4_ROADWAYS_PACKETS.md).
+Slice 5 receiving-model handoff, answer references, and causal packet
+comparison are documented in
+[`docs/V1.7_SLICE_5_HANDOFF_DIFF.md`](docs/V1.7_SLICE_5_HANDOFF_DIFF.md).
 
 ## V4.3 Build Week proof
 
@@ -202,8 +205,10 @@ local placeholder binding for development. The tracked migration is under
 
 Runtime variables:
 
-- `OPENAI_API_KEY` — optional; enables the live structured capture call.
-  Without it, `/api/structure` returns `503` with no proposal or finding.
+- `OPENAI_API_KEY` — optional; enables live structured capture and the Slice 5
+  OpenAI receiving-model handoff. Without it, `/api/structure` returns `503`
+  with no proposal or finding, and handoff attempts persist an honest failed
+  record with no answer.
 - `CAMPUS_ATLAS_ACTION_KEY` — required to enable external write routes and MCP
   write tools. When absent, external writes fail closed.
 - `CAMPUS_ATLAS_PUBLIC_DEMO=true` — optional; isolates each browser in an

@@ -11,7 +11,8 @@ export const CANONICAL_RECORD_TYPES = [
   "reasoning_nodes", "reasoning_node_versions",
   "findings", "finding_versions", "mechanisms", "mechanism_versions",
   "governance_events", "roadways", "roadway_versions", "live_state_snapshots", "packets",
-  "packet_items", "receipts", "handoffs",
+  "packet_items", "receipts", "handoffs", "handoff_lifecycle_events",
+  "handoff_answers", "handoff_receipts",
 ] as const;
 
 export type CanonicalRecordType = typeof CANONICAL_RECORD_TYPES[number];
@@ -44,6 +45,10 @@ const DOMAIN_OWNED_WRITES = new Set<CanonicalRecordType>([
   "packets",
   "packet_items",
   "receipts",
+  "handoffs",
+  "handoff_lifecycle_events",
+  "handoff_answers",
+  "handoff_receipts",
 ]);
 const ORDER_COLUMNS: Record<CanonicalRecordType, string> = {
   projects: "created_at",
@@ -72,6 +77,9 @@ const ORDER_COLUMNS: Record<CanonicalRecordType, string> = {
   packet_items: "sequence_order",
   receipts: "created_at",
   handoffs: "handoff_at",
+  handoff_lifecycle_events: "created_at",
+  handoff_answers: "answer_timestamp",
+  handoff_receipts: "created_at",
 };
 
 function assertTable(table: string): asserts table is CanonicalRecordType {

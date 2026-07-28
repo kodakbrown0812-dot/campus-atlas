@@ -71,6 +71,59 @@ type PacketResult = {
   };
 };
 
+type HandoffResult = {
+  handoff: {
+    id: string;
+    packetId: string;
+    originalTask: string;
+    packetSnapshotHash: string;
+    primaryRoadwayId: string;
+    primaryRoadwayVersionId: string;
+    provider: string;
+    model: string;
+    status: "pending" | "sent" | "completed" | "failed";
+    createdAt: string;
+    terminalAt: string | null;
+    failureCategory: string | null;
+    failureReason: string | null;
+    additionalLiveRetrieval: {
+      performed: boolean;
+      requested: boolean;
+      retrievedAt: string | null;
+      tools: Array<{ type: string; identity: string | null }>;
+      reliedOnNewerStateThanPacket: boolean | null;
+    };
+  };
+  answer: {
+    id: string;
+    providerResponseId: string;
+    model: string;
+    answerText: string;
+    answerTimestamp: string;
+  } | null;
+  receipt: {
+    id: string;
+    packetReceiptId: string;
+    priorComparablePacketId: string | null;
+    exactPacketDifference: Array<Record<string, unknown>>;
+    causalPacketDifference: Array<Record<string, unknown>>;
+    governanceCauses: Array<{ governanceEventId: string; effect: string }>;
+    unresolvedConflicts: Array<{ sourceId: string; statement: string }>;
+    strongestChallenges: Array<Record<string, unknown>>;
+    corrections: Array<Record<string, unknown>>;
+    historicalLimitations: Array<Record<string, unknown>>;
+    additionalLiveRetrieval: HandoffResult["handoff"]["additionalLiveRetrieval"];
+    finalAnswerReference: Record<string, unknown> | null;
+    honestyStatement: string;
+  } | null;
+  lifecycle: Array<{
+    id: string;
+    status: string;
+    createdAt: string;
+    failureReason: string | null;
+  }>;
+};
+
 const budgets = [400, 800, 1600] as const;
 
 export default function ReconstructionWorkspace({ projectId }: { projectId: string }) {
@@ -82,6 +135,8 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
   const [roadwayOverride, setRoadwayOverride] = useState("");
   const [interpretation, setInterpretation] = useState<Interpretation | null>(null);
   const [result, setResult] = useState<PacketResult | null>(null);
+  const [receivingModel, setReceivingModel] = useState("gpt-5.6");
+  const [handoff, setHandoff] = useState<HandoffResult | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "working" | "error">("loading");
   const [error, setError] = useState("");
 
@@ -111,6 +166,7 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
     setStatus("working");
     setError("");
     setResult(null);
+    setHandoff(null);
     const response = await fetch(
       `/api/v1/projects/${encodeURIComponent(projectId)}/reconstruction/interpret`,
       {
@@ -143,6 +199,7 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
     setStatus("working");
     setError("");
     setResult(null);
+    setHandoff(null);
     const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/packets`, {
       method: "POST",
       headers: {
@@ -176,6 +233,41 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
     }
     setResult({ packet: value.packet, receipt: value.receipt });
     setInterpretation(value.packet.interpretation);
+    setStatus("ready");
+  }
+
+  async function sendToReceivingModel() {
+    if (!result || result.packet.status !== "compiled" || result.packet.compilationError) return;
+    setStatus("working");
+    setError("");
+    setHandoff(null);
+    const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/handoffs`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${actionKey}`,
+        "idempotency-key": `handoff:${crypto.randomUUID()}`,
+      },
+      body: JSON.stringify({
+        packetId: result.packet.id,
+        provider: "openai",
+        model: receivingModel,
+        actorId: "cody",
+      }),
+    });
+    const value = await response.json().catch(() => ({ error: "Receiving-model handoff failed." })) as (
+      Partial<HandoffResult> & { error?: string }
+    );
+    if (value.handoff) {
+      setHandoff(value as HandoffResult);
+    }
+    if (!response.ok) {
+      setError(
+        value.handoff?.failureReason
+        || value.error
+        || "Receiving-model handoff failed and no success was substituted.",
+      );
+    }
     setStatus("ready");
   }
 
@@ -279,6 +371,85 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
               {result.receipt.governanceCauses.map((cause) => <p key={cause.governanceEventId}>{cause.effect}</p>)}
               <pre className={styles.raw}>{JSON.stringify(result.receipt.exactPacketDifference, null, 2)}</pre>
             </article>
+            <article className={styles.panel}>
+              <span className={styles.eyebrow}>Receiving-model handoff</span>
+              <h2>Four records remain separate</h2>
+              <div className={styles.list}>
+                <div className={styles.event}>
+                  <strong>Your request</strong>
+                  <pre className={styles.raw}>{result.packet.task}</pre>
+                </div>
+                <div className={styles.event}>
+                  <strong>Atlas reconstruction</strong>
+                  <small>Immutable packet {result.packet.id}; this is governed reference context, not a user message.</small>
+                  <pre className={styles.raw}>{result.packet.compiledContent}</pre>
+                </div>
+              </div>
+              <div className={styles.source}>
+                <span>Roadway: {result.packet.interpretation.primaryRoadway?.name}</span>
+                <span>Size: {result.packet.finalTokenCount}/{result.packet.tokenBudget} tokens</span>
+                <span>Freshness gate: {result.receipt.freshness.safeToCompile ? "passed" : "failed"}</span>
+                <span>Unresolved conflicts: {result.receipt.unresolvedConflicts.length}</span>
+                <span>
+                  Historical limitation: {
+                    Object.values(result.receipt.treatmentSummary).flat().some((item) => item.representation === "Reconstructed")
+                      ? "Reconstructed source present; unavailable raw source remains disclosed"
+                      : "none"
+                  }
+                </span>
+              </div>
+              <label className={styles.label} htmlFor="receiving-model">Exact receiving model</label>
+              <select
+                className={styles.select}
+                id="receiving-model"
+                onChange={(event) => setReceivingModel(event.target.value)}
+                value={receivingModel}
+              >
+                <option value="gpt-5.6">OpenAI · gpt-5.6</option>
+              </select>
+              <button
+                className={styles.button}
+                disabled={status === "working" || result.packet.status !== "compiled" || Boolean(result.packet.compilationError)}
+                onClick={sendToReceivingModel}
+                type="button"
+              >
+                Send saved packet to receiving model
+              </button>
+            </article>
+            {handoff ? (
+              <>
+                <article className={styles.panel}>
+                  <span className={styles.eyebrow}>Model answer</span>
+                  {handoff.answer ? (
+                    <>
+                      <h2>{handoff.answer.model}</h2>
+                      <p>{handoff.answer.answerText}</p>
+                      <small>Provider response {handoff.answer.providerResponseId} · {handoff.answer.answerTimestamp}</small>
+                    </>
+                  ) : (
+                    <p className={styles.error}>
+                      No model answer exists. Status: {handoff.handoff.status}. {handoff.handoff.failureReason}
+                    </p>
+                  )}
+                </article>
+                <article className={styles.panel}>
+                  <span className={styles.eyebrow}>Handoff receipt</span>
+                  <h2>{handoff.handoff.id}</h2>
+                  <div className={styles.source}>
+                    <span>{handoff.handoff.provider} · {handoff.handoff.model}</span>
+                    <span>Status: {handoff.handoff.status}</span>
+                    <span>Created: {handoff.handoff.createdAt}</span>
+                    <span>Additional live retrieval: {handoff.handoff.additionalLiveRetrieval.performed ? "recorded" : "false"}</span>
+                    <span>Final-answer reference: {handoff.answer?.id || "none"}</span>
+                    <span>Prior packet: {handoff.receipt?.priorComparablePacketId || "none"}</span>
+                  </div>
+                  <p>{handoff.receipt?.honestyStatement}</p>
+                  <p>Exact packet changes: {handoff.receipt?.exactPacketDifference.length || 0}</p>
+                  <p>Governance causes: {handoff.receipt?.governanceCauses.length || 0}</p>
+                  <pre className={styles.raw}>{JSON.stringify(handoff.receipt?.causalPacketDifference || [], null, 2)}</pre>
+                </article>
+              </>
+            ) : null}
           </>
         ) : null}
       </section>

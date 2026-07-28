@@ -66,6 +66,7 @@ async function sqliteD1() {
     "0005_amusing_turbo.sql",
     "0006_opposite_roland_deschain.sql",
     "0007_harsh_makkari.sql",
+    "0008_complete_timeslip.sql",
   ]) {
     const migration = await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8");
     for (const statement of migration.split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) {
@@ -293,6 +294,33 @@ async function createLiveState(worker, DB, projectId, category, suffix, override
       caseId: overrides.caseId,
     },
   });
+}
+
+async function createSlice5Handoff(
+  worker,
+  DB,
+  projectId,
+  body,
+  idempotencyKey,
+  extraEnv = {},
+) {
+  const response = await worker.fetch(new Request(
+    `http://localhost/api/v1/projects/${encodeURIComponent(projectId)}/handoffs`,
+    {
+      method: "POST",
+      headers: {
+        ...slice2Headers,
+        "idempotency-key": idempotencyKey,
+      },
+      body: JSON.stringify(body),
+    },
+  ), {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "slice-2-test-key",
+    ...extraEnv,
+  }, ctx);
+  return { response, value: await response.json() };
 }
 
 test("renders the development preview", async () => {
@@ -2740,6 +2768,633 @@ test("Slice 4 domain records reject generic writes that could bypass authority a
   const DB = await sqliteD1();
   await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
   for (const table of ["roadways", "roadway_versions", "live_state_snapshots", "packets", "packet_items", "receipts"]) {
+    const result = await slice2Request(worker, DB, `/api/v1/projects/sports/records/${table}`, {
+      method: "POST",
+      body: { id: `${table}:bypass`, project_id: "sports" },
+    });
+    assert.equal(result.response.status, 409, table);
+    assert.match(result.value.error, /owned by a canonical domain service/i);
+  }
+});
+
+test("Slice 5 keeps the exact original request, saved packet, provider input, answer, and receipt separate", async () => {
+  const worker = await builtWorker("slice5-input-separation");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Development");
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:slice5-separation",
+    statement: "Separate outright winning from margin coverage by checking the one-score path and offered number.",
+  });
+  const task = "Can this favorite win by two, or is the one-score cover path too large?";
+  const packet = await createSlice4Packet(worker, DB, {
+    task,
+    tokenBudget: 800,
+  }, "slice5-separation-packet");
+  assert.equal(packet.response.status, 201, JSON.stringify(packet.value));
+  assert.equal(packet.value.packet.status, "compiled");
+  const savedContent = packet.value.packet.compiledContent;
+  const adapterCalls = [];
+  const testAdapter = {
+    fixtureType: "slice5_test_only",
+    async execute(input) {
+      adapterCalls.push(input);
+      return {
+        providerResponseId: "response:slice5-success",
+        model: "atlas-test-receiver-v1",
+        answerText: "Test-only receiving answer kept separate from the request and packet.",
+        completedAt: "2026-07-28T12:00:00.000Z",
+        additionalLiveRetrieval: {
+          performed: false,
+          requested: false,
+          retrievedAt: null,
+          tools: [],
+          reliedOnNewerStateThanPacket: false,
+        },
+        metadata: { fixture: "slice5_test_only", productionSuccess: false },
+      };
+    },
+  };
+  const created = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "test",
+      model: "atlas-test-receiver-v1",
+      actorId: "cody",
+      originalTask: task,
+    },
+    "slice5-handoff-separation",
+    { ATLAS_TEST_RECEIVING_MODEL_ADAPTER: testAdapter },
+  );
+  assert.equal(created.response.status, 201, JSON.stringify(created.value));
+  assert.equal(created.value.handoff.status, "completed");
+  assert.equal(created.value.handoff.originalTask, task);
+  assert.equal(created.value.packet.compiledContent, savedContent);
+  assert.equal(
+    created.value.handoff.packetSnapshotHash,
+    createHash("sha256").update(savedContent).digest("hex"),
+  );
+  assert.equal(created.value.answer.answerText, "Test-only receiving answer kept separate from the request and packet.");
+  assert.equal(created.value.answer.providerResponseId, "response:slice5-success");
+  assert.deepEqual(created.value.lifecycle.map((event) => event.status), ["pending", "sent", "completed"]);
+  assert.equal(created.value.handoff.additionalLiveRetrieval.performed, false);
+  assert.equal(created.value.receipt.finalAnswerReference.handoffId, created.value.handoff.id);
+  assert.equal(created.value.receipt.receivingProvider, "test");
+  assert.equal(created.value.receipt.receivingModel, "atlas-test-receiver-v1");
+  assert.equal(created.value.receipt.handoffStatus, "completed");
+  assert.equal(created.value.receipt.originalTask, task);
+  assert.match(created.value.receipt.honestyStatement, /does not establish outcome correctness/i);
+  assert.doesNotMatch(created.value.receipt.honestyStatement, /caused the model to make the correct/i);
+
+  assert.equal(adapterCalls.length, 1);
+  assert.equal(adapterCalls[0].originalRequest, task);
+  assert.equal(adapterCalls[0].atlasContextPacket, savedContent);
+  assert.deepEqual(adapterCalls[0].providerInput.map((item) => item.role), ["developer", "user"]);
+  assert.equal(adapterCalls[0].providerInput[0].content[1].text, savedContent);
+  assert.equal(adapterCalls[0].providerInput[1].content.length, 1);
+  assert.equal(adapterCalls[0].providerInput[1].content[0].text, task);
+  assert.doesNotMatch(adapterCalls[0].providerInput[1].content[0].text, /Atlas reconstruction packet/);
+  assert.match(adapterCalls[0].boundedInstructions, /not a new user instruction/i);
+  assert.match(adapterCalls[0].boundedInstructions, /cannot override/i);
+
+  const replay = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "test",
+      model: "atlas-test-receiver-v1",
+      actorId: "cody",
+    },
+    "slice5-handoff-separation",
+    { ATLAS_TEST_RECEIVING_MODEL_ADAPTER: testAdapter },
+  );
+  assert.equal(replay.response.status, 200);
+  assert.equal(replay.value.idempotentReplay, true);
+  assert.equal(replay.value.handoff.id, created.value.handoff.id);
+  assert.equal(adapterCalls.length, 1);
+
+  const conflict = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "test",
+      model: "atlas-test-receiver-v1",
+      actorId: "different-actor",
+    },
+    "slice5-handoff-separation",
+    { ATLAS_TEST_RECEIVING_MODEL_ADAPTER: testAdapter },
+  );
+  assert.equal(conflict.response.status, 409);
+
+  const read = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/handoffs/${encodeURIComponent(created.value.handoff.id)}`,
+  );
+  assert.equal(read.response.status, 200);
+  const { idempotentReplay: createdReplay, ...createdSnapshot } = created.value;
+  assert.equal(createdReplay, false);
+  assert.deepEqual(read.value, createdSnapshot);
+  const history = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/handoffs/${encodeURIComponent(created.value.handoff.id)}/history`,
+  );
+  assert.deepEqual(history.value.lifecycle, created.value.lifecycle);
+  const answer = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/handoffs/${encodeURIComponent(created.value.handoff.id)}/answer`,
+  );
+  assert.deepEqual(answer.value.answer, created.value.answer);
+  const receipt = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/handoffs/${encodeURIComponent(created.value.handoff.id)}/receipt`,
+  );
+  assert.deepEqual(receipt.value.receipt, created.value.receipt);
+
+  const crossProjectRead = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/hockey/handoffs/${encodeURIComponent(created.value.handoff.id)}`,
+  );
+  assert.equal(crossProjectRead.response.status, 404);
+  const crossProjectWrite = await createSlice5Handoff(
+    worker,
+    DB,
+    "hockey",
+    {
+      packetId: packet.value.packet.id,
+      provider: "test",
+      model: "atlas-test-receiver-v1",
+      actorId: "cody",
+    },
+    "slice5-cross-project-write",
+    { ATLAS_TEST_RECEIVING_MODEL_ADAPTER: testAdapter },
+  );
+  assert.equal(crossProjectWrite.response.status, 404);
+
+  assert.equal(
+    DB.database.prepare("SELECT compiled_content FROM packets WHERE id = ?").get(packet.value.packet.id).compiled_content,
+    savedContent,
+  );
+  assert.throws(
+    () => DB.database.prepare("UPDATE handoffs SET original_task = 'mutated' WHERE id = ?").run(created.value.handoff.id),
+    /immutable/i,
+  );
+  assert.throws(
+    () => DB.database.prepare("UPDATE handoff_answers SET answer_text = 'mutated' WHERE handoff_id = ?").run(created.value.handoff.id),
+    /immutable/i,
+  );
+  assert.throws(
+    () => DB.database.prepare("DELETE FROM handoff_receipts WHERE handoff_id = ?").run(created.value.handoff.id),
+    /immutable/i,
+  );
+});
+
+test("Slice 5 records missing configuration and provider failure honestly without seeded success", async () => {
+  const worker = await builtWorker("slice5-honest-failure");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "missing", "Missing State Project");
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:slice5-failure",
+    statement: "Separate outright winning from margin coverage and preserve the strongest one-score challenge.",
+  });
+  const packet = await createSlice4Packet(worker, DB, {
+    task: "Can this favorite win by two, or is the one-score run-line path too large?",
+  }, "slice5-failure-packet");
+  assert.equal(packet.value.packet.status, "compiled");
+
+  const unauthorized = await worker.fetch(new Request(
+    "http://localhost/api/v1/projects/sports/handoffs",
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "slice5-unauthorized",
+      },
+      body: JSON.stringify({
+        packetId: packet.value.packet.id,
+        provider: "openai",
+        model: "gpt-5.6",
+        actorId: "cody",
+      }),
+    },
+  ), {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "slice-2-test-key",
+  }, ctx);
+  assert.equal(unauthorized.status, 401);
+
+  const missingKey = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "openai",
+      model: "gpt-5.6",
+      actorId: "cody",
+    },
+    "slice5-missing-api-key",
+  );
+  assert.equal(missingKey.response.status, 503);
+  assert.equal(missingKey.value.handoff.status, "failed");
+  assert.equal(missingKey.value.handoff.failureCategory, "missing_configuration");
+  assert.deepEqual(missingKey.value.lifecycle.map((event) => event.status), ["pending", "failed"]);
+  assert.equal(missingKey.value.answer, null);
+  assert.ok(missingKey.value.receipt);
+  assert.equal(missingKey.value.handoff.additionalLiveRetrieval.performed, false);
+  assert.doesNotMatch(JSON.stringify(missingKey.value), /England|Ghana|seeded answer/i);
+
+  const failingAdapter = {
+    fixtureType: "slice5_test_only",
+    async execute() {
+      throw new Error("Injected provider outage");
+    },
+  };
+  const providerFailure = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "test",
+      model: "atlas-test-receiver-v1",
+      actorId: "cody",
+    },
+    "slice5-provider-failure",
+    { ATLAS_TEST_RECEIVING_MODEL_ADAPTER: failingAdapter },
+  );
+  assert.equal(providerFailure.response.status, 502);
+  assert.equal(providerFailure.value.handoff.status, "failed");
+  assert.deepEqual(providerFailure.value.lifecycle.map((event) => event.status), ["pending", "sent", "failed"]);
+  assert.equal(providerFailure.value.answer, null);
+  assert.match(providerFailure.value.handoff.failureReason, /Injected provider outage/);
+
+  const missingStatePacket = await createSlice4Packet(worker, DB, {
+    projectId: "missing",
+    task: "At the current price tonight, can this favorite cover the -1.5 run line?",
+  }, "slice5-failed-packet");
+  assert.equal(missingStatePacket.value.packet.status, "failed");
+  const failedPacketAttempt = await createSlice5Handoff(
+    worker,
+    DB,
+    "missing",
+    {
+      packetId: missingStatePacket.value.packet.id,
+      provider: "openai",
+      model: "gpt-5.6",
+      actorId: "cody",
+    },
+    "slice5-failed-packet-handoff",
+  );
+  assert.equal(failedPacketAttempt.response.status, 400);
+  assert.match(failedPacketAttempt.value.error, /failed or incomplete/i);
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM handoffs WHERE project_id = 'missing'").get().count,
+    0,
+  );
+
+  const unsupported = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "openai",
+      model: "unsupported-model",
+      actorId: "cody",
+    },
+    "slice5-unsupported-model",
+  );
+  assert.equal(unsupported.response.status, 400);
+  const alteredTask = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "openai",
+      model: "gpt-5.6",
+      actorId: "cody",
+      originalTask: "A silently broadened task",
+    },
+    "slice5-altered-task",
+  );
+  assert.equal(alteredTask.response.status, 400);
+  assert.match(alteredTask.value.error, /cannot alter/i);
+});
+
+test("Slice 5 causal receipt connects a comparable packet diff to the exact governance event", async () => {
+  const worker = await builtWorker("slice5-causal-packet-diff");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const seeded = await seedSlice3Case(worker, DB, "slice5-causal-proof", ["challenge", "correction"]);
+  DB.database.prepare(
+    "UPDATE events SET exact_source_span = ?, compressed_representation = ? WHERE id = ?",
+  ).run(
+    "Strongest challenge: the one-score result still defeats a run-line cover.",
+    "Strongest challenge: preserve the one-score non-cover path.",
+    seeded.events[0].id,
+  );
+  DB.database.prepare(
+    "UPDATE events SET exact_source_span = ?, compressed_representation = ?, actor_id = 'cody' WHERE id = ?",
+  ).run(
+    "Cody correction: winning and covering are separate theses.",
+    "Cody corrected the scope: winning is not covering.",
+    seeded.events[1].id,
+  );
+  const task = "Can this favorite win by two, or does the one-score cover path make the number too expensive?";
+  const before = await createSlice4Packet(worker, DB, {
+    task,
+    caseId: seeded.caseId,
+    tokenBudget: 1600,
+  }, "slice5-causal-before");
+  assert.equal(before.value.packet.status, "compiled");
+
+  const mechanism = seedSlice4Mechanism(DB, {
+    id: "mechanism:slice5-governed-margin",
+    statement: "Separate outright win probability from cover probability using margin distribution, one-score paths, and offered price.",
+    supportingCaseIds: [seeded.caseId],
+    counterevidenceIds: [seeded.events[0].id],
+    realityContact: "Cody-reviewed margin mechanism with an explicit challenge.",
+  });
+  const governanceEventId = "governance-event:slice5-approval";
+  DB.database.prepare(
+    `INSERT INTO governance_events (
+      id, project_id, actor_id, action, target_type, target_id,
+      source_version_id, resulting_version_id, prior_authority, new_authority,
+      prior_scope, new_scope, affected_mechanism_id, reason,
+      retrieval_effect, created_at, idempotency_key
+    ) VALUES (?, 'sports', 'cody', 'approve', 'mechanism', ?, ?, ?,
+              'under_review', 'approved_project_wide', 'local', 'project_wide',
+              ?, 'Cody approved the reviewed wording and scope.',
+              'eligible_when_roadway_scope_and_freshness_match', ?, ?)`,
+  ).run(
+    governanceEventId,
+    mechanism.id,
+    mechanism.versionId,
+    mechanism.versionId,
+    mechanism.id,
+    "2026-07-28T11:00:00.000Z",
+    "slice5-causal-approval",
+  );
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:slice5-conflict-a",
+    statement: "Always prioritize recent favorite cover form when evaluating the run-line margin.",
+    counterevidenceIds: ["mechanism:slice5-conflict-b"],
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:slice5-conflict-b",
+    statement: "Never prioritize recent favorite cover form when evaluating the run-line margin.",
+    counterevidenceIds: ["mechanism:slice5-conflict-a"],
+  });
+  const after = await createSlice4Packet(worker, DB, {
+    task,
+    caseId: seeded.caseId,
+    tokenBudget: 1600,
+  }, "slice5-causal-after");
+  assert.equal(after.value.packet.status, "compiled");
+  assert.equal(after.value.packet.priorComparablePacketId, before.value.packet.id);
+  assert.ok(after.value.receipt.governanceCauses.some((cause) => cause.governanceEventId === governanceEventId));
+  assert.ok(after.value.receipt.exactPacketDifference.some((change) => change.sourceId === mechanism.id));
+
+  const adapter = {
+    fixtureType: "slice5_test_only",
+    async execute(input) {
+      return {
+        providerResponseId: "response:slice5-causal-proof",
+        model: "atlas-test-receiver-v1",
+        answerText: "Test-only answer for causal receipt verification.",
+        completedAt: "2026-07-28T12:30:00.000Z",
+        additionalLiveRetrieval: {
+          performed: true,
+          requested: true,
+          retrievedAt: "2026-07-28T12:29:00.000Z",
+          tools: [{ type: "test_live_lookup", identity: "fixture://slice5/live" }],
+          reliedOnNewerStateThanPacket: true,
+        },
+        metadata: { fixture: true, packetHashVerifiedByAdapter: Boolean(input.atlasContextPacket) },
+      };
+    },
+  };
+  const handoff = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: after.value.packet.id,
+      provider: "test",
+      model: "atlas-test-receiver-v1",
+      actorId: "cody",
+    },
+    "slice5-causal-handoff",
+    { ATLAS_TEST_RECEIVING_MODEL_ADAPTER: adapter },
+  );
+  assert.equal(handoff.response.status, 201, JSON.stringify(handoff.value));
+  assert.equal(handoff.value.receipt.priorComparablePacketId, before.value.packet.id);
+  const mechanismChange = handoff.value.receipt.causalPacketDifference.find(
+    (change) => change.sourceId === mechanism.id,
+  );
+  assert.ok(mechanismChange);
+  assert.equal(mechanismChange.cause.governanceEventId, governanceEventId);
+  assert.ok(handoff.value.receipt.strongestChallenges.some((item) => item.sourceId === seeded.events[0].id));
+  assert.ok(handoff.value.receipt.corrections.some((item) => item.sourceId === seeded.events[1].id));
+  assert.ok(handoff.value.receipt.unresolvedConflicts.length >= 2);
+  assert.equal(handoff.value.handoff.additionalLiveRetrieval.performed, true);
+  assert.equal(handoff.value.receipt.additionalLiveRetrieval.tools[0].identity, "fixture://slice5/live");
+  assert.equal(handoff.value.receipt.additionalLiveRetrieval.reliedOnNewerStateThanPacket, true);
+  assert.doesNotMatch(JSON.stringify(handoff.value.receipt), /caused the (?:model|final decision).*correct/i);
+
+  const comparison = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/handoffs/${encodeURIComponent(handoff.value.handoff.id)}/comparison`,
+  );
+  assert.equal(comparison.response.status, 200);
+  assert.deepEqual(comparison.value.causalPacketDifference, handoff.value.receipt.causalPacketDifference);
+  assert.ok(comparison.value.governanceCauses.some((cause) => cause.governanceEventId === governanceEventId));
+});
+
+test("Slice 5 preserves Brewers as Reconstructed beside Exact native source through handoff", async () => {
+  const worker = await builtWorker("slice5-brewers-handoff");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const fixture = await readFile(
+    new URL("../fixtures/brewers/rockies-brewers-user-reconstruction.txt", import.meta.url),
+    "utf8",
+  );
+  const contract = JSON.parse(await readFile(
+    new URL("../fixtures/brewers/rockies-brewers-user-reconstruction.json", import.meta.url),
+    "utf8",
+  ));
+  const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "slice5-brewers-import",
+    body: {
+      format: "text",
+      title: contract.caseObjective,
+      sourceName: contract.sourceName,
+      sourceType: contract.sourceType,
+      representationType: contract.representationType,
+      authorityState: contract.authorityState,
+      importId: "slice5-brewers-reconstruction",
+      transcript: fixture,
+      provenance: contract.provenance,
+    },
+  });
+  const native = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Slice 5 exact native outcome", provenance: { source: "campus_atlas_native" } },
+  });
+  const nativeCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: "Review the exact native Rockies–Brewers outcome",
+      conversationId: native.value.conversation.id,
+      makeActive: true,
+      actorId: "cody",
+    },
+  });
+  const exactContent = "Exact native source: Colorado won 5–2; current postmortem records what reality contradicted.";
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(native.value.conversation.id)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "slice5-native-exact-message",
+      body: { actorType: "user", actorId: "cody", content: exactContent },
+    },
+  );
+  const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId: native.value.conversation.id,
+      caseId: nativeCase.value.case.id,
+      type: "outcome",
+      assignmentState: "assigned",
+      exactSourceSpan: exactContent,
+      sourceSpans: [{ messageId: message.value.message.id, start: 0, end: exactContent.length }],
+    },
+  });
+  const packet = await createSlice4Packet(worker, DB, {
+    task: "Explain the completed Rockies–Brewers outcome and postmortem without rewriting the source.",
+    caseId: nativeCase.value.case.id,
+    tokenBudget: 1600,
+  }, "slice5-brewers-packet");
+  assert.equal(packet.value.packet.status, "compiled");
+
+  const adapter = {
+    fixtureType: "slice5_test_only",
+    async execute() {
+      return {
+        providerResponseId: "response:slice5-brewers",
+        model: "atlas-test-receiver-v1",
+        answerText: "Test-only Brewers handoff answer.",
+        completedAt: "2026-07-28T13:00:00.000Z",
+        additionalLiveRetrieval: {
+          performed: false,
+          requested: false,
+          retrievedAt: null,
+          tools: [],
+          reliedOnNewerStateThanPacket: false,
+        },
+        metadata: { fixture: true },
+      };
+    },
+  };
+  const handoff = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "test",
+      model: "atlas-test-receiver-v1",
+      actorId: "cody",
+    },
+    "slice5-brewers-handoff",
+    { ATLAS_TEST_RECEIVING_MODEL_ADAPTER: adapter },
+  );
+  assert.equal(handoff.response.status, 201, JSON.stringify(handoff.value));
+  assert.ok(
+    handoff.value.receipt.historicalLimitations.some(
+      (item) => item.sourceId === imported.value.import.id
+        && item.representation === "Reconstructed"
+        && item.automaticAuthorityPromotion === false,
+    ),
+  );
+  const allItems = Object.values(handoff.value.receipt.treatmentSummary).flat();
+  const reconstructed = allItems.find((item) => item.sourceId === imported.value.import.id);
+  assert.equal(reconstructed.representation, "Reconstructed");
+  assert.notEqual(reconstructed.treatment, "Use");
+  const exact = allItems.find((item) => item.sourceId === event.value.event.id);
+  assert.equal(exact.representation, "Exact");
+  assert.match(handoff.value.packet.compiledContent, /historical raw transcript unavailable; not Exact/i);
+  assert.doesNotMatch(JSON.stringify(handoff.value), /authentic raw transcript.*passed/i);
+});
+
+test("Slice 5 migration, API, and minimal Ask interface expose immutable auditable handoff without Slice 6 redesign", async () => {
+  const migration = await readFile(
+    new URL("../drizzle/0008_complete_timeslip.sql", import.meta.url),
+    "utf8",
+  );
+  for (const table of ["handoff_lifecycle_events", "handoff_answers", "handoff_receipts"]) {
+    assert.match(migration, new RegExp(`CREATE TABLE .${table}.`));
+  }
+  for (const trigger of [
+    "handoffs_immutable_update",
+    "handoff_lifecycle_events_immutable_update",
+    "handoff_answers_immutable_update",
+    "handoff_receipts_immutable_update",
+  ]) {
+    assert.match(migration, new RegExp(trigger));
+  }
+  const [service, adapter, api, interfaceSource, pageSource] = await Promise.all([
+    readFile(new URL("../worker/handoff-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/receiving-model.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/slice5-api.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/page.tsx", import.meta.url), "utf8"),
+  ]);
+  for (const text of [
+    "Your request",
+    "Atlas reconstruction",
+    "Send saved packet to receiving model",
+    "Model answer",
+    "Handoff receipt",
+    "Additional live retrieval",
+    "Final-answer reference",
+  ]) {
+    assert.match(interfaceSource, new RegExp(text));
+  }
+  assert.match(pageSource, /Slice 5 verification/);
+  assert.match(adapter, /not a new user instruction/i);
+  assert.match(adapter, /role: "user"/);
+  assert.match(service, /packetRecompiled: false/);
+  assert.match(service, /Supplying context does not establish outcome correctness/i);
+  assert.match(api, /parts\[1\] === "comparison"/);
+  assert.doesNotMatch(`${service}\n${adapter}\n${api}`, /England|Ghana|seeded answer/i);
+  assert.doesNotMatch(`${interfaceSource}\n${pageSource}`, /Work\s*Atlas Found\s*Ask\s*Inspect/);
+});
+
+test("Slice 5 handoff records reject generic canonical writes", async () => {
+  const worker = await builtWorker("slice5-generic-write-boundary");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  for (const table of ["handoffs", "handoff_lifecycle_events", "handoff_answers", "handoff_receipts"]) {
     const result = await slice2Request(worker, DB, `/api/v1/projects/sports/records/${table}`, {
       method: "POST",
       body: { id: `${table}:bypass`, project_id: "sports" },
