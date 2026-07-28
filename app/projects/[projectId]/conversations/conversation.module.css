@@ -164,6 +164,7 @@
 
 .select,
 .input,
+.textarea,
 .button {
   width: 100%;
   min-height: 42px;
@@ -174,12 +175,20 @@
 }
 
 .select,
-.input {
+.input,
+.textarea {
   padding: 9px 10px;
 }
 
-.input {
+.input,
+.textarea {
   margin-top: 8px;
+}
+
+.textarea {
+  min-height: 150px;
+  resize: vertical;
+  font: inherit;
 }
 
 .button {
@@ -190,6 +199,17 @@
 
 .button:hover {
   border-color: rgba(77, 124, 254, .62);
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.actions .button {
+  margin-top: 0;
 }
 
 .case {
@@ -212,9 +232,29 @@
   border-radius: 9px;
 }
 
-.event a {
+.event a,
+.textLink {
   color: #9ab1fa;
   font-size: 11px;
+}
+
+.textLink {
+  display: inline-block;
+  margin-top: 12px;
+}
+
+.checkpoint {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(39, 212, 199, .25);
+  border-radius: 9px;
+  background: rgba(39, 212, 199, .05);
+}
+
+.checkpoint p {
+  margin: 6px 0 0;
+  color: #9bacc5;
+  font-size: 12px;
 }
 
 .error {
@@ -241,5 +281,9 @@
 
   .sidebar {
     grid-row: 1;
+  }
+
+  .actions {
+    grid-template-columns: 1fr;
   }
 }

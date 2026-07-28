@@ -5,6 +5,8 @@ Campus Atlas is a reasoning sidecar for long-running ChatGPT Projects. It preser
 **Campus Atlas is the product.** “AI Reasoning Rebar” describes the architecture underneath it. Amy Campus is the example workspace, and Sports Engine is the mature proof project inside that workspace.
 
 The frozen V1.7 implementation authority is [`docs/V1.7_IMPLEMENTATION_BLUEPRINT.md`](docs/V1.7_IMPLEMENTATION_BLUEPRINT.md).
+Slice 3 checkpoint and governance behavior is documented in
+[`docs/V1.7_SLICE_3_FINDINGS_GOVERNANCE.md`](docs/V1.7_SLICE_3_FINDINGS_GOVERNANCE.md).
 
 ## V4.3 Build Week proof
 
@@ -57,7 +59,9 @@ No hidden chain-of-thought is displayed. The AI Work Receipt shows structured pr
 
 `POST /api/structure` uses the OpenAI Responses API with model `gpt-5.6` and a strict JSON schema when `OPENAI_API_KEY` is configured in the hosted environment.
 
-Without a runtime API key, the same endpoint returns an explicitly labeled seeded demonstration proposal so the judge path remains replayable. The receipt never mislabels fallback output as a live model call.
+Without a runtime API key, or when the live request fails, the endpoint fails
+explicitly with `proposal: null`. It does not fabricate a seeded extraction or
+create a finding.
 
 ## Using Campus Atlas with ChatGPT today
 
@@ -196,7 +200,7 @@ local placeholder binding for development. The tracked migration is under
 Runtime variables:
 
 - `OPENAI_API_KEY` — optional; enables the live structured capture call.
-  Without it, `/api/structure` returns an explicitly labeled seeded fallback.
+  Without it, `/api/structure` returns `503` with no proposal or finding.
 - `CAMPUS_ATLAS_ACTION_KEY` — required to enable external write routes and MCP
   write tools. When absent, external writes fail closed.
 - `CAMPUS_ATLAS_PUBLIC_DEMO=true` — optional; isolates each browser in an

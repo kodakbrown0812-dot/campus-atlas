@@ -7,7 +7,8 @@ export const AUTHORITY_STATES = [
 export const CANONICAL_RECORD_TYPES = [
   "projects", "conversations", "conversation_imports", "messages", "events", "cases",
   "conversation_case_links", "case_event_attachments", "case_boundary_proposals",
-  "case_boundary_operations", "reasoning_nodes", "reasoning_node_versions",
+  "case_boundary_operations", "checkpoints", "checkpoint_reasoning_nodes",
+  "reasoning_nodes", "reasoning_node_versions",
   "findings", "finding_versions", "mechanisms", "mechanism_versions",
   "governance_events", "roadways", "roadway_versions", "packets",
   "packet_items", "receipts", "handoffs",
@@ -19,7 +20,7 @@ type CanonicalRow = Record<string, unknown> & { id: string; project_id?: string 
 const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{2,95}$/i;
 const RECORD_ID_PATTERN = /^[a-z0-9][^\u0000-\u001f\u007f]{2,127}$/i;
 const tableNames = new Set<string>(CANONICAL_RECORD_TYPES);
-const SLICE_2_DOMAIN_WRITES = new Set<CanonicalRecordType>([
+const DOMAIN_OWNED_WRITES = new Set<CanonicalRecordType>([
   "conversations",
   "conversation_imports",
   "messages",
@@ -29,6 +30,14 @@ const SLICE_2_DOMAIN_WRITES = new Set<CanonicalRecordType>([
   "case_event_attachments",
   "case_boundary_proposals",
   "case_boundary_operations",
+  "checkpoints",
+  "checkpoint_reasoning_nodes",
+  "reasoning_nodes",
+  "reasoning_node_versions",
+  "findings",
+  "finding_versions",
+  "mechanisms",
+  "mechanism_versions",
 ]);
 const ORDER_COLUMNS: Record<CanonicalRecordType, string> = {
   projects: "created_at",
@@ -41,6 +50,8 @@ const ORDER_COLUMNS: Record<CanonicalRecordType, string> = {
   case_event_attachments: "created_at",
   case_boundary_proposals: "created_at",
   case_boundary_operations: "created_at",
+  checkpoints: "started_at",
+  checkpoint_reasoning_nodes: "created_at",
   reasoning_nodes: "created_at",
   reasoning_node_versions: "created_at",
   findings: "created_at",
@@ -143,9 +154,9 @@ export async function handleCanonicalRecords(request: Request, db: D1Database, a
       if (!actionKey || request.headers.get("authorization") !== `Bearer ${actionKey}`) {
         return Response.json({ error: "Write authorization required." }, { status: 401 });
       }
-      if (SLICE_2_DOMAIN_WRITES.has(table as CanonicalRecordType)) {
+      if (DOMAIN_OWNED_WRITES.has(table as CanonicalRecordType)) {
         return Response.json({
-          error: "This record type is owned by the Slice 2 conversation and case APIs.",
+          error: "This record type is owned by a canonical domain service.",
         }, { status: 409 });
       }
       const body = await request.json() as CanonicalRow;
