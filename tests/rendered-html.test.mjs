@@ -62,6 +62,9 @@ async function sqliteD1() {
     "0001_bored_sage.sql",
     "0002_remarkable_the_executioner.sql",
     "0003_small_bromley.sql",
+    "0004_odd_patriot.sql",
+    "0005_amusing_turbo.sql",
+    "0006_opposite_roland_deschain.sql",
   ]) {
     const migration = await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8");
     for (const statement of migration.split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) {
@@ -170,6 +173,54 @@ async function seedCanonicalProject(worker, DB, id, name) {
   assert.equal(result.response.status, 201);
 }
 
+async function seedSlice3Case(worker, DB, suffix, eventTypes) {
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: `Slice 3 ${suffix}` },
+  });
+  assert.equal(conversation.response.status, 201);
+  const conversationId = conversation.value.conversation.id;
+  const caseResult = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: `Govern the ${suffix} reasoning pathway`,
+      conversationId,
+      makeActive: true,
+      actorId: "cody",
+    },
+  });
+  assert.equal(caseResult.response.status, 201);
+  const events = [];
+  for (let index = 0; index < eventTypes.length; index += 1) {
+    const content = `${suffix} exact source ${index}: ${eventTypes[index]}`;
+    const message = await slice2Request(
+      worker,
+      DB,
+      `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: "POST",
+        idempotencyKey: `${suffix}-message-${index}`,
+        body: { actorType: index % 2 ? "assistant" : "user", content },
+      },
+    );
+    assert.equal(message.response.status, 201);
+    const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+      method: "POST",
+      body: {
+        conversationId,
+        caseId: caseResult.value.case.id,
+        type: eventTypes[index],
+        assignmentState: "assigned",
+        exactSourceSpan: content,
+        sourceSpans: [{ messageId: message.value.message.id, start: 0, end: content.length }],
+      },
+    });
+    assert.equal(event.response.status, 201);
+    events.push(event.value.event);
+  }
+  return { conversationId, caseId: caseResult.value.case.id, events };
+}
+
 test("renders the development preview", async () => {
   const worker = await builtWorker("render");
   const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), { ASSETS: assets }, ctx);
@@ -239,6 +290,24 @@ test("Slice 1 migration contains normalized records without replacing atlas_stat
   assert.match(schema, /export const atlasState/);
   assert.match(classification, /verified_canonical_history/);
   assert.match(classification, /unverified_proposal/);
+});
+
+test("Slice 3 migrations add checkpoints and append-only governance metadata", async () => {
+  const checkpointMigration = await readFile(new URL("../drizzle/0004_odd_patriot.sql", import.meta.url), "utf8");
+  const governanceMigration = await readFile(new URL("../drizzle/0005_amusing_turbo.sql", import.meta.url), "utf8");
+  const parityMigration = await readFile(new URL("../drizzle/0006_opposite_roland_deschain.sql", import.meta.url), "utf8");
+  assert.match(checkpointMigration, /CREATE TABLE `checkpoints`/);
+  assert.match(checkpointMigration, /CREATE TABLE `checkpoint_reasoning_nodes`/);
+  assert.match(checkpointMigration, /proposal_hash/);
+  assert.match(governanceMigration, /prior_status/);
+  assert.match(governanceMigration, /rollback_of_event_id/);
+  assert.match(governanceMigration, /source_finding_id/);
+  assert.match(governanceMigration, /finding_versions_immutable_update/);
+  assert.match(governanceMigration, /mechanism_versions_immutable_delete/);
+  assert.match(governanceMigration, /governance_events_immutable_update/);
+  assert.match(parityMigration, /authority_state/);
+  assert.match(parityMigration, /prior_return_condition/);
+  assert.match(parityMigration, /new_expires_at/);
 });
 
 test("Slice 2 native and imported conversations share one immutable source model", async () => {
@@ -1382,4 +1451,574 @@ test("demo reset restores every V4.6 proof subsystem without deleting unrelated 
   assert.match(page, /applies only to the current Amy Campus demo session/);
   assert.match(page, /makeSeedState\(state\.workspaceId\)/);
   assert.match(data, /proofBaseline: null/);
+});
+
+test("Slice 3 checkpoints select at most seven exact-source nodes and accept zero findings", async () => {
+  const worker = await builtWorker("slice3-sparse-checkpoint");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const seeded = await seedSlice3Case(
+    worker,
+    DB,
+    "sparse",
+    ["context", "evidence", "assumption", "estimate", "unknown", "method", "decision", "challenge", "outcome"],
+  );
+  const analyzed = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-sparse-checkpoint-1",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      trigger: "analyze_now",
+      findingCandidates: [],
+    },
+  });
+  assert.equal(analyzed.response.status, 201);
+  assert.equal(analyzed.value.checkpoint.candidateCount, 9);
+  assert.equal(analyzed.value.checkpoint.selectedCount, 7);
+  assert.equal(analyzed.value.checkpoint.omittedCount, 2);
+  assert.equal(analyzed.value.selectedNodes.length, 7);
+  assert.equal(analyzed.value.findings.length, 0);
+  assert.equal(analyzed.value.noDurableFindingProposed, true);
+  assert.ok(analyzed.value.selectedNodes.every((node) => node.sourceEventIds.length === 1));
+  const canonicalEventIds = new Set(seeded.events.map((event) => event.id));
+  assert.ok(analyzed.value.selectedNodes.every((node) => canonicalEventIds.has(node.sourceEventIds[0])));
+  assert.ok(analyzed.value.selectedNodes.every((node) => ["Exact", "Compressed"].includes(node.representationType)));
+
+  const refreshed = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/checkpoints/${encodeURIComponent(analyzed.value.checkpoint.id)}`,
+  );
+  assert.equal(refreshed.response.status, 200);
+  assert.deepEqual(refreshed.value, {
+    checkpoint: analyzed.value.checkpoint,
+    selectedNodes: analyzed.value.selectedNodes,
+    findings: [],
+  });
+
+  const replay = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-sparse-checkpoint-1",
+    body: { conversationId: seeded.conversationId, caseId: seeded.caseId },
+  });
+  assert.equal(replay.response.status, 200);
+  assert.equal(replay.value.idempotentReplay, true);
+
+  const unavailableStructure = await worker.fetch(new Request("http://localhost/api/structure", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      project: "Sports Engine",
+      input: "This source must not receive a fabricated England–Ghana fallback proposal.",
+    }),
+  }), { DB, ASSETS: assets }, ctx);
+  assert.equal(unavailableStructure.status, 503);
+  const unavailableBody = await unavailableStructure.json();
+  assert.equal(unavailableBody.proposal, null);
+  assert.equal(unavailableBody.findingCreated, false);
+});
+
+test("Slice 3 Cody revision governs, changes eligibility, and rolls back without rewriting history", async () => {
+  const worker = await builtWorker("slice3-governance");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const seeded = await seedSlice3Case(worker, DB, "mechanism", ["correction", "outcome"]);
+  const originalProposal = "Late contradictions to a central mechanism require a genuine rerank.";
+  const analyzed = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-mechanism-checkpoint",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      findingCandidates: [{
+        findingType: "mechanism_recognition",
+        sourceEventIds: seeded.events.map((event) => event.id),
+        proposalStatement: originalProposal,
+        proposedScope: "local",
+        conditions: ["The contradiction affects the wager's central mechanism."],
+        exclusions: ["Cosmetic or already-resolved discrepancies."],
+        supportingEvidence: [seeded.events[0].id],
+        counterevidence: [seeded.events[1].id],
+        uncertainty: "Needs Cody to define the rerank threshold.",
+        reasonForSurfacing: "The correction and outcome changed the reasoning pathway.",
+        expectedRetrievalEffect: "Require an explicit rerank check in later comparable research.",
+      }],
+    },
+  });
+  assert.equal(analyzed.response.status, 201);
+  assert.equal(analyzed.value.findings.length, 1);
+  const finding = analyzed.value.findings[0];
+
+  const combined = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-combined-finding-rejected",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      findingCandidates: [{
+        findingType: "mechanism_recognition",
+        sourceEventIds: [seeded.events[0].id],
+        proposalStatement: "This candidate attempts to carry multiple consequences.",
+        consequences: ["rerank", "change scope"],
+        reasonForSurfacing: "Invalid combined proposal.",
+        expectedRetrievalEffect: "None.",
+      }],
+    },
+  });
+  assert.equal(combined.response.status, 400);
+
+  const revisedStatement = "When late evidence contradicts a central wagering mechanism, rerank the alternatives or pass.";
+  const revised = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "slice3-revise-mechanism",
+      body: {
+        action: "revise",
+        actorId: "cody",
+        sourceVersionId: finding.currentVersionId,
+        reviewedStatement: revisedStatement,
+        scope: "project_wide",
+        reason: "Make the action and scope explicit before approval.",
+      },
+    },
+  );
+  assert.equal(revised.response.status, 201);
+  assert.equal(revised.value.record.status, "under_review");
+  assert.equal(revised.value.newAuthority, "under_review");
+
+  const approved = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "slice3-approve-mechanism",
+      body: {
+        action: "approve",
+        actorId: "cody",
+        sourceVersionId: revised.value.record.currentVersionId,
+        scope: "project_wide",
+        reason: "Approve Cody's reviewed wording for Sports Engine retrieval.",
+      },
+    },
+  );
+  assert.equal(approved.response.status, 201);
+  assert.equal(approved.value.record.status, "approved");
+  assert.equal(approved.value.record.authority, "approved_project_wide");
+  assert.equal(approved.value.newAuthority, "approved_project_wide");
+  assert.equal(approved.value.newScope, "project_wide");
+  assert.equal(approved.value.mechanism.statement, revisedStatement);
+  assert.equal(approved.value.mechanism.authority_state, "approved_project_wide");
+
+  let eligible = await slice2Request(worker, DB, "/api/v1/projects/sports/mechanisms/eligible");
+  assert.equal(eligible.response.status, 200);
+  assert.equal(eligible.value.mechanisms.length, 1);
+  assert.equal(eligible.value.mechanisms[0].statement, revisedStatement);
+
+  let detail = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}`,
+  );
+  assert.equal(detail.value.versions.length, 3);
+  assert.equal(detail.value.versions[0].proposal_statement, originalProposal);
+  assert.equal(detail.value.versions[1].proposal_statement, revisedStatement);
+  assert.equal(detail.value.versions[2].created_by, "cody");
+  assert.equal(detail.value.finding.authority_state, approved.value.record.authority);
+  const canonicalApproved = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/records/findings/${encodeURIComponent(finding.id)}`,
+  );
+  assert.equal(canonicalApproved.value.value.authority_state, approved.value.record.authority);
+
+  const rollback = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/governance-events/${encodeURIComponent(approved.value.governanceEvent.id)}/rollback`,
+    {
+      method: "POST",
+      idempotencyKey: "slice3-rollback-approval",
+      body: {
+        actorId: "cody",
+        reason: "Return the revised wording to review without deleting the approval history.",
+      },
+    },
+  );
+  assert.equal(rollback.response.status, 201, JSON.stringify(rollback.value));
+  assert.equal(rollback.value.record.status, "under_review");
+  assert.equal(rollback.value.record.authority, "under_review");
+  assert.equal(rollback.value.governanceEvent.rollback_of_event_id, approved.value.governanceEvent.id);
+
+  eligible = await slice2Request(worker, DB, "/api/v1/projects/sports/mechanisms/eligible");
+  assert.equal(eligible.value.mechanisms.length, 0);
+  detail = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}`,
+  );
+  assert.equal(detail.value.versions.length, 4);
+  assert.equal(detail.value.versions[0].proposal_statement, originalProposal);
+  assert.equal(detail.value.governance.length, 3);
+  assert.equal(detail.value.finding.authority_state, rollback.value.record.authority);
+  assert.throws(
+    () => DB.database.prepare("UPDATE finding_versions SET proposal_statement = 'rewritten' WHERE finding_id = ?").run(finding.id),
+    /immutable/i,
+  );
+  assert.throws(
+    () => DB.database.prepare("DELETE FROM governance_events WHERE target_id = ?").run(finding.id),
+    /immutable/i,
+  );
+});
+
+test("Slice 3 rejection suppresses unchanged proposals and deferral remains non-authoritative", async () => {
+  const worker = await builtWorker("slice3-suppression-deferral");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const seeded = await seedSlice3Case(worker, DB, "suppression", ["challenge"]);
+  const proposal = {
+    findingType: "scope_revision",
+    sourceEventIds: [seeded.events[0].id],
+    proposalStatement: "Limit this interpretation to the active case.",
+    proposedScope: "local",
+    conditions: [],
+    exclusions: [],
+    supportingEvidence: [seeded.events[0].id],
+    counterevidence: [],
+    uncertainty: "The broader project scope is unsupported.",
+    reasonForSurfacing: "The challenge narrows applicability.",
+    expectedRetrievalEffect: "Keep the interpretation out of project-wide retrieval.",
+  };
+  const firstCheckpoint = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-rejection-source",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      findingCandidates: [proposal],
+    },
+  });
+  const finding = firstCheckpoint.value.findings[0];
+  const rejected = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "slice3-reject-scope",
+      body: {
+        action: "reject",
+        actorId: "cody",
+        sourceVersionId: finding.currentVersionId,
+        reason: "This consequence is not supported.",
+      },
+    },
+  );
+  assert.equal(rejected.response.status, 201);
+  assert.equal(rejected.value.record.status, "rejected");
+  assert.equal(rejected.value.retrievalEffect, "suppressed_unchanged_proposal");
+
+  const suppressed = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-rejection-recheck",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      findingCandidates: [proposal],
+    },
+  });
+  assert.equal(suppressed.response.status, 201);
+  assert.equal(suppressed.value.findings.length, 0);
+  assert.equal(suppressed.value.suppressedFindingCount, 1);
+  assert.equal(suppressed.value.noDurableFindingProposed, true);
+
+  const deferredCheckpoint = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-deferral-source",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      findingCandidates: [{
+        ...proposal,
+        proposalStatement: "Revisit broader scope after a second independent case.",
+        expectedRetrievalEffect: "None until the return condition is met and Cody governs it.",
+      }],
+    },
+  });
+  const deferredFinding = deferredCheckpoint.value.findings[0];
+  const deferred = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(deferredFinding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "slice3-defer-scope",
+      body: {
+        action: "defer",
+        actorId: "cody",
+        sourceVersionId: deferredFinding.currentVersionId,
+        reason: "Wait for independent repetition.",
+        returnCondition: "A second independent case supports the same mechanism.",
+      },
+    },
+  );
+  assert.equal(deferred.response.status, 201);
+  assert.equal(deferred.value.record.status, "deferred");
+  assert.equal(deferred.value.record.authority, "proposed");
+  assert.equal(deferred.value.record.returnCondition, "A second independent case supports the same mechanism.");
+  assert.equal(deferred.value.retrievalEffect, "no_authoritative_retrieval_effect");
+  const redeferred = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(deferredFinding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "slice3-redefer-scope",
+      body: {
+        action: "defer",
+        actorId: "cody",
+        sourceVersionId: deferred.value.record.currentVersionId,
+        reason: "Use a narrower temporary return condition.",
+        returnCondition: "A second case is reviewed by Cody.",
+      },
+    },
+  );
+  assert.equal(redeferred.response.status, 201);
+  assert.equal(redeferred.value.record.returnCondition, "A second case is reviewed by Cody.");
+  const rollbackDeferral = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/governance-events/${encodeURIComponent(redeferred.value.governanceEvent.id)}/rollback`,
+    {
+      method: "POST",
+      idempotencyKey: "slice3-rollback-redeferral",
+      body: {
+        actorId: "cody",
+        reason: "Restore the earlier governed deferral state.",
+      },
+    },
+  );
+  assert.equal(rollbackDeferral.response.status, 201, JSON.stringify(rollbackDeferral.value));
+  assert.equal(rollbackDeferral.value.record.status, "deferred");
+  assert.equal(
+    rollbackDeferral.value.record.returnCondition,
+    "A second independent case supports the same mechanism.",
+  );
+  assert.equal(rollbackDeferral.value.record.authority, "proposed");
+
+  const eligible = await slice2Request(worker, DB, `/api/v1/projects/sports/mechanisms/eligible?caseId=${encodeURIComponent(seeded.caseId)}`);
+  assert.equal(eligible.value.mechanisms.length, 0);
+  const crossProject = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/hockey/findings/${encodeURIComponent(deferredFinding.id)}`,
+  );
+  assert.equal(crossProject.response.status, 404);
+});
+
+test("Slice 3 can propose a Brewers mechanism from the byte-preserved reconstruction without promoting it", async () => {
+  const worker = await builtWorker("slice3-brewers-mechanism-proposal");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const fixture = await readFile(
+    new URL("../fixtures/brewers/rockies-brewers-user-reconstruction.txt", import.meta.url),
+    "utf8",
+  );
+  const fixtureContract = JSON.parse(await readFile(
+    new URL("../fixtures/brewers/rockies-brewers-user-reconstruction.json", import.meta.url),
+    "utf8",
+  ));
+  const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "slice3-brewers-reconstruction-import",
+    body: {
+      format: "text",
+      title: fixtureContract.caseObjective,
+      sourceName: fixtureContract.sourceName,
+      sourceType: fixtureContract.sourceType,
+      representationType: fixtureContract.representationType,
+      authorityState: fixtureContract.authorityState,
+      transcript: fixture,
+      provenance: fixtureContract.provenance,
+    },
+  });
+  assert.equal(imported.response.status, 201);
+  const conversationId = imported.value.conversation.id;
+  const detail = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  const sourceMessage = detail.value.messages[0];
+  assert.equal(sourceMessage.exactContent, fixture);
+  const caseResult = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: fixtureContract.caseObjective,
+      conversationId,
+      makeActive: true,
+      actorId: "cody",
+      caseCore: {
+        sourceLayer: "governed_structured_reconstruction",
+        rawSourceLayerAvailable: false,
+      },
+    },
+  });
+  const sourceEvent = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      caseId: caseResult.value.case.id,
+      type: "postmortem",
+      assignmentState: "assigned",
+      exactSourceSpan: fixture,
+      sourceSpans: [{ messageId: sourceMessage.id, start: 0, end: fixture.length }],
+      extractionMethod: "user_supplied_reconstruction_mark",
+      extractionVersion: "slice3-brewers-reconstruction-v1",
+      metadata: {
+        representationType: "Reconstructed",
+        originalRawTranscriptAvailable: false,
+      },
+    },
+  });
+  assert.equal(sourceEvent.response.status, 201);
+
+  const analyzed = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-brewers-mechanism-proposal",
+    body: {
+      conversationId,
+      caseId: caseResult.value.case.id,
+      trigger: "analyze_now",
+      source: "user_supplied_case_reconstruction",
+      findingCandidates: [{
+        findingType: "mechanism_recognition",
+        sourceEventIds: [sourceEvent.value.event.id],
+        proposalStatement: "A late contradiction affecting a central mechanism should trigger a genuine rerank or pass decision.",
+        proposedScope: "local",
+        conditions: ["The contradiction changes a core assumption behind the preferred option."],
+        exclusions: ["Minor discrepancies that do not change the mechanism."],
+        supportingEvidence: [sourceEvent.value.event.id],
+        counterevidence: [],
+        uncertainty: "Only the reconstructed source layer is available; the historical raw transcript is unavailable.",
+        reasonForSurfacing: "The reconstruction records a late workload contradiction and an insufficient confidence reduction.",
+        expectedRetrievalEffect: "If Cody approves it later, surface a rerank check in comparable pitcher-prop and run-line research.",
+      }],
+    },
+  });
+  assert.equal(analyzed.response.status, 201);
+  assert.equal(analyzed.value.findings.length, 1);
+  assert.equal(analyzed.value.findings[0].status, "proposed");
+  assert.equal(analyzed.value.selectedNodes[0].representationType, "Reconstructed");
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms WHERE project_id = ?").get("sports").count,
+    0,
+  );
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events WHERE project_id = ?").get("sports").count,
+    0,
+  );
+  const finding = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(analyzed.value.findings[0].id)}`,
+  );
+  assert.equal(finding.response.status, 200);
+  assert.equal(finding.value.sourceEvents[0].exactSourceSpan, fixture);
+  assert.equal(finding.value.sourceEvents[0].sourceLinks[0].messageId, sourceMessage.id);
+  assert.match(
+    finding.value.sourceEvents[0].sourceLinks[0].href,
+    new RegExp(`#message-${encodeURIComponent(sourceMessage.id)}$`),
+  );
+  assert.equal(fixtureContract.rawTranscriptAvailable, false);
+});
+
+test("Slice 3 Keep local and Challenge produce distinct canonical retrieval effects", async () => {
+  const worker = await builtWorker("slice3-local-challenge");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const seeded = await seedSlice3Case(worker, DB, "local-challenge", ["assumption"]);
+  const checkpoint = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-local-challenge-source",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      findingCandidates: [
+        {
+          findingType: "mechanism_recognition",
+          sourceEventIds: [seeded.events[0].id],
+          proposalStatement: "Keep this assumption check inside the active case.",
+          proposedScope: "local",
+          reasonForSurfacing: "The evidence supports only this case.",
+          expectedRetrievalEffect: "Eligible only while reconstructing this case.",
+        },
+        {
+          findingType: "correction",
+          sourceEventIds: [seeded.events[0].id],
+          proposalStatement: "Treat the assumption as a settled project-wide correction.",
+          proposedScope: "project_wide",
+          reasonForSurfacing: "The same source could be overread.",
+          expectedRetrievalEffect: "Would change later project reasoning if approved.",
+        },
+      ],
+    },
+  });
+  assert.equal(checkpoint.response.status, 201);
+  assert.equal(checkpoint.value.findings.length, 2);
+  const [localFinding, challengedFinding] = checkpoint.value.findings;
+  const keptLocal = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(localFinding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "slice3-keep-local",
+      body: {
+        action: "keep_local",
+        actorId: "cody",
+        sourceVersionId: localFinding.currentVersionId,
+        reason: "The source supports local continuity, not a project-wide rule.",
+      },
+    },
+  );
+  assert.equal(keptLocal.response.status, 201);
+  assert.equal(keptLocal.value.newAuthority, "approved_local");
+  assert.equal(keptLocal.value.retrievalEffect, "eligible_local_case");
+
+  const challenged = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(challengedFinding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "slice3-challenge",
+      body: {
+        action: "challenge",
+        actorId: "cody",
+        sourceVersionId: challengedFinding.currentVersionId,
+        reason: "The proposed project-wide consequence exceeds the source.",
+      },
+    },
+  );
+  assert.equal(challenged.response.status, 201);
+  assert.equal(challenged.value.record.status, "challenged");
+  assert.equal(challenged.value.newAuthority, "challenged");
+  assert.equal(challenged.value.retrievalEffect, "excluded_from_governing_use");
+
+  const eligibleForCase = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/mechanisms/eligible?caseId=${encodeURIComponent(seeded.caseId)}`,
+  );
+  assert.equal(eligibleForCase.value.mechanisms.length, 1);
+  assert.equal(eligibleForCase.value.mechanisms[0].authority_state, "approved_local");
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms WHERE project_id = ?").get("sports").count,
+    1,
+  );
 });

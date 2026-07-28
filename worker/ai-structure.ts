@@ -31,31 +31,6 @@ const schema = {
   },
 } as const;
 
-function seededProposal(input: string, project: string): Proposal {
-  return {
-    claim: input.trim(),
-    evidence: [
-      "The captured thesis priced England as a heavy favorite.",
-      "The user explicitly linked team quality, scoring volume, and handicap coverage.",
-    ],
-    counterEvidence: [
-      "A defensive-wall outcome can preserve control without producing margin or total coverage.",
-      "Favorite strength alone does not establish the scoring distribution.",
-    ],
-    assumptions: [
-      "England's quality edge would convert into both margin and scoring volume.",
-      "Match control, scoring probability, and market coverage represented the same underlying signal.",
-    ],
-    missingInformation: ["Independent scoring-distribution estimate", "Defensive-wall counter-scenarios", "Verified offered market"],
-    source: "User-entered thesis · exact capture",
-    confidence: 68,
-    truthClass: "Predicted",
-    scope: "This match and market before kickoff",
-    projectOfOrigin: project,
-    fidelity: "Exact",
-  };
-}
-
 function extractOutputText(payload: unknown): string | null {
   if (!payload || typeof payload !== "object") return null;
   const direct = (payload as { output_text?: unknown }).output_text;
@@ -94,13 +69,20 @@ export async function handleStructure(request: Request, apiKey?: string) {
   const operation = typeof body.operation === "string" ? body.operation.trim() : "Structure knowledge capture";
   if (input.length < 20 || input.length > 8_000) return Response.json({ error: "Capture must contain between 20 and 8,000 characters." }, { status: 400 });
 
-  const checks = ["Input bounds validated", "Structured schema validated", "Project scope preserved", "No promotion authority granted"];
-  let proposal: Proposal;
-  let mode: "live_gpt" | "seeded_demo" = "seeded_demo";
+  const checks = ["Input bounds validated", "Project scope preserved", "No promotion authority granted"];
+  if (!apiKey) {
+    return Response.json({
+      error: "Live structuring is unavailable because OPENAI_API_KEY is not configured.",
+      mode: "unavailable",
+      proposal: null,
+      findingCreated: false,
+      sourcePersistedByThisEndpoint: false,
+      checks,
+    }, { status: 503 });
+  }
 
-  if (apiKey) {
-    try {
-      const response = await fetch("https://api.openai.com/v1/responses", {
+  try {
+    const response = await fetch("https://api.openai.com/v1/responses", {
         method: "POST",
         headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
         body: JSON.stringify({
@@ -111,37 +93,36 @@ export async function handleStructure(request: Request, apiKey?: string) {
           ],
           text: { format: { type: "json_schema", name: "campus_atlas_capture", strict: true, schema } },
         }),
-      });
-      if (!response.ok) throw new Error(`OpenAI request failed with ${response.status}`);
-      const payload = await response.json();
-      const output = extractOutputText(payload);
-      if (!output) throw new Error("OpenAI response contained no structured output");
-      const parsed = JSON.parse(output);
-      if (!validateProposal(parsed)) throw new Error("Structured output failed deterministic validation");
-      proposal = parsed;
-      mode = "live_gpt";
-      checks.push("GPT-5.6 structured output accepted");
-    } catch {
-      proposal = seededProposal(input, project);
-      checks.push("Live model unavailable · explicit seeded fallback used");
-    }
-  } else {
-    proposal = seededProposal(input, project);
-    checks.push("No runtime API key · explicit seeded fallback used");
-  }
-
-  return Response.json({
-    proposal,
-    receipt: {
-      id: `air-${crypto.randomUUID()}`,
-      operation,
-      model: mode === "live_gpt" ? "gpt-5.6" : "gpt-5.6-ready seeded fallback",
-      mode,
-      proposedAt: new Date().toISOString(),
+    });
+    if (!response.ok) throw new Error(`OpenAI request failed with ${response.status}`);
+    const payload = await response.json();
+    const output = extractOutputText(payload);
+    if (!output) throw new Error("OpenAI response contained no structured output");
+    const proposal = JSON.parse(output) as unknown;
+    if (!validateProposal(proposal)) throw new Error("Structured output failed deterministic validation");
+    checks.push("Structured schema validated", "GPT-5.6 structured output accepted");
+    return Response.json({
+      proposal,
+      receipt: {
+        id: `air-${crypto.randomUUID()}`,
+        operation,
+        model: "gpt-5.6",
+        mode: "live_gpt",
+        proposedAt: new Date().toISOString(),
+        checks,
+        approved: [],
+        rejected: [],
+        inputSummary: input.slice(0, 180),
+      },
+    });
+  } catch (error) {
+    return Response.json({
+      error: error instanceof Error ? error.message : "Live structuring failed.",
+      mode: "failed",
+      proposal: null,
+      findingCreated: false,
+      sourcePersistedByThisEndpoint: false,
       checks,
-      approved: [],
-      rejected: [],
-      inputSummary: input.slice(0, 180),
-    },
-  });
+    }, { status: 502 });
+  }
 }

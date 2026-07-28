@@ -195,6 +195,31 @@ export const caseBoundaryOperations = sqliteTable("case_boundary_operations", {
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
 
+export const checkpoints = sqliteTable("checkpoints", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  caseId: text("case_id").notNull().references(() => cases.id),
+  conversationId: text("conversation_id").notNull().references(() => conversations.id),
+  trigger: text("trigger").notNull(),
+  source: text("source").notNull(),
+  startedAt: text("started_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  completedAt: text("completed_at"),
+  status: text("status").notNull().default("preparing"),
+  extractionVersion: text("extraction_version").notNull(),
+  candidateCount: integer("candidate_count").notNull().default(0),
+  selectedCount: integer("selected_count").notNull().default(0),
+  omittedCount: integer("omitted_count").notNull().default(0),
+  healthBefore: text("health_before"),
+  healthAfter: text("health_after"),
+  missingState: text("missing_state").notNull().default("[]"),
+  ambiguity: text("ambiguity"),
+  error: text("error"),
+  idempotencyKey: text("idempotency_key").notNull(),
+  metadata: text("metadata").notNull().default("{}"),
+}, (table) => [
+  uniqueIndex("checkpoints_project_idempotency").on(table.projectId, table.idempotencyKey),
+]);
+
 export const reasoningNodes = sqliteTable("reasoning_nodes", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull().references(() => projects.id),
@@ -224,6 +249,18 @@ export const reasoningNodeVersions = sqliteTable("reasoning_node_versions", {
   supersedesVersionId: text("supersedes_version_id"),
 });
 
+export const checkpointReasoningNodes = sqliteTable("checkpoint_reasoning_nodes", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  checkpointId: text("checkpoint_id").notNull().references(() => checkpoints.id),
+  reasoningNodeId: text("reasoning_node_id").notNull().references(() => reasoningNodes.id),
+  selectionOrder: integer("selection_order").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("checkpoint_reasoning_nodes_selection").on(table.checkpointId, table.selectionOrder),
+  uniqueIndex("checkpoint_reasoning_nodes_node").on(table.checkpointId, table.reasoningNodeId),
+]);
+
 export const findings = sqliteTable("findings", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull().references(() => projects.id),
@@ -233,6 +270,7 @@ export const findings = sqliteTable("findings", {
   sourceEventIds: text("source_event_ids").notNull().default("[]"),
   currentVersionId: text("current_version_id"),
   status: text("status").notNull().default("proposed"),
+  authorityState: text("authority_state").notNull().default("proposed"),
   reviewRequired: integer("review_required", { mode: "boolean" }).notNull().default(true),
   returnCondition: text("return_condition"),
   expiresAt: text("expires_at"),
@@ -254,6 +292,7 @@ export const findingVersions = sqliteTable("finding_versions", {
   uncertainty: text("uncertainty"),
   reasonForSurfacing: text("reason_for_surfacing").notNull(),
   expectedRetrievalEffect: text("expected_retrieval_effect").notNull(),
+  proposalHash: text("proposal_hash").notNull().default(""),
   createdBy: text("created_by").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   supersedesVersionId: text("supersedes_version_id"),
@@ -262,6 +301,7 @@ export const findingVersions = sqliteTable("finding_versions", {
 export const mechanisms = sqliteTable("mechanisms", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull().references(() => projects.id),
+  sourceFindingId: text("source_finding_id").references(() => findings.id),
   currentGoverningVersionId: text("current_governing_version_id"),
   status: text("status").notNull().default("proposed"),
   legacyReference: text("legacy_reference"),
@@ -297,8 +337,16 @@ export const governanceEvents = sqliteTable("governance_events", {
   resultingVersionId: text("resulting_version_id"),
   priorAuthority: text("prior_authority"),
   newAuthority: text("new_authority"),
+  priorStatus: text("prior_status"),
+  newStatus: text("new_status"),
   priorScope: text("prior_scope"),
   newScope: text("new_scope"),
+  affectedMechanismId: text("affected_mechanism_id").references(() => mechanisms.id),
+  rollbackOfEventId: text("rollback_of_event_id"),
+  priorReturnCondition: text("prior_return_condition"),
+  newReturnCondition: text("new_return_condition"),
+  priorExpiresAt: text("prior_expires_at"),
+  newExpiresAt: text("new_expires_at"),
   reason: text("reason"),
   retrievalEffect: text("retrieval_effect").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),

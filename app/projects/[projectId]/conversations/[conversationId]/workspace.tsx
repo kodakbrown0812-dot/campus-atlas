@@ -68,6 +68,30 @@ type Source = {
   }>;
 };
 
+type CheckpointResult = {
+  checkpoint: {
+    id: string;
+    trigger: string;
+    status: string;
+    candidateCount: number;
+    selectedCount: number;
+    omittedCount: number;
+    healthBefore: string;
+    healthAfter: string;
+    missingState: string[];
+    ambiguity: string | null;
+  };
+  selectedNodes: Array<{
+    id: string;
+    type: string;
+    statement: string;
+    representationType: string;
+    sourceEventIds: string[];
+  }>;
+  findings: Array<{ id: string; proposal: string; status: string }>;
+  noDurableFindingProposed?: boolean;
+};
+
 export default function ConversationWorkspace({
   projectId,
   conversationId,
@@ -80,6 +104,8 @@ export default function ConversationWorkspace({
   const [actionKey, setActionKey] = useState("");
   const [selectedCase, setSelectedCase] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">("loading");
+  const [analysisStatus, setAnalysisStatus] = useState<"idle" | "analyzing" | "complete" | "error">("idle");
+  const [checkpoint, setCheckpoint] = useState<CheckpointResult | null>(null);
   const [error, setError] = useState("");
 
   const fetchConversation = useCallback(async () => {
@@ -145,6 +171,38 @@ export default function ConversationWorkspace({
       return;
     }
     setSource(await response.json() as Source);
+  }
+
+  async function analyzeNow() {
+    if (!activeCase) return;
+    setAnalysisStatus("analyzing");
+    setError("");
+    const response = await fetch(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/checkpoints`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${actionKey}`,
+          "idempotency-key": `analyze-now:${conversationId}:${crypto.randomUUID()}`,
+        },
+        body: JSON.stringify({
+          conversationId,
+          caseId: activeCase.id,
+          trigger: "analyze_now",
+          source: "canonical_case_events",
+          findingCandidates: [],
+        }),
+      },
+    );
+    const result = await response.json().catch(() => ({ error: "Checkpoint failed." })) as CheckpointResult & { error?: string };
+    if (!response.ok) {
+      setError(result.error || "Checkpoint failed.");
+      setAnalysisStatus("error");
+      return;
+    }
+    setCheckpoint(result);
+    setAnalysisStatus("complete");
   }
 
   if (status === "loading") return <div className={styles.shell}><section className={styles.panel}>Loading preserved conversation…</section></div>;
@@ -236,6 +294,37 @@ export default function ConversationWorkspace({
                 <p>Decision: {activeCase.decision || "Not established"}</p>
                 <p>Constraints: {activeCase.constraints.length ? activeCase.constraints.join(", ") : "None recorded"}</p>
                 <p>Core: {JSON.stringify(activeCase.caseCore)}</p>
+              </article>
+            )}
+            {activeCase && (
+              <>
+                <button
+                  className={styles.button}
+                  disabled={!actionKey || analysisStatus === "analyzing"}
+                  onClick={analyzeNow}
+                  type="button"
+                >
+                  {analysisStatus === "analyzing" ? "Analyzing canonical events…" : "Analyze now"}
+                </button>
+                <Link className={styles.textLink} href={`/projects/${encodeURIComponent(projectId)}/findings`}>
+                  Open Atlas Found
+                </Link>
+              </>
+            )}
+            {checkpoint && (
+              <article className={styles.checkpoint}>
+                <strong>{checkpoint.checkpoint.healthBefore} → {checkpoint.checkpoint.healthAfter}</strong>
+                <p>
+                  {checkpoint.checkpoint.candidateCount} candidates · {checkpoint.checkpoint.selectedCount} selected · {checkpoint.checkpoint.omittedCount} omitted
+                </p>
+                <p>
+                  {checkpoint.noDurableFindingProposed
+                    ? "No durable finding proposed."
+                    : `${checkpoint.findings.length} finding${checkpoint.findings.length === 1 ? "" : "s"} need review.`}
+                </p>
+                {!!checkpoint.checkpoint.missingState.length && (
+                  <p>Missing state: {checkpoint.checkpoint.missingState.join(", ")}</p>
+                )}
               </article>
             )}
           </section>
