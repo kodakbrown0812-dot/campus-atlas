@@ -361,7 +361,7 @@ export const roadways = sqliteTable("roadways", {
   status: text("status").notNull().default("proposed"),
   legacyReference: text("legacy_reference"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => [uniqueIndex("roadways_project_name").on(table.projectId, table.name)]);
 
 export const roadwayVersions = sqliteTable("roadway_versions", {
   id: text("id").primaryKey(),
@@ -388,17 +388,21 @@ export const packets = sqliteTable("packets", {
   caseId: text("case_id").references(() => cases.id),
   task: text("task").notNull(),
   inferredIntent: text("inferred_intent").notNull(),
+  interpretation: text("interpretation").notNull().default("{}"),
   primaryRoadwayId: text("primary_roadway_id").references(() => roadways.id),
   primaryRoadwayVersionId: text("primary_roadway_version_id"),
   supportingModules: text("supporting_modules").notNull().default("[]"),
   tokenBudget: integer("token_budget").notNull(),
+  finalTokenCount: integer("final_token_count").notNull().default(0),
   compiledContent: text("compiled_content").notNull(),
   priorComparablePacketId: text("prior_comparable_packet_id"),
+  comparisonKey: text("comparison_key"),
   status: text("status").notNull(),
   compilationError: text("compilation_error"),
+  idempotencyKey: text("idempotency_key"),
   legacyReference: text("legacy_reference"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => [uniqueIndex("packets_project_idempotency").on(table.projectId, table.idempotencyKey)]);
 
 export const packetItems = sqliteTable("packet_items", {
   id: text("id").primaryKey(),
@@ -415,7 +419,7 @@ export const packetItems = sqliteTable("packet_items", {
   inclusionReason: text("inclusion_reason"),
   exclusionReason: text("exclusion_reason"),
   sequenceOrder: integer("sequence_order").notNull(),
-});
+}, (table) => [uniqueIndex("packet_items_sequence").on(table.packetId, table.sequenceOrder)]);
 
 export const receipts = sqliteTable("receipts", {
   id: text("id").primaryKey(),
@@ -431,7 +435,31 @@ export const receipts = sqliteTable("receipts", {
   diffSummary: text("diff_summary"),
   legacyReference: text("legacy_reference"),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-});
+}, (table) => [uniqueIndex("receipts_packet").on(table.packetId)]);
+
+export const liveStateSnapshots = sqliteTable("live_state_snapshots", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  caseId: text("case_id").references(() => cases.id),
+  provider: text("provider").notNull(),
+  sourceIdentity: text("source_identity").notNull(),
+  category: text("category").notNull(),
+  entity: text("entity").notNull(),
+  rawValue: text("raw_value").notNull(),
+  normalizedValue: text("normalized_value").notNull().default("{}"),
+  observedAt: text("observed_at").notNull(),
+  validFrom: text("valid_from"),
+  validUntil: text("valid_until"),
+  supersededAt: text("superseded_at"),
+  freshnessWindowSeconds: integer("freshness_window_seconds").notNull(),
+  status: text("status").notNull().default("active"),
+  conflictGroup: text("conflict_group"),
+  metadata: text("metadata").notNull().default("{}"),
+  idempotencyKey: text("idempotency_key").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("live_state_project_idempotency").on(table.projectId, table.idempotencyKey),
+]);
 
 export const handoffs = sqliteTable("handoffs", {
   id: text("id").primaryKey(),

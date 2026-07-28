@@ -65,6 +65,7 @@ async function sqliteD1() {
     "0004_odd_patriot.sql",
     "0005_amusing_turbo.sql",
     "0006_opposite_roland_deschain.sql",
+    "0007_harsh_makkari.sql",
   ]) {
     const migration = await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8");
     for (const statement of migration.split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) {
@@ -219,6 +220,79 @@ async function seedSlice3Case(worker, DB, suffix, eventTypes) {
     events.push(event.value.event);
   }
   return { conversationId, caseId: caseResult.value.case.id, events };
+}
+
+function seedSlice4Mechanism(DB, {
+  id,
+  projectId = "sports",
+  statement,
+  authority = "approved_project_wide",
+  status = "active",
+  supportingCaseIds = [],
+  supportingNodeIds = [],
+  counterevidenceIds = [],
+  realityContact = null,
+  createdAt = "2026-07-01T12:00:00.000Z",
+}) {
+  const versionId = `${id}:version:1`;
+  DB.database.prepare(
+    `INSERT INTO mechanisms (
+      id, project_id, source_finding_id, current_governing_version_id,
+      status, created_at, updated_at
+    ) VALUES (?, ?, NULL, ?, ?, ?, ?)`,
+  ).run(id, projectId, versionId, status, createdAt, createdAt);
+  DB.database.prepare(
+    `INSERT INTO mechanism_versions (
+      id, project_id, mechanism_id, statement, scope_conditions, exclusions,
+      supporting_case_ids, supporting_node_ids, counterevidence_ids,
+      reality_contact, authority_state, intended_retrieval_effect,
+      created_by, created_at, supersedes_version_id
+    ) VALUES (?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?,
+              'eligible_when_roadway_scope_and_freshness_match', 'fixture', ?, NULL)`,
+  ).run(
+    versionId,
+    projectId,
+    id,
+    statement,
+    JSON.stringify(supportingCaseIds),
+    JSON.stringify(supportingNodeIds),
+    JSON.stringify(counterevidenceIds),
+    realityContact,
+    authority,
+    createdAt,
+  );
+  return { id, versionId };
+}
+
+async function createSlice4Packet(worker, DB, body, idempotencyKey) {
+  return slice2Request(worker, DB, `/api/v1/projects/${body.projectId || "sports"}/packets`, {
+    method: "POST",
+    idempotencyKey,
+    body: {
+      task: body.task,
+      caseId: body.caseId,
+      tokenBudget: body.tokenBudget ?? 800,
+      roadwayOverride: body.roadwayOverride,
+    },
+  });
+}
+
+async function createLiveState(worker, DB, projectId, category, suffix, overrides = {}) {
+  return slice2Request(worker, DB, `/api/v1/projects/${projectId}/live-state`, {
+    method: "POST",
+    idempotencyKey: `slice4-live-${projectId}-${category}-${suffix}`,
+    body: {
+      provider: "calibration-provider",
+      sourceIdentity: `fixture://${projectId}/${category}/${suffix}`,
+      category,
+      entity: overrides.entity || "Milwaukee Brewers",
+      rawValue: overrides.rawValue || `${category} available`,
+      normalizedValue: { fixture: true },
+      observedAt: overrides.observedAt || new Date().toISOString(),
+      freshnessWindowSeconds: overrides.freshnessWindowSeconds || 3600,
+      caseId: overrides.caseId,
+    },
+  });
 }
 
 test("renders the development preview", async () => {
@@ -2021,4 +2095,656 @@ test("Slice 3 Keep local and Challenge produce distinct canonical retrieval effe
     DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms WHERE project_id = ?").get("sports").count,
     1,
   );
+});
+
+test("Slice 4 migration protects immutable roadways, packets, items, and receipts", async () => {
+  const migration = await readFile(new URL("../drizzle/0007_harsh_makkari.sql", import.meta.url), "utf8");
+  assert.match(migration, /CREATE TABLE `live_state_snapshots`/);
+  assert.match(migration, /packets_project_idempotency/);
+  assert.match(migration, /packet_items_sequence/);
+  assert.match(migration, /roadway_versions_immutable_update/);
+  assert.match(migration, /packets_immutable_delete/);
+  assert.match(migration, /packet_items_immutable_update/);
+  assert.match(migration, /receipts_immutable_delete/);
+});
+
+test("Slice 4 registry contains three conclusion-free versioned roadways and exposes ambiguity", async () => {
+  const worker = await builtWorker("slice4-roadway-registry");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+
+  const registry = await slice2Request(worker, DB, "/api/v1/projects/sports/roadways");
+  assert.equal(registry.response.status, 200);
+  assert.equal(registry.value.roadways.length, 3);
+  assert.deepEqual(
+    new Set(registry.value.roadways.map((roadway) => roadway.name)),
+    new Set(["Broad Lock-Finding", "Margin / Run-Line Value", "Outcome / Postmortem"]),
+  );
+  for (const roadway of registry.value.roadways) {
+    assert.equal(roadway.version, 1);
+    assert.equal(roadway.status, "active");
+    assert.equal(roadway.authorityState, "approved_project_wide");
+    assert.ok(roadway.requiredChecks.length > 0);
+    assert.ok(roadway.requiredCounterevidence.length > 0);
+    assert.ok(roadway.stopConditions.length > 0);
+    assert.doesNotMatch(JSON.stringify(roadway), /avoid run lines|bet favorites|prefer first five|brewers mechanism always governs/i);
+  }
+
+  const broad = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/interpret", {
+    method: "POST",
+    body: { task: "Compare the available markets and rank the strongest option on the slate." },
+  });
+  assert.equal(broad.response.status, 200);
+  assert.equal(broad.value.interpretation.primaryRoadway.name, "Broad Lock-Finding");
+
+  const margin = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/interpret", {
+    method: "POST",
+    body: { task: "Can this favorite win by two, or is the one-score path too large at that number?" },
+  });
+  assert.equal(margin.response.status, 200);
+  assert.equal(margin.value.interpretation.primaryRoadway.name, "Margin / Run-Line Value");
+
+  const postmortem = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/interpret", {
+    method: "POST",
+    body: { task: "Explain what went wrong after the game and identify the postmortem correction." },
+  });
+  assert.equal(postmortem.response.status, 200);
+  assert.equal(postmortem.value.interpretation.primaryRoadway.name, "Outcome / Postmortem");
+
+  const ambiguous = await createSlice4Packet(worker, DB, {
+    task: "Compare the best option and explain why the prior outcome failed.",
+  }, "slice4-material-ambiguity");
+  assert.equal(ambiguous.response.status, 409);
+  assert.equal(ambiguous.value.status, "clarification_required");
+  assert.equal(ambiguous.value.interpretation.materialAmbiguity, true);
+  assert.equal(ambiguous.value.packet, null);
+
+  const override = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/interpret", {
+    method: "POST",
+    body: {
+      task: "Compare the best option and explain why the prior outcome failed.",
+      roadwayOverride: "outcome-postmortem",
+    },
+  });
+  assert.equal(override.response.status, 200);
+  assert.equal(override.value.interpretation.primaryRoadway.name, "Outcome / Postmortem");
+  assert.equal(override.value.interpretation.userSelectedOverride, true);
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM roadway_versions WHERE project_id = ?").get("sports").count,
+    3,
+  );
+});
+
+test("Slice 4 comparable packets record the exact Slice 3 governance event that changes eligibility", async () => {
+  const worker = await builtWorker("slice4-governance-packet-diff");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const seeded = await seedSlice3Case(worker, DB, "slice4-margin-proof", ["challenge", "evidence"]);
+  DB.database.prepare("UPDATE events SET exact_source_span = ?, compressed_representation = ? WHERE id = ?").run(
+    "The one-score path remains the strongest counterexample to the favorite covering.",
+    "One-score outcomes challenge the margin-cover thesis.",
+    seeded.events[0].id,
+  );
+  const mechanismStatement = "Separate outright win probability from cover probability by testing margin distribution, one-score paths, and the offered number.";
+  const checkpoint = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice4-proof-checkpoint",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      findingCandidates: [{
+        findingType: "mechanism_recognition",
+        sourceEventIds: [seeded.events[1].id],
+        proposalStatement: "Initial Atlas wording about margin distribution.",
+        proposedScope: "project_wide",
+        conditions: ["Use for run-line or winning-margin tasks."],
+        exclusions: ["Do not use as a conclusion about favorites."],
+        supportingEvidence: [seeded.events[1].id],
+        counterevidence: [seeded.events[0].id],
+        uncertainty: "One case does not establish a universal rule.",
+        reasonForSurfacing: "The task mechanism separates winning from covering.",
+        expectedRetrievalEffect: "Eligible only after Cody reviews and approves the final wording and scope.",
+      }],
+    },
+  });
+  assert.equal(checkpoint.response.status, 201);
+  const finding = checkpoint.value.findings[0];
+  const task = "Can this favorite win by two, or does the one-score path make the number too expensive?";
+
+  const before = await createSlice4Packet(worker, DB, {
+    task,
+    caseId: seeded.caseId,
+    tokenBudget: 800,
+  }, "slice4-proof-before");
+  assert.equal(before.response.status, 201, JSON.stringify(before.value));
+  assert.equal(before.value.packet.status, "compiled");
+  assert.equal(
+    before.value.receipt.treatmentSummary.Use.some((item) => item.sourceType === "Mechanism"),
+    false,
+  );
+  assert.equal(
+    before.value.receipt.treatmentSummary.Consider.some((item) => item.sourceId === finding.id),
+    true,
+  );
+
+  const revised = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "slice4-proof-revise",
+      body: {
+        action: "revise",
+        actorId: "cody",
+        sourceVersionId: finding.currentVersionId,
+        reviewedStatement: mechanismStatement,
+        scope: "project_wide",
+        reason: "Cody is narrowing the mechanism to margin-value tasks.",
+      },
+    },
+  );
+  assert.equal(revised.response.status, 201);
+  const approved = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "slice4-proof-approve",
+      body: {
+        action: "approve",
+        actorId: "cody",
+        sourceVersionId: revised.value.record.currentVersionId,
+        scope: "project_wide",
+        reason: "Approve Cody's reviewed wording for comparable margin-value retrieval.",
+      },
+    },
+  );
+  assert.equal(approved.response.status, 201);
+
+  const after = await createSlice4Packet(worker, DB, {
+    task,
+    caseId: seeded.caseId,
+    tokenBudget: 800,
+  }, "slice4-proof-after");
+  assert.equal(after.response.status, 201, JSON.stringify(after.value));
+  assert.equal(after.value.packet.status, "compiled");
+  assert.equal(after.value.packet.priorComparablePacketId, before.value.packet.id);
+  const usedMechanism = after.value.receipt.treatmentSummary.Use.find(
+    (item) => item.sourceId === approved.value.mechanism.id,
+  );
+  assert.ok(usedMechanism);
+  assert.equal(usedMechanism.sourceVersionId, approved.value.mechanism.current_governing_version_id);
+  assert.ok(
+    after.value.receipt.treatmentSummary.Consider.some(
+      (item) => item.sourceId === seeded.events[0].id && /counterevidence|challenge/i.test(item.reason),
+    ),
+  );
+  assert.ok(
+    after.value.receipt.governanceCauses.some(
+      (cause) => cause.governanceEventId === approved.value.governanceEvent.id,
+    ),
+  );
+  assert.ok(
+    after.value.receipt.exactPacketDifference.some(
+      (change) => change.sourceId === approved.value.mechanism.id,
+    ),
+  );
+  assert.doesNotMatch(JSON.stringify(after.value.receipt.governanceCauses), /final decision (?:was|to be) correct/i);
+
+  const read = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/packets/${encodeURIComponent(after.value.packet.id)}`,
+  );
+  assert.equal(read.response.status, 200);
+  assert.deepEqual(read.value.packet, after.value.packet);
+  assert.deepEqual(read.value.receipt, after.value.receipt);
+  const receiptRead = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/packets/${encodeURIComponent(after.value.packet.id)}/receipt`,
+  );
+  assert.deepEqual(receiptRead.value.receipt, after.value.receipt);
+  const comparisonRead = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/packets/${encodeURIComponent(after.value.packet.id)}/comparison`,
+  );
+  assert.equal(comparisonRead.value.priorComparablePacketId, before.value.packet.id);
+  assert.deepEqual(comparisonRead.value.exactPacketDifference, after.value.receipt.exactPacketDifference);
+});
+
+test("Slice 4 calibration treatments enforce mechanism, scope, authority, evidence, conflict, and project gates", async () => {
+  const expectations = JSON.parse(await readFile(
+    new URL("../fixtures/slice4/calibration-expectations.json", import.meta.url),
+    "utf8",
+  )).fixtures;
+  const worker = await builtWorker("slice4-calibration-treatments");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Development");
+  const active = await seedSlice3Case(worker, DB, "slice4-calibration", ["correction", "outcome", "challenge", "assumption"]);
+  const outside = await seedSlice3Case(worker, DB, "slice4-outside-scope", ["evidence"]);
+  const [correction, outcome, challenge, inference] = active.events;
+  DB.database.prepare(
+    "UPDATE events SET exact_source_span = ?, compressed_representation = ?, actor_id = 'cody', ingested_at = ? WHERE id = ?",
+  ).run(
+    "Cody correction: winning is not covering; keep the one-score margin path visible.",
+    "Cody corrected the inference: winning and covering are distinct.",
+    "2026-07-01T00:00:00.000Z",
+    correction.id,
+  );
+  DB.database.prepare(
+    "UPDATE events SET exact_source_span = ?, compressed_representation = ?, ingested_at = ? WHERE id = ?",
+  ).run(
+    "Older completed outcome: the favorite won by one and did not cover.",
+    "Outcome-backed evidence: favorite won by one and failed to cover.",
+    "2026-06-01T00:00:00.000Z",
+    outcome.id,
+  );
+  DB.database.prepare(
+    "UPDATE events SET exact_source_span = ?, compressed_representation = ? WHERE id = ?",
+  ).run(
+    "Strong counterexample: outright opponent win remains a plausible margin script.",
+    "Strong counterexample: preserve the outright-opponent and one-score paths.",
+    challenge.id,
+  );
+  DB.database.prepare(
+    "UPDATE events SET exact_source_span = ?, compressed_representation = ?, authority_state = 'inferred' WHERE id = ?",
+  ).run(
+    "Newer repeated model inference says team quality alone predicts the run-line cover.",
+    "Newer model inference repeats that team quality predicts covering.",
+    inference.id,
+  );
+
+  const primary = seedSlice4Mechanism(DB, {
+    id: "mechanism:margin-primary",
+    statement: "Separate outright win probability from cover probability using margin distribution, one-score paths, and offered price.",
+    supportingCaseIds: [active.caseId],
+    counterevidenceIds: [challenge.id],
+    realityContact: "Supported by completed margin outcomes.",
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:same-topic-wrong-mechanism",
+    statement: "Milwaukee Brewers uniform colors are blue and gold.",
+    realityContact: "Same team, unrelated mechanism.",
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:approved-local-elsewhere",
+    statement: "For this case only, treat one-score cover risk as decisive for run-line value.",
+    authority: "approved_local",
+    supportingCaseIds: [outside.caseId],
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:conflict-include",
+    statement: "Always include recent favorite cover form when assessing margin value.",
+    counterevidenceIds: ["mechanism:conflict-exclude"],
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:conflict-exclude",
+    statement: "Never include recent favorite cover form when assessing margin value.",
+    counterevidenceIds: ["mechanism:conflict-include"],
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:margin-duplicate-a",
+    statement: "Evaluate run-line cover through margin distribution and one-score paths.",
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:margin-duplicate-b",
+    statement: "Evaluate run-line cover through margin distribution and one-score paths.",
+  });
+
+  const rejectedFindingId = "finding:slice4-rejected";
+  const rejectedVersionId = "finding-version:slice4-rejected";
+  DB.database.prepare(
+    `INSERT INTO findings (
+      id, project_id, case_id, checkpoint_id, finding_type, source_event_ids,
+      current_version_id, status, authority_state, review_required, created_at, resolved_at
+    ) VALUES (?, 'sports', ?, NULL, 'mechanism_recognition', ?, ?, 'rejected', 'rejected', 0, ?, ?)`,
+  ).run(
+    rejectedFindingId,
+    active.caseId,
+    JSON.stringify([inference.id]),
+    rejectedVersionId,
+    "2026-07-20T00:00:00.000Z",
+    "2026-07-20T00:00:00.000Z",
+  );
+  DB.database.prepare(
+    `INSERT INTO finding_versions (
+      id, project_id, finding_id, proposal_statement, proposed_scope,
+      conditions, exclusions, supporting_evidence, counterevidence,
+      uncertainty, reason_for_surfacing, expected_retrieval_effect,
+      proposal_hash, created_by, created_at, supersedes_version_id
+    ) VALUES (?, 'sports', ?, ?, 'project_wide', '[]', '[]', ?, '[]',
+              NULL, 'Calibration rejected finding.', 'No retrieval effect.',
+              'slice4-rejected-hash', 'atlas', ?, NULL)`,
+  ).run(
+    rejectedVersionId,
+    rejectedFindingId,
+    "Repeated team quality should automatically govern run-line cover.",
+    JSON.stringify([inference.id]),
+    "2026-07-20T00:00:00.000Z",
+  );
+
+  const stale = await createLiveState(worker, DB, "sports", "current_price", "superseded", {
+    observedAt: "2025-01-01T00:00:00.000Z",
+    freshnessWindowSeconds: 60,
+    caseId: active.caseId,
+  });
+  assert.equal(stale.response.status, 201);
+  DB.database.prepare(
+    "UPDATE live_state_snapshots SET status = 'superseded', superseded_at = ? WHERE id = ?",
+  ).run("2025-01-02T00:00:00.000Z", stale.value.snapshot.id);
+
+  const narrow = await createSlice4Packet(worker, DB, {
+    task: "Can this favorite win by two, or does the one-score path make the run line too expensive?",
+    caseId: active.caseId,
+    tokenBudget: 1600,
+  }, "slice4-calibration-narrow");
+  assert.equal(narrow.response.status, 201, JSON.stringify(narrow.value));
+  assert.equal(narrow.value.packet.status, "compiled");
+  assert.equal(narrow.value.packet.interpretation.primaryRoadway.name, expectations.different_vocabulary_same_mechanism.expectedRoadway);
+  const allTreatments = Object.values(narrow.value.receipt.treatmentSummary).flat();
+  const byId = new Map(allTreatments.map((item) => [item.sourceId, item]));
+  assert.equal(byId.get(primary.id).treatment, expectations.different_vocabulary_same_mechanism.expectedTreatment);
+  assert.equal(
+    byId.get("mechanism:same-topic-wrong-mechanism").treatment,
+    expectations.same_topic_wrong_mechanism.expectedTreatment,
+  );
+  assert.equal(
+    byId.get("mechanism:approved-local-elsewhere").treatment,
+    expectations.approved_local_outside_scope.expectedTreatment,
+  );
+  assert.equal(byId.get(challenge.id).treatment, expectations.strong_counterexample.expectedTreatment);
+  assert.match(byId.get(challenge.id).reason, /counterevidence|challenge/i);
+  for (const id of ["mechanism:conflict-include", "mechanism:conflict-exclude"]) {
+    assert.equal(byId.get(id).treatment, expectations.conflicting_approved_mechanisms.expectedTreatment);
+    assert.equal(byId.get(id).representation, expectations.conflicting_approved_mechanisms.expectedRepresentation);
+  }
+  assert.equal(byId.get(stale.value.snapshot.id).treatment, expectations.superseded_live_snapshot.expectedTreatment);
+  assert.equal(byId.get(rejectedFindingId).treatment, expectations.rejected_resurfacing.expectedTreatment);
+  assert.ok(
+    ["mechanism:margin-duplicate-a", "mechanism:margin-duplicate-b"]
+      .some((id) => byId.get(id).treatment === expectations.redundant_approved_mechanisms.expectedTreatment),
+  );
+  const considerationOrder = narrow.value.receipt.treatmentSummary.Consider.map((item) => item.sourceId);
+  assert.ok(considerationOrder.indexOf(outcome.id) < considerationOrder.indexOf(inference.id));
+  assert.ok(considerationOrder.indexOf(correction.id) < considerationOrder.indexOf(inference.id));
+  assert.match(narrow.value.packet.compiledContent, /Strong counterexample/i);
+  assert.match(
+    narrow.value.packet.compiledContent,
+    /\[EXCLUDE\] Milwaukee Brewers uniform colors are blue and gold/i,
+  );
+
+  const broad = await createSlice4Packet(worker, DB, {
+    task: "Compare all available options and rank the strongest candidate on the slate.",
+    caseId: active.caseId,
+    tokenBudget: 800,
+  }, "slice4-calibration-broad");
+  assert.equal(broad.response.status, 201);
+  assert.equal(broad.value.packet.interpretation.primaryRoadway.name, expectations.broad_then_narrow.expectedBroadRoadway);
+  assert.equal(narrow.value.packet.interpretation.primaryRoadway.name, expectations.broad_then_narrow.expectedNarrowRoadway);
+
+  const isolated = await createSlice4Packet(worker, DB, {
+    projectId: "hockey",
+    task: "Can this favorite win by two, or is the one-score path too large?",
+    tokenBudget: 800,
+  }, "slice4-project-isolation");
+  assert.equal(isolated.response.status, 201);
+  const isolatedIds = Object.values(isolated.value.receipt.treatmentSummary).flat().map((item) => item.sourceId);
+  assert.equal(isolatedIds.includes(primary.id), false);
+});
+
+test("Slice 4 enforces 400, 800, and 1600 budgets, honest failures, idempotency, and immutability", async () => {
+  const worker = await builtWorker("slice4-budgets-immutability");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "missing", "Missing State Project");
+  await seedCanonicalProject(worker, DB, "overflow", "Minimum Safe Overflow");
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:budget-margin",
+    statement: "Separate outright winning from run-line covering by checking price, margin distribution, and the strongest one-score challenge.",
+  });
+  for (const category of ["market_availability", "current_price", "participant_status"]) {
+    const live = await createLiveState(worker, DB, "sports", category, "budget");
+    assert.equal(live.response.status, 201);
+  }
+
+  const packetIds = [];
+  for (const budget of [400, 800, 1600]) {
+    const result = await createSlice4Packet(worker, DB, {
+      task: "At the current price tonight, can this favorite cover the -1.5 run line?",
+      tokenBudget: budget,
+    }, `slice4-budget-${budget}`);
+    assert.equal(result.response.status, 201, JSON.stringify(result.value));
+    assert.equal(result.value.packet.status, "compiled", JSON.stringify(result.value.packet));
+    assert.equal(result.value.packet.tokenBudget, budget);
+    assert.ok(result.value.packet.finalTokenCount <= budget);
+    assert.equal(result.value.receipt.freshness.safeToCompile, true);
+    assert.deepEqual(result.value.receipt.freshness.missing, []);
+    packetIds.push(result.value.packet.id);
+  }
+
+  const replay = await createSlice4Packet(worker, DB, {
+    task: "At the current price tonight, can this favorite cover the -1.5 run line?",
+    tokenBudget: 800,
+  }, "slice4-budget-800");
+  assert.equal(replay.response.status, 200);
+  assert.equal(replay.value.idempotentReplay, true);
+  assert.equal(replay.value.packet.id, packetIds[1]);
+
+  const invalidBudget = await createSlice4Packet(worker, DB, {
+    task: "Can this favorite cover the run line?",
+    tokenBudget: 500,
+  }, "slice4-budget-invalid");
+  assert.equal(invalidBudget.response.status, 400);
+
+  const missing = await createSlice4Packet(worker, DB, {
+    projectId: "missing",
+    task: "At the current price tonight, can this favorite cover the -1.5 run line?",
+    tokenBudget: 800,
+  }, "slice4-required-state-missing");
+  assert.equal(missing.response.status, 201);
+  assert.equal(missing.value.packet.status, "failed");
+  assert.match(missing.value.packet.compilationError, /^required_live_state_missing:/);
+  assert.equal(missing.value.receipt.freshness.safeToCompile, false);
+  assert.ok(missing.value.receipt.freshness.missing.length > 0);
+  assert.match(missing.value.packet.compiledContent, /Compilation stopped/);
+
+  const longClause = " while preserving price, distribution, one-score paths, outright-loss scripts, corrections, and counterevidence";
+  for (let index = 0; index < 8; index += 1) {
+    const id = `mechanism:overflow-${index}`;
+    const other = `mechanism:overflow-${index % 2 === 0 ? index + 1 : index - 1}`;
+    seedSlice4Mechanism(DB, {
+      id,
+      projectId: "overflow",
+      statement: `${index % 2 === 0 ? "Always include" : "Never include"} margin-cover evidence ${index}${longClause.repeat(3)}.`,
+      counterevidenceIds: [other],
+    });
+  }
+  const overflow = await createSlice4Packet(worker, DB, {
+    projectId: "overflow",
+    task: "Can the favorite win by two, or is the one-score margin path too large?",
+    tokenBudget: 400,
+  }, "slice4-minimum-safe-overflow");
+  assert.equal(overflow.response.status, 201);
+  assert.equal(overflow.value.packet.status, "failed");
+  assert.match(overflow.value.packet.compilationError, /^minimum_safe_packet_exceeds_budget:/);
+  assert.ok(overflow.value.receipt.unresolvedConflicts.length >= 2);
+
+  const immutableId = packetIds[1];
+  assert.throws(
+    () => DB.database.prepare("UPDATE packets SET task = 'mutated' WHERE id = ?").run(immutableId),
+    /immutable/i,
+  );
+  assert.throws(
+    () => DB.database.prepare("DELETE FROM packet_items WHERE packet_id = ?").run(immutableId),
+    /immutable/i,
+  );
+  assert.throws(
+    () => DB.database.prepare("UPDATE receipts SET selected_roadway_reason = 'mutated' WHERE packet_id = ?").run(immutableId),
+    /immutable/i,
+  );
+  assert.throws(
+    () => DB.database.prepare("DELETE FROM roadway_versions WHERE project_id = 'sports'").run(),
+    /immutable/i,
+  );
+});
+
+test("Slice 4 preserves Brewers Reconstructed limitations beside an Exact native source", async () => {
+  const worker = await builtWorker("slice4-brewers-representation");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const fixture = await readFile(
+    new URL("../fixtures/brewers/rockies-brewers-user-reconstruction.txt", import.meta.url),
+    "utf8",
+  );
+  const contract = JSON.parse(await readFile(
+    new URL("../fixtures/brewers/rockies-brewers-user-reconstruction.json", import.meta.url),
+    "utf8",
+  ));
+  const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "slice4-brewers-reconstruction-import",
+    body: {
+      format: "text",
+      title: contract.caseObjective,
+      sourceName: contract.sourceName,
+      sourceType: contract.sourceType,
+      representationType: contract.representationType,
+      authorityState: contract.authorityState,
+      importId: contract.importId,
+      transcript: fixture,
+      provenance: contract.provenance,
+    },
+  });
+  assert.equal(imported.response.status, 201);
+  const reconstructedCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: contract.caseObjective,
+      conversationId: imported.value.conversation.id,
+      makeActive: true,
+      actorId: "cody",
+    },
+  });
+  assert.equal(reconstructedCase.response.status, 201);
+
+  const native = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Exact native outcome fixture", provenance: { source: "campus_atlas_native" } },
+  });
+  const nativeCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: "Review the exact native outcome",
+      conversationId: native.value.conversation.id,
+      makeActive: true,
+      actorId: "cody",
+    },
+  });
+  const exactContent = "Exact native source: Colorado won 5–2; review what the result contradicted.";
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(native.value.conversation.id)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "slice4-exact-native-message",
+      body: { actorType: "user", actorId: "cody", content: exactContent },
+    },
+  );
+  const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId: native.value.conversation.id,
+      caseId: nativeCase.value.case.id,
+      type: "outcome",
+      assignmentState: "assigned",
+      exactSourceSpan: exactContent,
+      sourceSpans: [{ messageId: message.value.message.id, start: 0, end: exactContent.length }],
+    },
+  });
+  assert.equal(event.response.status, 201);
+
+  const packet = await createSlice4Packet(worker, DB, {
+    task: "Explain the completed Rockies–Brewers result and postmortem lessons without rewriting the source.",
+    caseId: nativeCase.value.case.id,
+    tokenBudget: 1600,
+  }, "slice4-brewers-representation-packet");
+  assert.equal(packet.response.status, 201, JSON.stringify(packet.value));
+  assert.equal(packet.value.packet.status, "compiled");
+  const items = Object.values(packet.value.receipt.treatmentSummary).flat();
+  const reconstructed = items.find(
+    (item) => item.sourceType === "SourceArtifact" && item.sourceId === imported.value.import.id,
+  );
+  assert.ok(reconstructed);
+  assert.equal(reconstructed.representation, "Reconstructed");
+  assert.equal(reconstructed.treatment, "Consider");
+  assert.match(reconstructed.reason, /historical raw transcript.*unavailable_cannot_truthfully_reconstruct/i);
+  const exact = items.find((item) => item.sourceId === event.value.event.id);
+  assert.ok(exact);
+  assert.equal(exact.representation, "Exact");
+  assert.match(packet.value.packet.compiledContent, /historical raw transcript unavailable; not Exact/i);
+  assert.equal(
+    items.some((item) => item.sourceId === imported.value.import.id && item.treatment === "Use"),
+    false,
+  );
+});
+
+test("Slice 4 minimal interface exposes interpretation, treatments, budgets, packet, receipt, and no handoff", async () => {
+  const worker = await builtWorker("slice4-minimal-interface");
+  const response = await worker.fetch(
+    new Request("http://localhost/projects/sports/ask", { headers: { accept: "text/html" } }),
+    { ASSETS: assets },
+    ctx,
+  );
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  for (const text of ["Ask with Atlas", "immutable receipt"]) {
+    assert.match(html, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  const interfaceSource = await readFile(
+    new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url),
+    "utf8",
+  );
+  for (const text of [
+    "Interpret current task",
+    "Compile packet",
+    "400",
+    "800",
+    "1600",
+    "Frozen registry",
+    "Interpreted intent",
+    "Immutable packet",
+    "Causal receipt",
+  ]) {
+    assert.match(interfaceSource, new RegExp(text));
+  }
+  const slice4Source = await Promise.all([
+    "roadway-service.ts",
+    "candidate-ranking.ts",
+    "packet-service.ts",
+    "slice4-api.ts",
+  ].map((name) => readFile(new URL(`../worker/${name}`, import.meta.url), "utf8")));
+  const combined = slice4Source.join("\n");
+  assert.doesNotMatch(combined, /INSERT INTO handoffs|receivingModel|model handoff/i);
+  assert.doesNotMatch(combined, /England|Ghana/);
+  assert.doesNotMatch(combined, /fake success|seeded success/i);
+});
+
+test("Slice 4 domain records reject generic writes that could bypass authority and immutability", async () => {
+  const worker = await builtWorker("slice4-generic-write-boundary");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  for (const table of ["roadways", "roadway_versions", "live_state_snapshots", "packets", "packet_items", "receipts"]) {
+    const result = await slice2Request(worker, DB, `/api/v1/projects/sports/records/${table}`, {
+      method: "POST",
+      body: { id: `${table}:bypass`, project_id: "sports" },
+    });
+    assert.equal(result.response.status, 409, table);
+    assert.match(result.value.error, /owned by a canonical domain service/i);
+  }
 });

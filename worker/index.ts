@@ -7,6 +7,7 @@ import { handleAtlasActions } from "./atlas-actions";
 import { handleCanonicalRecords } from "./canonical-records";
 import { handleConversationCases } from "./conversation-cases";
 import { handleSlice3 } from "./slice3-api";
+import { handleSlice4 } from "./slice4-api";
 
 interface Env {
   ASSETS: Fetcher;
@@ -52,6 +53,10 @@ const worker = {
 
     if (/^\/api\/v1\/projects\/[^/]+\/(?:checkpoints|findings|governance-events|mechanisms\/eligible)(?:\/|$)/.test(url.pathname)) {
       return handleSlice3(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+    }
+
+    if (/^\/api\/v1\/projects\/[^/]+\/(?:roadways|reconstruction|packets|live-state)(?:\/|$)/.test(url.pathname)) {
+      return handleSlice4(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (url.pathname.startsWith("/api/v1/projects/") && url.pathname.includes("/records/")) {

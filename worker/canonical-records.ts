@@ -10,7 +10,7 @@ export const CANONICAL_RECORD_TYPES = [
   "case_boundary_operations", "checkpoints", "checkpoint_reasoning_nodes",
   "reasoning_nodes", "reasoning_node_versions",
   "findings", "finding_versions", "mechanisms", "mechanism_versions",
-  "governance_events", "roadways", "roadway_versions", "packets",
+  "governance_events", "roadways", "roadway_versions", "live_state_snapshots", "packets",
   "packet_items", "receipts", "handoffs",
 ] as const;
 
@@ -38,6 +38,12 @@ const DOMAIN_OWNED_WRITES = new Set<CanonicalRecordType>([
   "finding_versions",
   "mechanisms",
   "mechanism_versions",
+  "roadways",
+  "roadway_versions",
+  "live_state_snapshots",
+  "packets",
+  "packet_items",
+  "receipts",
 ]);
 const ORDER_COLUMNS: Record<CanonicalRecordType, string> = {
   projects: "created_at",
@@ -61,6 +67,7 @@ const ORDER_COLUMNS: Record<CanonicalRecordType, string> = {
   governance_events: "created_at",
   roadways: "created_at",
   roadway_versions: "created_at",
+  live_state_snapshots: "created_at",
   packets: "created_at",
   packet_items: "sequence_order",
   receipts: "created_at",
