@@ -8,8 +8,8 @@ export default async function ConversationPage({
 }) {
   const { projectId, conversationId } = await params;
   return (
-    <main className={styles.page}>
-      <ConversationWorkspace projectId={projectId} conversationId={conversationId} />
+    <main className={styles.page} data-canonical-conversation>
+      <ConversationWorkspace key={`${projectId}:${conversationId}`} projectId={projectId} conversationId={conversationId} />
     </main>
   );
 }

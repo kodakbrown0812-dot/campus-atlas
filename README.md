@@ -13,6 +13,9 @@ behavior is documented in
 Slice 5 receiving-model handoff, answer references, and causal packet
 comparison are documented in
 [`docs/V1.7_SLICE_5_HANDOFF_DIFF.md`](docs/V1.7_SLICE_5_HANDOFF_DIFF.md).
+Slice 6A canonical shell, Work, conversation, Reasoning Health, and session
+behavior is documented in
+[`docs/V1.7_SLICE_6A_SHELL_WORK.md`](docs/V1.7_SLICE_6A_SHELL_WORK.md).
 
 ## V4.3 Build Week proof
 

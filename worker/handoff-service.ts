@@ -287,7 +287,7 @@ async function readHandoffRows(db: D1Database, projectId: string, handoffId: str
     all<Row>(db.prepare(
       `SELECT * FROM handoff_lifecycle_events
        WHERE handoff_id = ? AND project_id = ?
-       ORDER BY created_at ASC, rowid ASC`,
+       ORDER BY rowid ASC`,
     ).bind(handoffId, projectId)),
     first<Row>(db.prepare(
       "SELECT * FROM handoff_answers WHERE handoff_id = ? AND project_id = ? LIMIT 1",

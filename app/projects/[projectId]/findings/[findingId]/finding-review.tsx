@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useWriteSession } from "../../../../components/write-session";
 import styles from "../../conversations/conversation.module.css";
 
 type Version = {
@@ -64,10 +65,10 @@ export default function FindingReview({
   projectId: string;
   findingId: string;
 }) {
+  const { session, authorizationHeaders } = useWriteSession();
   const [detail, setDetail] = useState<FindingDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const [error, setError] = useState("");
-  const [actionKey, setActionKey] = useState("");
   const [reviewedStatement, setReviewedStatement] = useState("");
   const [scope, setScope] = useState("local");
   const [reason, setReason] = useState("");
@@ -111,8 +112,8 @@ export default function FindingReview({
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${actionKey}`,
           "idempotency-key": `finding:${findingId}:${action}:${crypto.randomUUID()}`,
+          ...authorizationHeaders(),
         },
         body: JSON.stringify({
           action,
@@ -235,20 +236,14 @@ export default function FindingReview({
             placeholder="Return condition (required for Defer)"
             value={returnCondition}
           />
-          <input
-            aria-label="Canonical write key"
-            className={styles.input}
-            disabled={terminal}
-            onChange={(event) => setActionKey(event.target.value)}
-            placeholder="Write key (kept only in memory)"
-            type="password"
-            value={actionKey}
-          />
+          {!session?.writeAuthorization.authorized && (
+            <p className={styles.error}>Read-only session. Enable writes once from the application shell.</p>
+          )}
           <div className={styles.actions}>
             {actions.map((action) => (
               <button
                 className={styles.button}
-                disabled={terminal || status === "saving" || !actionKey || !reason || (action.id === "defer" && !returnCondition)}
+                disabled={terminal || status === "saving" || !session?.writeAuthorization.authorized || !reason || (action.id === "defer" && !returnCondition)}
                 key={action.id}
                 onClick={() => govern(action.id)}
                 type="button"

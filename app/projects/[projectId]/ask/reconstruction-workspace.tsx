@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useWriteSession } from "../../../components/write-session";
 import styles from "../conversations/conversation.module.css";
 
 type Roadway = {
@@ -127,10 +128,10 @@ type HandoffResult = {
 const budgets = [400, 800, 1600] as const;
 
 export default function ReconstructionWorkspace({ projectId }: { projectId: string }) {
+  const { session, authorizationHeaders } = useWriteSession();
   const [roadways, setRoadways] = useState<Roadway[]>([]);
   const [task, setTask] = useState("");
   const [caseId, setCaseId] = useState("");
-  const [actionKey, setActionKey] = useState("");
   const [budget, setBudget] = useState<number>(800);
   const [roadwayOverride, setRoadwayOverride] = useState("");
   const [interpretation, setInterpretation] = useState<Interpretation | null>(null);
@@ -173,7 +174,7 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
         method: "POST",
         headers: {
           "content-type": "application/json",
-          authorization: `Bearer ${actionKey}`,
+          ...authorizationHeaders(),
         },
         body: JSON.stringify({
           task,
@@ -204,8 +205,8 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${actionKey}`,
         "idempotency-key": `packet:${crypto.randomUUID()}`,
+        ...authorizationHeaders(),
       },
       body: JSON.stringify({
         task,
@@ -245,8 +246,8 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
       method: "POST",
       headers: {
         "content-type": "application/json",
-        authorization: `Bearer ${actionKey}`,
         "idempotency-key": `handoff:${crypto.randomUUID()}`,
+        ...authorizationHeaders(),
       },
       body: JSON.stringify({
         packetId: result.packet.id,
@@ -291,13 +292,14 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
           />
           <label className={styles.label} htmlFor="atlas-case">Optional canonical case ID</label>
           <input className={styles.input} id="atlas-case" onChange={(event) => setCaseId(event.target.value)} value={caseId} />
-          <label className={styles.label} htmlFor="atlas-key">Write authorization</label>
-          <input className={styles.input} id="atlas-key" onChange={(event) => setActionKey(event.target.value)} type="password" value={actionKey} />
+          {!session?.writeAuthorization.authorized && (
+            <p className={styles.error}>Read-only session. Enable canonical writes once from the application shell.</p>
+          )}
           <div className={styles.actions}>
-            <button className={styles.button} disabled={!task.trim() || status === "working"} onClick={interpret} type="button">
+            <button className={styles.button} disabled={!session?.writeAuthorization.authorized || !task.trim() || status === "working"} onClick={interpret} type="button">
               Interpret
             </button>
-            <button className={styles.button} disabled={!task.trim() || status === "working"} onClick={compile} type="button">
+            <button className={styles.button} disabled={!session?.writeAuthorization.authorized || !task.trim() || status === "working"} onClick={compile} type="button">
               Compile packet
             </button>
           </div>
@@ -409,7 +411,7 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
               </select>
               <button
                 className={styles.button}
-                disabled={status === "working" || result.packet.status !== "compiled" || Boolean(result.packet.compilationError)}
+                disabled={!session?.writeAuthorization.authorized || status === "working" || result.packet.status !== "compiled" || Boolean(result.packet.compilationError)}
                 onClick={sendToReceivingModel}
                 type="button"
               >
