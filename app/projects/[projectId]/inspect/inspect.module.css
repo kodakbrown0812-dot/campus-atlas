@@ -1,0 +1,202 @@
+.page {
+  width: min(1120px, 100%);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 34px 22px 84px;
+  color: #dfe8f7;
+}
+
+.header {
+  display: grid;
+  grid-template-columns: 1fr minmax(260px, .65fr);
+  gap: 30px;
+  align-items: end;
+  margin-bottom: 22px;
+}
+
+.header span,
+.panel > span {
+  color: #81a0ed;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+}
+
+.header h1 {
+  margin: 6px 0 0;
+  font-size: clamp(32px, 6vw, 54px);
+  letter-spacing: -.045em;
+}
+
+.header p,
+.empty p {
+  color: #8297b8;
+}
+
+.tabs,
+.subtabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+}
+
+.tabs button,
+.subtabs button {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid rgba(140, 166, 207, .16);
+  border-radius: 9px;
+  color: #8297b8;
+  background: rgba(8, 23, 46, .72);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.tabs button[aria-current="page"],
+.subtabs button[aria-current="page"] {
+  border-color: rgba(77, 124, 254, .45);
+  color: #e2e9ff;
+  background: rgba(77, 124, 254, .12);
+}
+
+.stack {
+  display: grid;
+  gap: 11px;
+}
+
+.panel,
+.record,
+.empty,
+.rawRecord {
+  border: 1px solid rgba(140, 166, 207, .16);
+  border-radius: 14px;
+  background: linear-gradient(155deg, rgba(13, 31, 60, .94), rgba(7, 20, 41, .92));
+}
+
+.panel,
+.record,
+.empty {
+  padding: 19px;
+}
+
+.record {
+  display: grid;
+  gap: 13px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.record:hover {
+  border-color: rgba(77, 124, 254, .45);
+}
+
+.record > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.record > header strong {
+  font-size: 16px;
+}
+
+.record > header span {
+  padding: 5px 8px;
+  border-radius: 999px;
+  color: #91ddd6;
+  background: rgba(39, 212, 199, .07);
+  font-size: 10px;
+}
+
+.record dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px 16px;
+  margin: 0;
+}
+
+.record dl div {
+  display: grid;
+  grid-template-columns: 150px 1fr;
+  gap: 10px;
+}
+
+.record dt,
+.record small {
+  color: #768dad;
+}
+
+.record dd {
+  margin: 0;
+  color: #aabbd2;
+  overflow-wrap: anywhere;
+}
+
+.record pre,
+.rawRecord {
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.record textarea,
+.record input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid rgba(140, 166, 207, .22);
+  border-radius: 9px;
+  color: #dfe8f7;
+  background: #071326;
+}
+
+.record textarea {
+  min-height: 130px;
+  resize: vertical;
+}
+
+.record button {
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid rgba(77, 124, 254, .46);
+  border-radius: 9px;
+  color: #e6ecff;
+  background: rgba(77, 124, 254, .14);
+  cursor: pointer;
+}
+
+.record button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.rawRecord {
+  margin: 0;
+  padding: 15px;
+  color: #aebed4;
+  font: 11px/1.6 ui-monospace, monospace;
+}
+
+.failure {
+  margin-top: 30px;
+  border-color: rgba(245, 138, 168, .3);
+}
+
+@media (max-width: 760px) {
+  .page {
+    padding: 22px 12px 84px;
+  }
+
+  .header,
+  .record dl {
+    grid-template-columns: 1fr;
+  }
+
+  .record dl div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { WriteSessionProvider, useWriteSession } from "./write-session";
+import ContextualAdd from "./contextual-add";
 import styles from "./shell.module.css";
 
 type Project = {
@@ -110,6 +111,7 @@ function ProjectShellInner({
   const [status, setStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [switching, setSwitching] = useState(false);
   const [mobileAuthorizationOpen, setMobileAuthorizationOpen] = useState(false);
+  const [contextualAddOpen, setContextualAddOpen] = useState(false);
   const activeDestination = destinationForPath(pathname);
 
   useEffect(() => {
@@ -148,6 +150,7 @@ function ProjectShellInner({
     if (!nextProjectId || nextProjectId === projectId) return;
     setSwitching(true);
     setMobileAuthorizationOpen(false);
+    setContextualAddOpen(false);
     router.push(destinationHref(nextProjectId, activeDestination));
   }
 
@@ -191,6 +194,9 @@ function ProjectShellInner({
             </Link>
           ))}
         </nav>
+        <button className={styles.contextualAdd} onClick={() => setContextualAddOpen(true)} type="button">
+          <span>＋</span> Add
+        </button>
 
         <div className={styles.sidebarBottom}>
           <div className={styles.canonicalStatus}>
@@ -227,6 +233,14 @@ function ProjectShellInner({
           type="button"
         >
           {status === "ready" ? "D1" : "!"}
+        </button>
+        <button
+          aria-label="Open Contextual Add"
+          className={styles.mobileAdd}
+          onClick={() => setContextualAddOpen(true)}
+          type="button"
+        >
+          ＋
         </button>
       </header>
 
@@ -272,6 +286,12 @@ function ProjectShellInner({
           </section>
         </div>
       )}
+      <ContextualAdd
+        key={projectId}
+        onClose={() => setContextualAddOpen(false)}
+        open={contextualAddOpen}
+        projectId={projectId}
+      />
     </div>
   );
 }

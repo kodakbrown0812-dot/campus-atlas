@@ -402,6 +402,9 @@ export default function ConversationWorkspace({
         <button className={styles.analyzeButton} disabled={!canWrite || !activeCase || analysisStatus === "running"} onClick={analyzeNow} type="button">
           {analysisStatus === "running" ? "Analyzing…" : "Analyze now"}
         </button>
+        <Link className={styles.structureButton} href={`/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/structure`}>
+          View structure
+        </Link>
       </section>
 
       {!canWrite && (

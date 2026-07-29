@@ -121,6 +121,7 @@ function findingView(row: Row) {
     expectedRetrievalEffect: row.expected_retrieval_effect,
     proposalHash: row.proposal_hash,
     createdBy: row.created_by,
+    sourceCase: row.case_objective || null,
   };
 }
 
@@ -488,17 +489,50 @@ async function analyzeCheckpoint(
   };
 }
 
-export async function listFindings(db: D1Database, projectId: string, status?: string | null) {
+export async function listFindings(
+  db: D1Database,
+  projectId: string,
+  filters: {
+    status?: string | null;
+    type?: string | null;
+    caseId?: string | null;
+    scope?: string | null;
+    since?: string | null;
+  } = {},
+) {
   const values: unknown[] = [projectId];
-  const statusFilter = status ? " AND f.status = ?" : "";
-  if (status) values.push(status);
+  const clauses: string[] = [];
+  if (filters.status) {
+    clauses.push("f.status = ?");
+    values.push(filters.status);
+  }
+  if (filters.type) {
+    clauses.push("f.finding_type = ?");
+    values.push(filters.type);
+  }
+  if (filters.caseId) {
+    clauses.push("f.case_id = ?");
+    values.push(filters.caseId);
+  }
+  if (filters.scope) {
+    clauses.push("v.proposed_scope = ?");
+    values.push(filters.scope);
+  }
+  if (filters.since) {
+    if (!Number.isFinite(Date.parse(filters.since))) throw new Error("Finding date filter is invalid.");
+    clauses.push("f.created_at >= ?");
+    values.push(filters.since);
+  }
+  const filterSql = clauses.length ? ` AND ${clauses.join(" AND ")}` : "";
   const rows = await all<Row>(db.prepare(
     `SELECT f.*, v.proposal_statement, v.proposed_scope, v.conditions, v.exclusions,
             v.supporting_evidence, v.counterevidence, v.uncertainty,
-            v.reason_for_surfacing, v.expected_retrieval_effect, v.proposal_hash, v.created_by
+            v.reason_for_surfacing, v.expected_retrieval_effect, v.proposal_hash, v.created_by,
+            c.objective AS case_objective
      FROM findings f
      JOIN finding_versions v ON v.id = f.current_version_id AND v.project_id = f.project_id
-     WHERE f.project_id = ?${statusFilter}
+     JOIN cases c ON c.id = f.case_id AND c.project_id = f.project_id
+     WHERE f.project_id = ?${filterSql}
      ORDER BY f.created_at DESC`,
   ).bind(...values));
   return rows.map(findingView);
