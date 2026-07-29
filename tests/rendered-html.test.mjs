@@ -4,8 +4,6 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
-const developmentPreviewMeta = /<meta(?=[^>]*\bname=["']codex-preview["'])(?=[^>]*\bcontent=["']development["'])[^>]*>/i;
-
 function memoryD1() {
   const rows = new Map();
   return {
@@ -323,11 +321,13 @@ async function createSlice5Handoff(
   return { response, value: await response.json() };
 }
 
-test("renders the development preview", async () => {
+test("renders the Campus Atlas root without starter preview metadata", async () => {
   const worker = await builtWorker("render");
   const response = await worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html" } }), { ASSETS: assets }, ctx);
   assert.equal(response.status, 200);
-  assert.match(await response.text(), developmentPreviewMeta);
+  const html = await response.text();
+  assert.match(html, /Campus Atlas/);
+  assert.doesNotMatch(html, /codex-preview/);
 });
 
 test("Slice 1 canonical API enforces project scope and idempotent writes", async () => {
@@ -392,6 +392,122 @@ test("Slice 1 migration contains normalized records without replacing atlas_stat
   assert.match(schema, /export const atlasState/);
   assert.match(classification, /verified_canonical_history/);
   assert.match(classification, /unverified_proposal/);
+});
+
+test("Slice 6A shell reads canonical health, projects, session, and isolated active Work", async () => {
+  const worker = await builtWorker("slice6a-shell-reads");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Development");
+
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Native Slice 6A proof" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const caseRecord = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: "Preserve exact native continuity",
+      conversationId,
+      makeActive: true,
+      actorId: "cody",
+    },
+  });
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "slice6a-native-message",
+      body: {
+        actorType: "user",
+        actorId: "cody",
+        content: "A current challenge should remain visible in Reasoning Health.",
+      },
+    },
+  );
+  await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      caseId: caseRecord.value.case.id,
+      type: "challenge",
+      assignmentState: "assigned",
+      exactSourceSpan: "current challenge",
+      sourceSpans: [{
+        messageId: message.value.message.id,
+        start: 2,
+        end: 19,
+      }],
+    },
+  });
+
+  const env = { DB, ASSETS: assets, CAMPUS_ATLAS_ACTION_KEY: "slice-2-test-key" };
+  const health = await worker.fetch(new Request("http://localhost/api/v1/health"), env, ctx);
+  assert.equal(health.status, 200);
+  assert.deepEqual(
+    Object.fromEntries(Object.entries(await health.json()).filter(([key]) =>
+      ["canonicalState", "persistence", "fixtureMode", "seededFallback"].includes(key),
+    )),
+    {
+      canonicalState: "available",
+      persistence: "canonical_d1",
+      fixtureMode: false,
+      seededFallback: false,
+    },
+  );
+
+  const projectsResponse = await worker.fetch(new Request("http://localhost/api/v1/projects"), env, ctx);
+  assert.equal(projectsResponse.status, 200);
+  const projects = await projectsResponse.json();
+  assert.equal(projects.projects.length, 2);
+  assert.equal(projects.fixtureMode, false);
+  assert.equal(projects.source, "canonical_d1");
+
+  const readOnly = await (await worker.fetch(new Request("http://localhost/api/v1/session"), env, ctx)).json();
+  assert.equal(readOnly.session.readOnly, true);
+  assert.equal(readOnly.session.writeAuthorization.storage, "memory_only");
+  assert.doesNotMatch(JSON.stringify(readOnly), /slice-2-test-key/);
+  const authorized = await (await worker.fetch(new Request("http://localhost/api/v1/session", {
+    headers: { authorization: "Bearer slice-2-test-key" },
+  }), env, ctx)).json();
+  assert.equal(authorized.session.writeAuthorization.authorized, true);
+  assert.doesNotMatch(JSON.stringify(authorized), /slice-2-test-key/);
+
+  const workResponse = await worker.fetch(new Request("http://localhost/api/v1/projects/sports/work"), env, ctx);
+  assert.equal(workResponse.status, 200);
+  const work = await workResponse.json();
+  assert.equal(work.activeConversationId, conversationId);
+  assert.equal(work.conversations.length, 1);
+  assert.equal(work.conversations[0].reasoningHealth.state, "Conflict");
+  assert.equal(work.conversations[0].reasoningHealth.cause.type, "event");
+  assert.equal(work.fixtureMode, false);
+  assert.equal(work.source, "canonical_d1");
+
+  const isolated = await (await worker.fetch(new Request("http://localhost/api/v1/projects/hockey/work"), env, ctx)).json();
+  assert.equal(isolated.project.id, "hockey");
+  assert.equal(isolated.conversations.length, 0);
+
+  const unauthorizedWrite = await worker.fetch(new Request("http://localhost/api/v1/projects/sports/conversations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "Must not persist" }),
+  }), env, ctx);
+  assert.equal(unauthorizedWrite.status, 401);
+
+  const unavailable = await worker.fetch(new Request("http://localhost/api/v1/health"), {
+    DB: { prepare() { throw new Error("D1 unavailable"); } },
+    ASSETS: assets,
+  }, ctx);
+  assert.equal(unavailable.status, 503);
+  assert.deepEqual(await unavailable.json(), {
+    error: "D1 unavailable",
+    canonicalState: "unavailable",
+    fixtureMode: false,
+    seededFallback: false,
+  });
 });
 
 test("Slice 3 migrations add checkpoints and append-only governance metadata", async () => {
@@ -1291,85 +1407,53 @@ test("Slice 2 split and merge remain proposals until explicitly applied", async 
   assert.equal(restoredCase.value.case.status, "active");
 });
 
-test("V4.6 global and project navigation is quiet and project scoped", async () => {
+test("Slice 6A root restores canonical Work without AtlasState or seeded fallback", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  for (const destination of ["Home", "Projects", "Review", "Atlas"]) assert.match(page, new RegExp(`label: "${destination}"`));
-  assert.doesNotMatch(page, /label: "Capture"/);
-  assert.match(page, /type ProjectTab = "work" \| "evidence" \| "blueprint" \| "activity"/);
-  assert.match(page, /state\.cases\.filter\(\(item\) => item\.project === activeProject\)/);
-  assert.match(page, /state\.evidence\.filter\(\(item\) => item\.project === activeProject\)/);
-  assert.match(page, /Ask Atlas will not silently change this scope/);
-  assert.match(page, /Headquarters.*Governance function/s);
+  assert.match(page, /\/api\/v1\/health/);
+  assert.match(page, /\/api\/v1\/projects/);
+  assert.match(page, /\/work/);
+  assert.match(page, /No seeded project card was substituted/);
+  assert.doesNotMatch(page, /makeSeedState|\/api\/state|England|Ghana|AtlasState/);
 });
 
-test("Work opens one unified case with the complete governed lifecycle", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  for (const section of ["What happened", "Research audit", "Evidence", "Outcome", "Post-mortem", "Proposed learning", "Connections", "Downstream effect"]) assert.match(page, new RegExp(section));
-  for (const stage of ["Captured", "Outcome recorded", "Audited", "Lesson proposed", "Awaiting review", "Approved", "Retrieval eligible"]) assert.match(page, new RegExp(stage));
-  assert.match(page, /Origin and reasoning/);
-  assert.match(page, /Facts/);
-  assert.match(page, /Estimates/);
-  assert.match(page, /Assumptions/);
-  assert.match(page, /Unknowns/);
-  assert.match(page, /Counterarguments/);
+test("Slice 6A shell has exactly four primary destinations and mobile parity", async () => {
+  const shell = await readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/components/shell.module.css", import.meta.url), "utf8");
+  for (const destination of ["Work", "Atlas Found", "Ask", "Inspect"]) {
+    assert.match(shell, new RegExp(`label: "${destination}"`));
+  }
+  assert.equal((shell.match(/label: "/g) || []).length, 4);
+  assert.match(shell, /aria-label="Campus Atlas primary"/);
+  assert.match(shell, /aria-label="Campus Atlas mobile primary"/);
+  assert.match(shell, /project-switcher/);
+  assert.match(shell, /Switching project and clearing the prior project view/);
+  assert.match(shell, /mobileSheet/);
+  assert.match(css, /\.mobileNav/);
+  assert.match(css, /@media \(max-width: 760px\)/);
 });
 
-test("Capture is short, writes canonical records, and always produces a transition receipt", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  for (const type of ["New case or experience", "Research", "Evidence", "Outcome", "Correction", "Challenge", "Observation", "Proposed connection"]) assert.match(page, new RegExp(type));
-  assert.match(page, /Retrieval did not change because no knowledge was approved/);
-  assert.match(page, /Where it went/);
-  assert.match(page, /Previous state/);
-  assert.match(page, /New state/);
-  assert.match(page, /Recommended next step/);
-  assert.match(page, /API-visible state/);
-});
-
-test("Evidence Ledger uses quiet project schemas without treating labels as knowledge", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const data = await readFile(new URL("../app/v46-data.ts", import.meta.url), "utf8");
-  assert.match(page, /Evidence Ledger/);
-  assert.match(page, /Ranked highly because it matches/);
-  assert.match(page, /Labels support ranking and reconstruction\. They are not knowledge claims or feed events/);
-  assert.match(page, /Routine label edits stay in record history/);
-  for (const label of ["Skill dial", "Game situation", "Sport", "League", "Market type", "Shared mechanism", "Fragility"]) assert.match(data, new RegExp(label));
-});
-
-test("Review exposes evidence and operational governance controls", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  for (const control of ["Approve", "Edit and approve", "Challenge", "Reject", "Connect", "Merge", "Defer", "Supersede", "Retire"]) assert.match(page, new RegExp(control));
-  assert.match(page, /Supporting evidence/);
-  assert.match(page, /Challenging evidence/);
-  assert.match(page, /Possible Blueprint effect/);
-  assert.match(page, /Expected retrieval effect/);
-  assert.match(page, /Cross-project consequence/);
-  assert.match(page, /Approve the underlying knowledge before authorizing a Blueprint revision/);
-});
-
-test("Ask Atlas provides a direct answer before progressive inspection", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  for (const layer of ["Atlas response", "Inspect context", "Exclusions", "Context packet", "Retrieval receipt", "Before-and-after diff", "Raw JSON"]) assert.match(page, new RegExp(layer));
-  for (const scope of ["Current project only", "Current project + approved transfers", "Entire Campus exploration"]) assert.ok(page.includes(scope));
-  assert.match(page, /Token budget/);
-  assert.match(page, /Temporary local context/);
-});
-
-test("project graph modes show different relationship subsets and inspect edges", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  for (const mode of ["connections", "lineage", "challenges", "cross", "transfer"]) assert.match(page, new RegExp(`"${mode}"`));
-  for (const detail of ["Supporting evidence", "Confidence", "Creator", "Downstream consequence", "Reconstruction value", "Domain limitations"]) assert.match(page, new RegExp(detail));
-  assert.match(page, /Selecting a connection|Select a connection/);
-});
-
-test("mobile preserves Home, Projects, Review, Atlas, Ask, Capture, Work, Evidence, and Blueprint", async () => {
-  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
-  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
-  assert.match(page, /aria-label="Campus Atlas mobile workspace"/);
-  assert.match(page, /mobile-capture/);
-  assert.match(page, /onAsk/);
-  assert.match(css, /\.mobile-nav/);
-  assert.match(css, /@media\(max-width:680px\)/);
-  assert.match(css, /\.project-tabs\{grid-template-columns:repeat\(3,120px\)/);
+test("Slice 6A Work and conversation actions use canonical services only", async () => {
+  const work = await readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8");
+  const conversation = await readFile(new URL("../app/projects/[projectId]/conversations/[conversationId]/workspace.tsx", import.meta.url), "utf8");
+  const session = await readFile(new URL("../app/components/write-session.tsx", import.meta.url), "utf8");
+  for (const expected of [
+    "/conversations",
+    "/conversations/import",
+    "Start Atlas conversation",
+    "Import conversation",
+    "No fixture, decorative project card, or simulated activity was inserted",
+  ]) assert.match(work, new RegExp(expected.replaceAll("/", "\\/")));
+  for (const expected of [
+    "/messages",
+    "/active-case",
+    "/checkpoints",
+    "Reasoning Health",
+    "Atlas found no consequence that should change future retrieval",
+    "Server confirmed the preserved message",
+  ]) assert.match(conversation, new RegExp(expected.replaceAll("/", "\\/")));
+  assert.doesNotMatch(`${work}\n${conversation}`, /\/api\/state|makeSeedState|AtlasState/);
+  assert.match(session, /storage: "memory_only"/);
+  assert.doesNotMatch(session, /localStorage|sessionStorage/);
 });
 
 test("pre-approval knowledge is excluded and absent from the active Blueprint", async () => {
@@ -1545,14 +1629,16 @@ test("writes fail closed and never expose the configured secret", async () => {
   assert.doesNotMatch(JSON.stringify(status), /never-return-this/);
 });
 
-test("demo reset restores every V4.6 proof subsystem without deleting unrelated workspaces", async () => {
+test("V4.6 seeded proof remains available for compatibility without owning the V1.7 root", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const data = await readFile(new URL("../app/v46-data.ts", import.meta.url), "utf8");
-  assert.match(page, /Reset Amy Campus demo/);
-  assert.match(page, /cases, evidence, Review, approved Knowledge, Blueprint versions, graph connections, transfer proposals, reconstruction pathways, packet history, and activity/);
-  assert.match(page, /applies only to the current Amy Campus demo session/);
-  assert.match(page, /makeSeedState\(state\.workspaceId\)/);
+  assert.match(data, /export function makeSeedState/);
+  assert.match(data, /seededCases/);
+  assert.match(data, /seededEvidence/);
+  assert.match(data, /seededKnowledge/);
   assert.match(data, /proofBaseline: null/);
+  assert.doesNotMatch(page, /makeSeedState|v46-data|Reset Amy Campus demo/);
+  assert.match(page, /No seeded project card was substituted/);
 });
 
 test("Slice 3 checkpoints select at most seven exact-source nodes and accept zero findings", async () => {

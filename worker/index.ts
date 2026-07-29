@@ -10,6 +10,7 @@ import { handleSlice3 } from "./slice3-api";
 import { handleSlice4 } from "./slice4-api";
 import { handleSlice5 } from "./slice5-api";
 import { TestReceivingModelAdapter } from "./receiving-model";
+import { handleShellService } from "./shell-service";
 
 interface Env {
   ASSETS: Fetcher;
@@ -48,6 +49,16 @@ const worker = {
 
     if (url.pathname === "/api/structure") {
       return handleStructure(request, env.OPENAI_API_KEY);
+    }
+
+    if (
+      ["/api/v1/health", "/api/v1/session", "/api/v1/projects"].includes(url.pathname)
+      || /^\/api\/v1\/projects\/[^/]+\/work$/.test(url.pathname)
+    ) {
+      return handleShellService(request, env.DB, {
+        actionKey: env.CAMPUS_ATLAS_ACTION_KEY,
+        publicDemo: env.CAMPUS_ATLAS_PUBLIC_DEMO === "true",
+      });
     }
 
     if (/^\/api\/v1\/projects\/[^/]+\/(?:conversations|cases|events|case-boundaries)(?:\/|$)/.test(url.pathname)) {

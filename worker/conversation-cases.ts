@@ -1,6 +1,7 @@
 import { canonicalId } from "./canonical-records";
 import { applyBoundaryProposal, createBoundaryProposal, reverseBoundaryOperation } from "./case-boundaries";
 import { normalizeActor, parseImport, sha256, timestampValue } from "./transcript-import";
+import { reasoningHealthForConversation } from "./reasoning-health";
 
 type Row = Record<string, unknown>;
 
@@ -225,6 +226,12 @@ async function conversationDetail(db: D1Database, projectId: string, conversatio
   ]);
   return {
     conversation: conversationView(conversation),
+    reasoningHealth: await reasoningHealthForConversation(
+      db,
+      projectId,
+      conversationId,
+      conversation.active_case_id ? String(conversation.active_case_id) : null,
+    ),
     messages: messages.map(messageView),
     events: events.map(eventView),
     cases: links.map(caseView),
