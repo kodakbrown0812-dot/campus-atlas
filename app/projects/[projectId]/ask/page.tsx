@@ -1,6 +1,6 @@
 import Link from "next/link";
 import ReconstructionWorkspace from "./reconstruction-workspace";
-import styles from "../conversations/conversation.module.css";
+import styles from "./ask.module.css";
 
 export default async function AskPage({
   params,
@@ -11,18 +11,21 @@ export default async function AskPage({
   return (
     <main className={styles.page}>
       <div className={styles.shell}>
-        <Link className={styles.back} href={`/projects/${encodeURIComponent(projectId)}/conversations`}>
-          ← Conversations
+        <Link className={styles.back} href={`/projects/${encodeURIComponent(projectId)}/work`}>
+          ← Return to Work
         </Link>
         <header className={styles.header}>
           <div>
-            <span className={styles.eyebrow}>Canonical reconstruction</span>
+            <span>Governed reconstruction</span>
             <h1>Ask with Atlas</h1>
-            <p>Interpret a task, compile governed context, preserve its immutable receipt, hand the saved packet to a receiving model, and inspect the causal handoff receipt.</p>
+            <p>
+              Inspect what Atlas understands, how candidates are treated, the exact packet supplied,
+              and the receiving model’s separate answer.
+            </p>
           </div>
-          <span className={styles.status}>Slice 5 verification</span>
+          <b>Canonical V1.7</b>
         </header>
-        <ReconstructionWorkspace projectId={projectId} />
+        <ReconstructionWorkspace key={projectId} projectId={projectId} />
       </div>
     </main>
   );

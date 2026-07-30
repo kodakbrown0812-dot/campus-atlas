@@ -636,4 +636,52 @@ export async function getHandoffHistory(
   };
 }
 
+export async function listHandoffs(db: D1Database, projectId: string) {
+  const rows = await all<Row>(db.prepare(
+    `SELECT h.*,
+            (
+              SELECT e.status FROM handoff_lifecycle_events e
+              WHERE e.project_id = h.project_id AND e.handoff_id = h.id
+              ORDER BY e.rowid DESC LIMIT 1
+            ) AS current_status,
+            (
+              SELECT e.failure_category FROM handoff_lifecycle_events e
+              WHERE e.project_id = h.project_id AND e.handoff_id = h.id
+              ORDER BY e.rowid DESC LIMIT 1
+            ) AS current_failure_category,
+            (
+              SELECT e.failure_reason FROM handoff_lifecycle_events e
+              WHERE e.project_id = h.project_id AND e.handoff_id = h.id
+              ORDER BY e.rowid DESC LIMIT 1
+            ) AS current_failure_reason,
+            a.id AS answer_id,
+            a.provider_response_id,
+            a.answer_timestamp,
+            r.id AS receipt_id
+     FROM handoffs h
+     LEFT JOIN handoff_answers a
+       ON a.project_id = h.project_id AND a.handoff_id = h.id
+     LEFT JOIN handoff_receipts r
+       ON r.project_id = h.project_id AND r.handoff_id = h.id
+     WHERE h.project_id = ?
+     ORDER BY h.handoff_at DESC, h.rowid DESC`,
+  ).bind(projectId));
+  return rows.map((row) => ({
+    id: row.id,
+    projectId: row.project_id,
+    packetId: row.packet_id,
+    originalTask: row.original_task,
+    provider: row.receiving_provider,
+    model: row.receiving_model,
+    status: row.current_status || row.handoff_status,
+    failureCategory: row.current_failure_category || null,
+    failureReason: row.current_failure_reason || row.failure_reason || null,
+    createdAt: row.handoff_at,
+    answerId: row.answer_id || null,
+    providerResponseId: row.provider_response_id || null,
+    answerTimestamp: row.answer_timestamp || null,
+    receiptId: row.receipt_id || null,
+  }));
+}
+
 export { supportedReceivingModels };

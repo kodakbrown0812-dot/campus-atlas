@@ -2,6 +2,7 @@ import {
   executeHandoff,
   getHandoff,
   getHandoffHistory,
+  listHandoffs,
   supportedReceivingModels,
 } from "./handoff-service";
 import { TestReceivingModelAdapter } from "./receiving-model";
@@ -67,6 +68,14 @@ export async function handleSlice5(
         status,
         headers: { "cache-control": "no-store" },
       });
+    }
+
+    if (parts.length === 0 && request.method === "GET") {
+      await requireProject(db, projectId);
+      return Response.json({
+        projectId,
+        handoffs: await listHandoffs(db, projectId),
+      }, { headers: { "cache-control": "no-store" } });
     }
 
     if (parts.length >= 1 && request.method === "GET") {
