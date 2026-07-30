@@ -111,7 +111,7 @@ export function responseError(error: unknown, fallback = "Slice 3 request failed
   if (/current version|already governed|conflict/i.test(message)) {
     return Response.json({ error: message }, { status: 409 });
   }
-  if (/required|invalid|unsupported|must|cannot|does not|at most|outside|unchanged|one finding/i.test(message)) {
+  if (/required|requires|invalid|unsupported|must|cannot|does not|at most|outside|unchanged|one finding/i.test(message)) {
     return Response.json({ error: message }, { status: 400 });
   }
   return Response.json({ error: message }, { status: 500 });

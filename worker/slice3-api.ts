@@ -40,8 +40,13 @@ export async function handleSlice3(
     }
 
     if (parts[0] === "findings" && parts.length === 1 && request.method === "GET") {
-      const status = url.searchParams.get("status");
-      return Response.json({ projectId, findings: await listFindings(db, projectId, status) }, {
+      return Response.json({ projectId, findings: await listFindings(db, projectId, {
+        status: url.searchParams.get("status"),
+        type: url.searchParams.get("type"),
+        caseId: url.searchParams.get("caseId"),
+        scope: url.searchParams.get("scope"),
+        since: url.searchParams.get("since"),
+      }) }, {
         headers: { "cache-control": "no-store" },
       });
     }

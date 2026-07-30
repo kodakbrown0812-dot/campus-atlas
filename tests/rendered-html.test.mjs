@@ -3489,3 +3489,383 @@ test("Slice 5 handoff records reject generic canonical writes", async () => {
     assert.match(result.value.error, /owned by a canonical domain service/i);
   }
 });
+
+test("Slice 6B reasoning-node correction is versioned, idempotent, project-scoped, and non-authoritative", async () => {
+  const worker = await builtWorker("slice6b-node-correction");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Engine");
+  const seeded = await seedSlice3Case(worker, DB, "slice6b correction", ["correction", "challenge"]);
+  const checkpoint = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice6b-correction-checkpoint",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      trigger: "analyze_now",
+      source: "slice6b_contract",
+      findingCandidates: [],
+    },
+  });
+  assert.equal(checkpoint.response.status, 201, JSON.stringify(checkpoint.value));
+  const node = checkpoint.value.selectedNodes[0];
+  const correctedStatement = `${node.statement} Cody corrected this wording without promoting authority.`;
+  const correction = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/reasoning-nodes/${encodeURIComponent(node.id)}/corrections`,
+    {
+      method: "POST",
+      idempotencyKey: "slice6b-node-correction",
+      body: {
+        sourceVersionId: node.currentVersionId,
+        reviewedStatement: correctedStatement,
+        actorId: "cody",
+        reason: "The selected wording needed a narrower and explicit representation.",
+      },
+    },
+  );
+  assert.equal(correction.response.status, 201, JSON.stringify(correction.value));
+  assert.equal(correction.value.version.statement, correctedStatement);
+  assert.equal(correction.value.version.representation_type, "Reconstructed");
+  assert.equal(correction.value.retrievalEffect, "wording_corrected_no_authority_promotion");
+  assert.equal(correction.value.governanceEvent.prior_authority, correction.value.governanceEvent.new_authority);
+  assert.equal(correction.value.governanceEvent.source_version_id, node.currentVersionId);
+  assert.equal(correction.value.version.supersedes_version_id, node.currentVersionId);
+
+  const replay = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/reasoning-nodes/${encodeURIComponent(node.id)}/corrections`,
+    {
+      method: "POST",
+      idempotencyKey: "slice6b-node-correction",
+      body: {
+        sourceVersionId: node.currentVersionId,
+        reviewedStatement: correctedStatement,
+        actorId: "cody",
+        reason: "The selected wording needed a narrower and explicit representation.",
+      },
+    },
+  );
+  assert.equal(replay.response.status, 200);
+  assert.equal(replay.value.idempotentReplay, true);
+  assert.equal(replay.value.version.id, correction.value.version.id);
+
+  const conflict = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/reasoning-nodes/${encodeURIComponent(node.id)}/corrections`,
+    {
+      method: "POST",
+      idempotencyKey: "slice6b-node-correction",
+      body: {
+        sourceVersionId: node.currentVersionId,
+        reviewedStatement: "Conflicting correction content.",
+        actorId: "cody",
+        reason: "Different request.",
+      },
+    },
+  );
+  assert.equal(conflict.response.status, 409);
+  assert.match(conflict.value.error, /idempotency key conflicts/i);
+
+  const detail = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/inspect/reasoning/${encodeURIComponent(node.id)}`,
+  );
+  assert.equal(detail.response.status, 200);
+  assert.equal(detail.value.node.currentVersionId, correction.value.version.id);
+  assert.equal(detail.value.versions.length, 2);
+  assert.equal(detail.value.versions[0].id, node.currentVersionId);
+  assert.equal(detail.value.correctionHistory.at(-1).id, correction.value.governanceEvent.id);
+  const generic = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/records/reasoning_nodes/${encodeURIComponent(node.id)}`,
+  );
+  assert.equal(generic.value.value.current_version_id, correction.value.version.id);
+  const crossProject = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/hockey/inspect/reasoning/${encodeURIComponent(node.id)}`,
+  );
+  assert.equal(crossProject.response.status, 404);
+});
+
+test("Slice 6B Contextual Add maps to canonical records with receipts, isolation, and no authority promotion", async () => {
+  const worker = await builtWorker("slice6b-contextual-add");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Engine");
+  const seeded = await seedSlice3Case(worker, DB, "slice6b contextual", ["observation"]);
+
+  const addedCase = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "slice6b-contextual-case",
+    body: {
+      type: "case",
+      objective: "A bounded case created through Contextual Add",
+      conversationId: seeded.conversationId,
+      actorId: "cody",
+      sourceReference: "user_supplied_contextual_capture",
+    },
+  });
+  assert.equal(addedCase.response.status, 201, JSON.stringify(addedCase.value));
+  assert.equal(addedCase.value.receipt.recordType, "case");
+  assert.equal(addedCase.value.receipt.retrievalChanged, false);
+  assert.equal(addedCase.value.receipt.authority, "observed");
+
+  const observationBody = {
+    type: "observation",
+    content: "A directly supplied observation stays observed until a separate governance action.",
+    conversationId: seeded.conversationId,
+    caseId: seeded.caseId,
+    representation: "Reconstructed",
+    actorId: "cody",
+    sourceReference: "manual://slice6b-observation",
+    reason: "Preserve local context without promoting it.",
+  };
+  const observation = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "slice6b-contextual-observation",
+    body: observationBody,
+  });
+  assert.equal(observation.response.status, 201, JSON.stringify(observation.value));
+  assert.equal(observation.value.record.authority_state, "observed");
+  assert.equal(observation.value.receipt.representation, "Reconstructed");
+  assert.equal(observation.value.receipt.retrievalChanged, false);
+  assert.match(observation.value.receipt.retrievalReason, /no consequential meaning was approved/i);
+
+  const exactContent = "Exact Contextual Add source is preserved from this canonical message.";
+  const exactMessage = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(seeded.conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "slice6b-contextual-exact-message",
+      body: { actorType: "user", actorId: "cody", content: exactContent },
+    },
+  );
+  const exactCapture = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "slice6b-contextual-exact",
+    body: {
+      type: "research_evidence",
+      content: exactContent,
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      representation: "Exact",
+      sourceMessageId: exactMessage.value.message.id,
+      sourceStart: 0,
+      sourceEnd: exactContent.length,
+      actorId: "cody",
+      reason: "Preserve exact native evidence.",
+    },
+  });
+  assert.equal(exactCapture.response.status, 201, JSON.stringify(exactCapture.value));
+  assert.equal(exactCapture.value.receipt.representation, "Exact");
+  assert.deepEqual(JSON.parse(exactCapture.value.record.source_message_ids), [exactMessage.value.message.id]);
+  const unsupportedExact = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "slice6b-contextual-invalid-exact",
+    body: {
+      type: "observation",
+      content: "This has no canonical message span.",
+      conversationId: seeded.conversationId,
+      representation: "Exact",
+      actorId: "cody",
+      reason: "This should fail honestly.",
+    },
+  });
+  assert.equal(unsupportedExact.response.status, 400);
+  assert.match(unsupportedExact.value.error, /Exact representation requires a canonical source-message span/i);
+
+  const replay = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "slice6b-contextual-observation",
+    body: observationBody,
+  });
+  assert.equal(replay.response.status, 200);
+  assert.equal(replay.value.idempotentReplay, true);
+  assert.equal(replay.value.record.id, observation.value.record.id);
+
+  const outcome = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "slice6b-contextual-outcome",
+    body: {
+      type: "outcome",
+      content: "The observed outcome is recorded without automatically creating a mechanism.",
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      representation: "Reconstructed",
+      actorId: "cody",
+      reason: "Record reality contact.",
+    },
+  });
+  assert.equal(outcome.response.status, 201, JSON.stringify(outcome.value));
+  const caseRead = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/cases/${encodeURIComponent(seeded.caseId)}`,
+  );
+  assert.equal(caseRead.value.case.outcomeState, "recorded");
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms WHERE project_id = ?").get("sports").count,
+    0,
+  );
+
+  const proposedConnection = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "slice6b-contextual-connection",
+    body: {
+      type: "proposed_connection",
+      content: "This relationship is proposed and remains non-authoritative.",
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      targetType: "case",
+      targetId: addedCase.value.record.id,
+      actorId: "cody",
+      reason: "Suggest a relationship for later review.",
+    },
+  });
+  assert.equal(proposedConnection.response.status, 201);
+  assert.equal(proposedConnection.value.receipt.authority, "proposed");
+  assert.equal(proposedConnection.value.receipt.retrievalChanged, false);
+
+  const crossProject = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/hockey/records/events/${encodeURIComponent(observation.value.record.id)}`,
+  );
+  assert.equal(crossProject.response.status, 404);
+  const unauthorized = await worker.fetch(new Request(
+    "http://localhost/api/v1/projects/sports/contextual-add",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "slice6b-unauthorized" },
+      body: JSON.stringify(observationBody),
+    },
+  ), { DB, ASSETS: assets, CAMPUS_ATLAS_ACTION_KEY: "slice-2-test-key" }, ctx);
+  assert.equal(unauthorized.status, 401);
+});
+
+test("Slice 6B Inspect and Structure return the same project-scoped canonical snapshots as direct APIs", async () => {
+  const worker = await builtWorker("slice6b-inspect-parity");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Engine");
+  const seeded = await seedSlice3Case(worker, DB, "slice6b inspect", ["evidence", "challenge", "outcome"]);
+  const checkpoint = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice6b-inspect-checkpoint",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      trigger: "analyze_now",
+      source: "slice6b_contract",
+      findingCandidates: [],
+    },
+  });
+  assert.equal(checkpoint.response.status, 201);
+
+  const overview = await slice2Request(worker, DB, "/api/v1/projects/sports/inspect");
+  assert.equal(overview.response.status, 200, JSON.stringify(overview.value));
+  assert.ok(overview.value.cases.some((record) => record.id === seeded.caseId));
+  assert.equal(
+    overview.value.cases.find((record) => record.id === seeded.caseId).reasoningHealth.state,
+    "Conflict",
+  );
+  assert.ok(overview.value.reasoning.some((record) => record.id === checkpoint.value.selectedNodes[0].id));
+  assert.deepEqual(overview.value.principles, []);
+  assert.match(overview.value.principlesNote, /No stable canonical principle record/i);
+  assert.ok(Array.isArray(overview.value.advanced.relationships));
+
+  const caseDetail = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/inspect/cases/${encodeURIComponent(seeded.caseId)}`,
+  );
+  assert.equal(caseDetail.response.status, 200, JSON.stringify(caseDetail.value));
+  assert.equal(caseDetail.value.case.id, seeded.caseId);
+  assert.equal(caseDetail.value.events.length, seeded.events.length);
+  assert.equal(caseDetail.value.reasoning.length, checkpoint.value.selectedNodes.length);
+  assert.ok(caseDetail.value.conversations.some((record) => record.id === seeded.conversationId));
+
+  const structure = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(seeded.conversationId)}/structure`,
+  );
+  assert.equal(structure.response.status, 200, JSON.stringify(structure.value));
+  assert.equal(structure.value.conversation.id, seeded.conversationId);
+  assert.equal(structure.value.cases[0].case.id, seeded.caseId);
+  assert.deepEqual(
+    structure.value.cases[0].events.map((record) => record.id),
+    caseDetail.value.events.map((record) => record.id),
+  );
+
+  const crossProjectCase = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/hockey/inspect/cases/${encodeURIComponent(seeded.caseId)}`,
+  );
+  assert.equal(crossProjectCase.response.status, 404);
+  const crossProjectStructure = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/hockey/conversations/${encodeURIComponent(seeded.conversationId)}/structure`,
+  );
+  assert.equal(crossProjectStructure.response.status, 404);
+});
+
+test("Slice 6B interface is canonical, explicit, mobile-capable, and leaves Slice 6C untouched", async () => {
+  const [
+    queue,
+    review,
+    inspect,
+    structure,
+    contextualAdd,
+    shell,
+    ask,
+    service,
+  ] = await Promise.all([
+    readFile(new URL("../app/projects/[projectId]/findings/finding-queue.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/findings/[findingId]/finding-review.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/inspect/inspect-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/conversations/[conversationId]/structure/structure-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/contextual-add.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../worker/stewardship-mutations.ts", import.meta.url), "utf8"),
+  ]);
+  for (const label of ["Needs review", "Deferred", "Awaiting outcome", "Conflict-related", "Recently resolved"]) {
+    assert.match(queue, new RegExp(label));
+  }
+  for (const text of [
+    "Atlas’s original proposal",
+    "Cody’s current reviewed wording",
+    "Exact wording difference",
+    "Reject this proposal and suppress unchanged resurfacing",
+    "Deferral has no authoritative retrieval effect",
+    "Roll back this governance event while preserving history",
+  ]) {
+    assert.match(review, new RegExp(text.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")));
+  }
+  for (const tab of ["Cases", "Reasoning", "Mechanisms", "Principles", "Blueprint", "Packets", "Advanced"]) {
+    assert.match(inspect, new RegExp(`"${tab}"`));
+  }
+  for (const action of ["Mark event chat-only", "Leave event unassigned", "Propose split", "Propose merge"]) {
+    assert.match(structure, new RegExp(action));
+  }
+  for (const type of ["Case", "Research or evidence", "Outcome", "Correction", "Challenge", "Observation", "Proposed connection"]) {
+    assert.match(contextualAdd, new RegExp(type));
+  }
+  assert.match(shell, /ContextualAdd/);
+  assert.match(service, /wording_corrected_no_authority_promotion/);
+  assert.match(service, /No consequential meaning was approved by this capture/);
+  assert.doesNotMatch(`${queue}\n${review}\n${inspect}\n${structure}\n${contextualAdd}`, /England|Ghana|makeSeedState/i);
+  assert.doesNotMatch(ask, /Slice 6C|dogfood runbook|hosted release/i);
+});

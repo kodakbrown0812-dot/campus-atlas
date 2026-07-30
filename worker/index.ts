@@ -11,6 +11,7 @@ import { handleSlice4 } from "./slice4-api";
 import { handleSlice5 } from "./slice5-api";
 import { TestReceivingModelAdapter } from "./receiving-model";
 import { handleShellService } from "./shell-service";
+import { handleSlice6B } from "./slice6b-api";
 
 interface Env {
   ASSETS: Fetcher;
@@ -61,6 +62,10 @@ const worker = {
       });
     }
 
+    if (/^\/api\/v1\/projects\/[^/]+\/conversations\/[^/]+\/structure$/.test(url.pathname)) {
+      return handleSlice6B(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+    }
+
     if (/^\/api\/v1\/projects\/[^/]+\/(?:conversations|cases|events|case-boundaries)(?:\/|$)/.test(url.pathname)) {
       return handleConversationCases(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
@@ -79,6 +84,10 @@ const worker = {
         openAiApiKey: env.OPENAI_API_KEY,
         testAdapter: env.ATLAS_TEST_RECEIVING_MODEL_ADAPTER,
       });
+    }
+
+    if (/^\/api\/v1\/projects\/[^/]+\/(?:inspect|contextual-add|reasoning-nodes)(?:\/|$)/.test(url.pathname)) {
+      return handleSlice6B(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (url.pathname.startsWith("/api/v1/projects/") && url.pathname.includes("/records/")) {
