@@ -16,6 +16,15 @@ comparison are documented in
 Slice 6A canonical shell, Work, conversation, Reasoning Health, and session
 behavior is documented in
 [`docs/V1.7_SLICE_6A_SHELL_WORK.md`](docs/V1.7_SLICE_6A_SHELL_WORK.md).
+Slice 6B governance, Structure, Inspect, and Contextual Add behavior is
+documented in
+[`docs/V1.7_SLICE_6B_GOVERN_INSPECT.md`](docs/V1.7_SLICE_6B_GOVERN_INSPECT.md).
+Slice 6C Ask, handoff presentation, and local hardening status is documented in
+[`docs/V1.7_SLICE_6C_ASK_DOGFOOD_HARDENING.md`](docs/V1.7_SLICE_6C_ASK_DOGFOOD_HARDENING.md).
+The pending native proof and hosted release gates are tracked in
+[`docs/V1.7_NATIVE_DOGFOOD_RUNBOOK.md`](docs/V1.7_NATIVE_DOGFOOD_RUNBOOK.md)
+and
+[`docs/V1.7_HOSTED_RELEASE_CHECKLIST.md`](docs/V1.7_HOSTED_RELEASE_CHECKLIST.md).
 
 ## V4.3 Build Week proof
 

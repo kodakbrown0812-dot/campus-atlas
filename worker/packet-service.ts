@@ -31,6 +31,7 @@ type PacketItemSnapshot = {
   sequenceOrder: number;
   protectedRole: RankedCandidate["protectedRole"] | "required_check";
   governanceEventId: string | null;
+  counterevidenceIds: string[];
   discovery?: RankedCandidate["discovery"];
   ranking?: RankedCandidate["ranking"];
   metadata?: Record<string, unknown>;
@@ -65,6 +66,7 @@ function roadwayChecks(interpretation: TaskInterpretation): PacketItemSnapshot[]
     sequenceOrder: index + 1,
     protectedRole: "required_check",
     governanceEventId: null,
+    counterevidenceIds: [],
   }));
 }
 
@@ -83,6 +85,7 @@ function candidateItem(candidate: RankedCandidate, sequenceOrder: number): Packe
     sequenceOrder,
     protectedRole: candidate.protectedRole,
     governanceEventId: candidate.governanceEventId,
+    counterevidenceIds: candidate.counterevidenceIds,
     discovery: candidate.discovery,
     ranking: candidate.ranking,
     metadata: candidate.metadata,
@@ -550,6 +553,120 @@ export async function compilePacket(
   return { ...(await packetDetail(db, projectId, packetId)), idempotentReplay: false };
 }
 
+export async function previewPacketCandidates(
+  db: D1Database,
+  projectId: string,
+  body: Row,
+) {
+  const budget = Number(body.tokenBudget ?? 800);
+  if (!SUPPORTED_TOKEN_BUDGETS.has(budget)) {
+    throw new Error("Token budget must be exactly 400, 800, or 1600.");
+  }
+  const interpretation = await interpretTask(db, projectId, body);
+  if (interpretation.clarificationRequired || !interpretation.primaryRoadway) {
+    return {
+      status: "clarification_required",
+      interpretation,
+      treatmentSummary: { Use: [], Consider: [], Exclude: [] },
+      candidateSummary: {
+        discovered: 0,
+        used: 0,
+        considered: 0,
+        excluded: 0,
+        redundantRecordsRemoved: 0,
+        protectedCorrectionsRetained: 0,
+        strongestChallengeRetained: false,
+      },
+      requiredChecks: [],
+      protectedCorrections: [],
+      protectedConflicts: [],
+      strongestChallenge: null,
+      importantExclusions: [],
+      freshness: {
+        required: interpretation.requiredLiveState,
+        missing: interpretation.requiredLiveState,
+        safeToCompile: false,
+      },
+      tokenBudget: budget,
+      estimatedSafeMinimum: null,
+      estimatedFinalSize: null,
+      likelyCompression: false,
+      packetCreated: false,
+    };
+  }
+
+  const candidates = await discoverAndRankCandidates(db, projectId, interpretation);
+  const missingLiveState = interpretation.requiredLiveState.filter(
+    (category) => !hasFreshCategory(candidates, category),
+  );
+  const checks = roadwayChecks(interpretation);
+  const candidateSnapshots = candidates.map(
+    (candidate, index) => candidateItem(candidate, checks.length + index + 1),
+  );
+  const rendered = renderPacket(
+    interpretation,
+    projectId,
+    budget,
+    checks,
+    candidateSnapshots,
+    missingLiveState,
+  );
+  const summary = treatmentSummary(rendered.candidates);
+  const budgetExcluded = rendered.candidates.filter((item) => (
+    item.treatment === "Exclude" && item.reason.startsWith("Excluded by the ")
+  ));
+  const strongestChallenge = rendered.candidates.find(
+    (item) => item.protectedRole === "challenge",
+  ) || null;
+  const state = rendered.error?.startsWith("required_live_state_missing:")
+    ? "missing_required_state"
+    : rendered.error?.startsWith("minimum_safe_packet_exceeds_budget:")
+      ? "unsafe_under_selected_budget"
+      : "ready";
+
+  return {
+    status: state,
+    interpretation,
+    treatmentSummary: summary,
+    candidateSummary: {
+      discovered: rendered.candidates.length,
+      used: summary.Use.length,
+      considered: summary.Consider.length,
+      excluded: summary.Exclude.length,
+      redundantRecordsRemoved: rendered.candidates.filter(
+        (item) => /redundan/i.test(item.reason),
+      ).length,
+      protectedCorrectionsRetained: rendered.candidates.filter(
+        (item) => item.protectedRole === "correction" && item.treatment !== "Exclude",
+      ).length,
+      strongestChallengeRetained: Boolean(
+        strongestChallenge && strongestChallenge.treatment !== "Exclude",
+      ),
+    },
+    requiredChecks: checks,
+    protectedCorrections: rendered.candidates.filter(
+      (item) => item.protectedRole === "correction",
+    ),
+    protectedConflicts: rendered.candidates.filter(
+      (item) => item.protectedRole === "conflict",
+    ),
+    strongestChallenge,
+    importantExclusions: summary.Exclude.filter((item) => (
+      /rejected|retired|superseded|stale|scope|project|mechanism|budget/i.test(item.reason)
+    )),
+    freshness: {
+      required: interpretation.requiredLiveState,
+      missing: missingLiveState,
+      safeToCompile: missingLiveState.length === 0,
+    },
+    tokenBudget: budget,
+    estimatedSafeMinimum: rendered.minimumTokenCount,
+    estimatedFinalSize: rendered.finalTokenCount,
+    likelyCompression: budgetExcluded.length > 0,
+    packetCreated: false,
+  };
+}
+
 export async function getPacket(db: D1Database, projectId: string, packetId: string) {
   return packetDetail(db, projectId, packetId);
 }
@@ -562,7 +679,19 @@ export async function listPackets(db: D1Database, projectId: string) {
      FROM packets WHERE project_id = ?
      ORDER BY created_at DESC, rowid DESC`,
   ).bind(projectId));
-  return rows;
+  return rows.map((row) => ({
+    id: row.id,
+    task: row.task,
+    inferredIntent: row.inferred_intent,
+    primaryRoadwayId: row.primary_roadway_id,
+    primaryRoadwayVersionId: row.primary_roadway_version_id,
+    tokenBudget: row.token_budget,
+    finalTokenCount: row.final_token_count,
+    priorComparablePacketId: row.prior_comparable_packet_id,
+    status: row.status,
+    compilationError: row.compilation_error,
+    createdAt: row.created_at,
+  }));
 }
 
 export async function createLiveStateSnapshot(

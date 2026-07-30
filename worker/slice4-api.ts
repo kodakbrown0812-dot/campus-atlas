@@ -1,4 +1,10 @@
-import { compilePacket, createLiveStateSnapshot, getPacket, listPackets } from "./packet-service";
+import {
+  compilePacket,
+  createLiveStateSnapshot,
+  getPacket,
+  listPackets,
+  previewPacketCandidates,
+} from "./packet-service";
 import { ensureRoadwayRegistry, interpretTask } from "./roadway-service";
 import {
   assertId,
@@ -35,6 +41,19 @@ export async function handleSlice4(
         projectId,
         interpretation: await interpretTask(db, projectId, body),
       }, { headers: { "cache-control": "no-store" } });
+    }
+
+    if (parts[0] === "reconstruction" && parts[1] === "candidates" && parts.length === 2 && request.method === "POST") {
+      authorizeWrite(request, actionKey);
+      const body = await request.json() as Row;
+      const result = await previewPacketCandidates(db, projectId, body);
+      return Response.json({
+        projectId,
+        ...result,
+      }, {
+        status: result.status === "clarification_required" ? 409 : 200,
+        headers: { "cache-control": "no-store" },
+      });
     }
 
     if (parts[0] === "packets" && parts.length === 1 && request.method === "GET") {

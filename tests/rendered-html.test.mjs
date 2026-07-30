@@ -2808,7 +2808,7 @@ test("Slice 4 preserves Brewers Reconstructed limitations beside an Exact native
   );
 });
 
-test("Slice 4 minimal interface exposes interpretation, treatments, budgets, packet, receipt, and no handoff", async () => {
+test("Slice 4 canonical reconstruction remains available beneath the final Ask workflow", async () => {
   const worker = await builtWorker("slice4-minimal-interface");
   const response = await worker.fetch(
     new Request("http://localhost/projects/sports/ask", { headers: { accept: "text/html" } }),
@@ -2817,26 +2817,27 @@ test("Slice 4 minimal interface exposes interpretation, treatments, budgets, pac
   );
   assert.equal(response.status, 200);
   const html = await response.text();
-  for (const text of ["Ask with Atlas", "immutable receipt"]) {
+  for (const text of ["Ask with Atlas", "Canonical V1.7"]) {
     assert.match(html, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
-  const interfaceSource = await readFile(
-    new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url),
-    "utf8",
-  );
+  const [interfaceSource, candidateSource, packetSource] = await Promise.all([
+    readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/candidate-treatment-panel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/packet-preview.tsx", import.meta.url), "utf8"),
+  ]);
   for (const text of [
-    "Interpret current task",
+    "Interpret",
+    "Treat candidates",
     "Compile packet",
     "400",
     "800",
     "1600",
-    "Frozen registry",
-    "Interpreted intent",
-    "Immutable packet",
-    "Causal receipt",
   ]) {
-    assert.match(interfaceSource, new RegExp(text));
+    assert.match(`${interfaceSource}\n${candidateSource}\n${packetSource}`, new RegExp(text));
   }
+  assert.match(interfaceSource, /reconstruction\/candidates/);
+  assert.match(candidateSource, /canonical server results/);
+  assert.match(packetSource, /same immutable packet response/i);
   const slice4Source = await Promise.all([
     "roadway-service.ts",
     "candidate-ranking.ts",
@@ -3432,7 +3433,7 @@ test("Slice 5 preserves Brewers as Reconstructed beside Exact native source thro
   assert.doesNotMatch(JSON.stringify(handoff.value), /authentic raw transcript.*passed/i);
 });
 
-test("Slice 5 migration, API, and minimal Ask interface expose immutable auditable handoff without Slice 6 redesign", async () => {
+test("Slice 5 immutable handoff remains auditable through the final separated Ask presentation", async () => {
   const migration = await readFile(
     new URL("../drizzle/0008_complete_timeslip.sql", import.meta.url),
     "utf8",
@@ -3448,32 +3449,36 @@ test("Slice 5 migration, API, and minimal Ask interface expose immutable auditab
   ]) {
     assert.match(migration, new RegExp(trigger));
   }
-  const [service, adapter, api, interfaceSource, pageSource] = await Promise.all([
+  const [service, adapter, api, interfaceSource, handoffSource, historySource, pageSource] = await Promise.all([
     readFile(new URL("../worker/handoff-service.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/receiving-model.ts", import.meta.url), "utf8"),
     readFile(new URL("../worker/slice5-api.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/handoff-presentation.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/ask-history.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/projects/[projectId]/ask/page.tsx", import.meta.url), "utf8"),
   ]);
   for (const text of [
     "Your request",
     "Atlas reconstruction",
-    "Send saved packet to receiving model",
     "Model answer",
-    "Handoff receipt",
+    "Receipt",
     "Additional live retrieval",
-    "Final-answer reference",
+    "No additional live retrieval occurred",
+    "A test adapter is never selectable here",
   ]) {
-    assert.match(interfaceSource, new RegExp(text));
+    assert.match(handoffSource, new RegExp(text));
   }
-  assert.match(pageSource, /Slice 5 verification/);
+  assert.match(pageSource, /Canonical V1\.7/);
+  assert.match(interfaceSource, /model\.production === true/);
+  assert.match(historySource, /never recompiles a packet or retries a handoff/i);
   assert.match(adapter, /not a new user instruction/i);
   assert.match(adapter, /role: "user"/);
   assert.match(service, /packetRecompiled: false/);
   assert.match(service, /Supplying context does not establish outcome correctness/i);
   assert.match(api, /parts\[1\] === "comparison"/);
   assert.doesNotMatch(`${service}\n${adapter}\n${api}`, /England|Ghana|seeded answer/i);
-  assert.doesNotMatch(`${interfaceSource}\n${pageSource}`, /Work\s*Atlas Found\s*Ask\s*Inspect/);
+  assert.doesNotMatch(`${interfaceSource}\n${handoffSource}\n${pageSource}`, /atlas-test-receiver-v1|England|Ghana/);
 });
 
 test("Slice 5 handoff records reject generic canonical writes", async () => {
@@ -3488,6 +3493,179 @@ test("Slice 5 handoff records reject generic canonical writes", async () => {
     assert.equal(result.response.status, 409, table);
     assert.match(result.value.error, /owned by a canonical domain service/i);
   }
+});
+
+test("Slice 6C previews server-owned candidate treatments without creating a packet", async () => {
+  const worker = await builtWorker("slice6c-candidate-preview");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Engine");
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:slice6c-preview",
+    statement: "Separate winning from covering by preserving the one-score counter-script.",
+    counterevidenceIds: ["challenge:slice6c-preview"],
+  });
+
+  const before = await slice2Request(worker, DB, "/api/v1/projects/sports/packets");
+  assert.equal(before.response.status, 200);
+  assert.equal(before.value.packets.length, 0);
+
+  const preview = await slice2Request(
+    worker,
+    DB,
+    "/api/v1/projects/sports/reconstruction/candidates",
+    {
+      method: "POST",
+      body: {
+        task: "Can this favorite win by two, or is the one-score cover path too large?",
+        tokenBudget: 800,
+      },
+    },
+  );
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.value));
+  assert.equal(preview.value.status, "ready");
+  assert.equal(preview.value.packetCreated, false);
+  assert.equal(preview.value.projectId, "sports");
+  assert.equal(preview.value.tokenBudget, 800);
+  for (const treatment of ["Use", "Consider", "Exclude"]) {
+    assert.ok(Array.isArray(preview.value.treatmentSummary[treatment]));
+    for (const item of preview.value.treatmentSummary[treatment]) {
+      assert.equal(item.treatment, treatment);
+      assert.ok(item.reason);
+    }
+  }
+  assert.equal(typeof preview.value.candidateSummary.strongestChallengeRetained, "boolean");
+
+  const after = await slice2Request(worker, DB, "/api/v1/projects/sports/packets");
+  assert.equal(after.response.status, 200);
+  assert.equal(after.value.packets.length, 0);
+
+  const ambiguous = await slice2Request(
+    worker,
+    DB,
+    "/api/v1/projects/sports/reconstruction/candidates",
+    {
+      method: "POST",
+      body: { task: "Which market explains the outcome?", tokenBudget: 400 },
+    },
+  );
+  assert.equal(ambiguous.response.status, 409);
+  assert.equal(ambiguous.value.status, "clarification_required");
+  assert.equal(ambiguous.value.packetCreated, false);
+  assert.equal(ambiguous.value.interpretation.primaryRoadway, null);
+
+  const crossProject = await slice2Request(
+    worker,
+    DB,
+    "/api/v1/projects/hockey/reconstruction/candidates",
+    {
+      method: "POST",
+      body: {
+        task: "Can this favorite win by two, or is the one-score cover path too large?",
+        tokenBudget: 800,
+      },
+    },
+  );
+  assert.equal(crossProject.response.status, 200);
+  assert.equal(
+    Object.values(crossProject.value.treatmentSummary).flat()
+      .some((item) => item.sourceId === "mechanism:slice6c-preview"),
+    false,
+  );
+});
+
+test("Slice 6C lists immutable packet and honest handoff history within project scope", async () => {
+  const worker = await builtWorker("slice6c-history");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Engine");
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:slice6c-history",
+    statement: "Separate winning from covering by checking the one-score path.",
+  });
+  const packet = await createSlice4Packet(worker, DB, {
+    task: "Can this favorite win by two, or is the one-score cover path too large?",
+    tokenBudget: 800,
+  }, "slice6c-history-packet");
+  assert.equal(packet.response.status, 201, JSON.stringify(packet.value));
+  assert.equal(packet.value.packet.status, "compiled");
+
+  const failed = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "openai",
+      model: "gpt-5.6",
+      actorId: "cody",
+    },
+    "slice6c-history-handoff",
+  );
+  assert.equal(failed.response.status, 503, JSON.stringify(failed.value));
+  assert.equal(failed.value.handoff.status, "failed");
+  assert.equal(failed.value.handoff.failureCategory, "missing_configuration");
+
+  const packets = await slice2Request(worker, DB, "/api/v1/projects/sports/packets");
+  assert.equal(packets.response.status, 200);
+  assert.deepEqual(packets.value.packets.map((item) => item.id), [packet.value.packet.id]);
+  assert.equal(packets.value.packets[0].tokenBudget, 800);
+  assert.equal(packets.value.packets[0].status, "compiled");
+
+  const handoffs = await slice2Request(worker, DB, "/api/v1/projects/sports/handoffs");
+  assert.equal(handoffs.response.status, 200);
+  assert.equal(handoffs.value.handoffs.length, 1);
+  assert.equal(handoffs.value.handoffs[0].id, failed.value.handoff.id);
+  assert.equal(handoffs.value.handoffs[0].status, "failed");
+  assert.equal(handoffs.value.handoffs[0].providerResponseId, null);
+  assert.ok(handoffs.value.handoffs[0].receiptId);
+
+  const otherPackets = await slice2Request(worker, DB, "/api/v1/projects/hockey/packets");
+  const otherHandoffs = await slice2Request(worker, DB, "/api/v1/projects/hockey/handoffs");
+  assert.equal(otherPackets.value.packets.length, 0);
+  assert.equal(otherHandoffs.value.handoffs.length, 0);
+});
+
+test("Slice 6C final Ask is staged, project-resetting, mobile-capable, and free of production fixtures", async () => {
+  const [
+    workspace,
+    candidates,
+    packet,
+    handoff,
+    history,
+    page,
+    styles,
+    shell,
+  ] = await Promise.all([
+    readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/candidate-treatment-panel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/packet-preview.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/handoff-presentation.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/ask-history.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/ask.module.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8"),
+  ]);
+  const combined = [workspace, candidates, packet, handoff, history, page].join("\n");
+  for (const stage of ["Interpret", "Treat candidates", "Compile packet", "Handoff and receipt"]) {
+    assert.match(combined, new RegExp(stage));
+  }
+  for (const surface of ["Your request", "Atlas reconstruction", "Model answer", "Receipt"]) {
+    assert.match(handoff, new RegExp(surface));
+  }
+  assert.match(workspace, /model\.production === true/);
+  assert.match(workspace, /reconstruction\/candidates/);
+  assert.match(workspace, /new URLSearchParams\(window\.location\.search\)/);
+  assert.match(workspace, /query\.get\("packet"\)/);
+  assert.match(workspace, /query\.get\("handoff"\)/);
+  assert.match(history, /never recompiles a packet or retries a handoff/i);
+  assert.match(packet, /same immutable packet response/i);
+  assert.match(candidates, /browser cannot promote authority/i);
+  assert.match(shell, /<ProjectShellInner key=\{projectId\}/);
+  assert.match(styles, /@media \(max-width: 760px\)/);
+  assert.match(styles, /min-height: 44px/);
+  assert.match(styles, /bottom: calc\(68px \+ env\(safe-area-inset-bottom\)\)/);
+  assert.doesNotMatch(combined, /atlas-test-receiver-v1|England|Ghana|makeSeedState|seeded answer/i);
 });
 
 test("Slice 6B reasoning-node correction is versioned, idempotent, project-scoped, and non-authoritative", async () => {
@@ -3821,7 +3999,7 @@ test("Slice 6B Inspect and Structure return the same project-scoped canonical sn
   assert.equal(crossProjectStructure.response.status, 404);
 });
 
-test("Slice 6B interface is canonical, explicit, mobile-capable, and leaves Slice 6C untouched", async () => {
+test("Slice 6B interface remains canonical and explicit beneath the Slice 6C Ask completion", async () => {
   const [
     queue,
     review,
@@ -3867,5 +4045,5 @@ test("Slice 6B interface is canonical, explicit, mobile-capable, and leaves Slic
   assert.match(service, /wording_corrected_no_authority_promotion/);
   assert.match(service, /No consequential meaning was approved by this capture/);
   assert.doesNotMatch(`${queue}\n${review}\n${inspect}\n${structure}\n${contextualAdd}`, /England|Ghana|makeSeedState/i);
-  assert.doesNotMatch(ask, /Slice 6C|dogfood runbook|hosted release/i);
+  assert.doesNotMatch(ask, /England|Ghana|seeded answer|makeSeedState/i);
 });

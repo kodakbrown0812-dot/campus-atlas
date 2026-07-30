@@ -305,7 +305,7 @@ export default function ProjectShell({
 }) {
   return (
     <WriteSessionProvider>
-      <ProjectShellInner projectId={projectId}>{children}</ProjectShellInner>
+      <ProjectShellInner key={projectId} projectId={projectId}>{children}</ProjectShellInner>
     </WriteSessionProvider>
   );
 }
