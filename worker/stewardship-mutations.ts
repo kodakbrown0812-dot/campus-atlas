@@ -281,7 +281,13 @@ async function sourceForContextualEvent(
   if (!message) throw new Error("Source message not found.");
   const start = Number(body.sourceStart ?? 0);
   const end = Number(body.sourceEnd ?? String(message.exact_content).length);
-  if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start) {
+  if (
+    !Number.isInteger(start)
+    || !Number.isInteger(end)
+    || start < 0
+    || end <= start
+    || end > String(message.exact_content).length
+  ) {
     throw new Error("Source span offsets are invalid.");
   }
   const exact = String(message.exact_content).slice(start, end);
@@ -313,6 +319,9 @@ async function contextualEvent(
   const caseId = optionalString(body.caseId);
   if (caseId) await requireCase(db, projectId, assertId(caseId, "case ID"));
   let conversationId = optionalString(body.conversationId);
+  if (body.representation === "Exact" && !conversationId) {
+    throw new Error("Exact representation requires a selected canonical conversation.");
+  }
   if (!conversationId && caseId) {
     const linked = await linkedConversation(db, projectId, caseId);
     conversationId = linked ? String(linked.id) : null;
@@ -458,6 +467,20 @@ export async function contextualAdd(
   const representation = type === "case"
     ? "Reconstructed"
     : parseJson<Record<string, unknown>>(record.metadata, {}).representationType || "Reconstructed";
+  const eventMetadata = type === "case"
+    ? {}
+    : parseJson<Record<string, unknown>>(record.metadata, {});
+  const sourceSpan = Array.isArray(eventMetadata.sourceSpans)
+    ? eventMetadata.sourceSpans.find((candidate) => candidate && typeof candidate === "object") as Row | undefined
+    : undefined;
+  const sourceLineage = representation === "Exact" && sourceSpan
+    ? {
+        messageId: String(sourceSpan.messageId),
+        start: Number(sourceSpan.start),
+        end: Number(sourceSpan.end),
+        href: `/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(String(record.conversation_id))}#message-${encodeURIComponent(String(sourceSpan.messageId))}`,
+      }
+    : null;
   return {
     projectId,
     receipt: {
@@ -469,7 +492,10 @@ export async function contextualAdd(
       recordType: type === "case" ? "case" : "event",
       representation,
       authority: type === "proposed_connection" ? "proposed" : "observed",
-      source: optionalString(body.sourceReference) || (record.source_message_ids === "[]" ? "User-supplied contextual capture" : "Canonical message span"),
+      source: representation === "Exact"
+        ? "Canonical message span"
+        : optionalString(body.sourceReference) || "User-supplied contextual capture",
+      sourceLineage,
       suggestedRelationships: type === "proposed_connection"
         ? [parseJson<Record<string, unknown>>(record.metadata, {}).proposedConnection]
         : [],

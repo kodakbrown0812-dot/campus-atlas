@@ -3930,6 +3930,242 @@ test("Slice 6B Contextual Add maps to canonical records with receipts, isolation
   assert.equal(unauthorized.status, 401);
 });
 
+test("Dogfood Exact Contextual Add UI contract preserves canonical message spans and isolation", async () => {
+  const worker = await builtWorker("dogfood-exact-contextual-add");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Engine");
+
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Native exact-source dogfood contract" },
+  });
+  const otherConversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Another Sports Engine conversation" },
+  });
+  const hockeyConversation = await slice2Request(worker, DB, "/api/v1/projects/hockey/conversations", {
+    method: "POST",
+    body: { title: "Hockey isolation source" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const exactContent = "First exact clause. Second exact clause / with reserved: characters?";
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "dogfood-exact-source-message",
+      body: {
+        actorType: "user",
+        actorId: "cody",
+        content: exactContent,
+        originalTimestamp: "2026-07-31T14:00:00-05:00",
+      },
+    },
+  );
+  const hockeyMessage = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/hockey/conversations/${encodeURIComponent(hockeyConversation.value.conversation.id)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "dogfood-cross-project-source-message",
+      body: { actorType: "user", actorId: "cody", content: "Project-isolated hockey source." },
+    },
+  );
+  const caseResult = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: "Verify exact native event capture through Contextual Add",
+      conversationId,
+      makeActive: true,
+      actorId: "cody",
+    },
+  });
+  const shared = {
+    type: "observation",
+    conversationId,
+    caseId: caseResult.value.case.id,
+    representation: "Exact",
+    sourceMessageId: message.value.message.id,
+    actorId: "cody",
+    reason: "Dogfood exact-source UI contract.",
+  };
+
+  const fullMessage = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "dogfood-exact-full-message",
+    body: {
+      ...shared,
+      content: exactContent,
+      sourceStart: 0,
+      sourceEnd: exactContent.length,
+    },
+  });
+  assert.equal(fullMessage.response.status, 201, JSON.stringify(fullMessage.value));
+  assert.equal(fullMessage.value.record.exact_source_span, exactContent);
+  assert.equal(fullMessage.value.record.authority_state, "observed");
+  assert.equal(fullMessage.value.receipt.representation, "Exact");
+  assert.equal(fullMessage.value.receipt.authority, "observed");
+  assert.equal(fullMessage.value.receipt.source, "Canonical message span");
+  assert.deepEqual(fullMessage.value.receipt.sourceLineage, {
+    messageId: message.value.message.id,
+    start: 0,
+    end: exactContent.length,
+    href: `/projects/sports/conversations/${encodeURIComponent(conversationId)}#message-${encodeURIComponent(message.value.message.id)}`,
+  });
+
+  const substring = "Second exact clause / with reserved: characters?";
+  const substringStart = exactContent.indexOf(substring);
+  const substringCapture = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "dogfood-exact-substring",
+    body: {
+      ...shared,
+      type: "research_evidence",
+      content: substring,
+      sourceStart: substringStart,
+      sourceEnd: substringStart + substring.length,
+    },
+  });
+  assert.equal(substringCapture.response.status, 201, JSON.stringify(substringCapture.value));
+  assert.equal(substringCapture.value.record.exact_source_span, substring);
+  assert.deepEqual(
+    JSON.parse(substringCapture.value.record.metadata).sourceSpans[0],
+    {
+      id: JSON.parse(substringCapture.value.record.metadata).sourceSpans[0].id,
+      messageId: message.value.message.id,
+      start: substringStart,
+      end: substringStart + substring.length,
+    },
+  );
+
+  const mismatch = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "dogfood-exact-mismatch",
+    body: { ...shared, content: "Rewritten instead of exact.", sourceStart: 0, sourceEnd: exactContent.length },
+  });
+  assert.equal(mismatch.response.status, 400);
+  assert.match(mismatch.value.error, /does not match the exact source span/i);
+
+  const missingMessage = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "dogfood-exact-missing-message",
+    body: {
+      type: "observation",
+      conversationId,
+      representation: "Exact",
+      content: exactContent,
+      actorId: "cody",
+    },
+  });
+  assert.equal(missingMessage.response.status, 400);
+  assert.match(missingMessage.value.error, /canonical source-message span/i);
+
+  const crossProjectMessage = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "dogfood-exact-cross-project-message",
+    body: {
+      ...shared,
+      sourceMessageId: hockeyMessage.value.message.id,
+      content: "Project-isolated hockey source.",
+      sourceStart: 0,
+      sourceEnd: "Project-isolated hockey source.".length,
+    },
+  });
+  assert.equal(crossProjectMessage.response.status, 404);
+  assert.match(crossProjectMessage.value.error, /source message not found/i);
+
+  const wrongConversation = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "dogfood-exact-wrong-conversation",
+    body: {
+      ...shared,
+      caseId: undefined,
+      conversationId: otherConversation.value.conversation.id,
+      content: exactContent,
+      sourceStart: 0,
+      sourceEnd: exactContent.length,
+    },
+  });
+  assert.equal(wrongConversation.response.status, 404);
+  assert.match(wrongConversation.value.error, /source message not found/i);
+
+  const noConversation = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "dogfood-exact-no-conversation",
+    body: {
+      ...shared,
+      conversationId: undefined,
+      content: exactContent,
+      sourceStart: 0,
+      sourceEnd: exactContent.length,
+    },
+  });
+  assert.equal(noConversation.response.status, 400);
+  assert.match(noConversation.value.error, /selected canonical conversation/i);
+
+  const reconstructedContent = "Reconstructed capture remains available and does not require a source span.";
+  const reconstructed = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "dogfood-reconstructed-regression",
+    body: {
+      type: "observation",
+      conversationId,
+      caseId: caseResult.value.case.id,
+      representation: "Reconstructed",
+      content: reconstructedContent,
+      actorId: "cody",
+      reason: "Preserve existing reconstructed behavior.",
+    },
+  });
+  assert.equal(reconstructed.response.status, 201, JSON.stringify(reconstructed.value));
+  assert.equal(reconstructed.value.receipt.representation, "Reconstructed");
+  assert.equal(reconstructed.value.receipt.sourceLineage, null);
+
+  const refreshed = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}`,
+  );
+  assert.equal(refreshed.response.status, 200);
+  assert.equal(refreshed.value.messages[0].exactContent, exactContent);
+  assert.equal(refreshed.value.messages[0].contentHash, message.value.message.contentHash);
+  const refreshedFull = refreshed.value.events.find((record) => record.id === fullMessage.value.record.id);
+  assert.equal(refreshedFull.exactSourceSpan, exactContent);
+  assert.equal(refreshedFull.metadata.representationType, "Exact");
+  assert.equal(refreshedFull.authority, "observed");
+  assert.equal(refreshedFull.sourceLinks[0].messageId, message.value.message.id);
+  assert.equal(refreshedFull.sourceLinks[0].span.start, 0);
+  assert.equal(refreshedFull.sourceLinks[0].span.end, exactContent.length);
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms WHERE project_id = ?").get("sports").count,
+    0,
+  );
+  assert.equal(
+    DB.database.prepare("SELECT exact_content FROM messages WHERE id = ?").get(message.value.message.id).exact_content,
+    exactContent,
+  );
+
+  const contextualAddSource = await readFile(
+    new URL("../app/components/contextual-add.tsx", import.meta.url),
+    "utf8",
+  );
+  for (const requiredUiContract of [
+    '<option value="Exact">Exact</option>',
+    "sourceMessageId",
+    "sourceStart",
+    "sourceEnd",
+    "Exact selected text",
+    "What happened must match the exact selected source span",
+    "Exact source lineage",
+  ]) {
+    assert.match(contextualAddSource, new RegExp(requiredUiContract.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
 test("Slice 6B Inspect and Structure return the same project-scoped canonical snapshots as direct APIs", async () => {
   const worker = await builtWorker("slice6b-inspect-parity");
   const DB = await sqliteD1();
