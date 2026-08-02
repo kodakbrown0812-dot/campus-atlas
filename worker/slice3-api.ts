@@ -1,4 +1,4 @@
-import { findingDetail, getCheckpoint, listFindings, runCheckpoint } from "./checkpoint-service";
+import { findingDetail, getCheckpoint, latestCheckpoint, listFindings, runCheckpoint } from "./checkpoint-service";
 import { eligibleMechanisms, governFinding, rollbackGovernance } from "./governance-service";
 import {
   assertId,
@@ -28,6 +28,18 @@ export async function handleSlice3(
       const result = await runCheckpoint(db, projectId, body, idempotencyKey);
       return Response.json(result, {
         status: result.idempotentReplay ? 200 : 201,
+        headers: { "cache-control": "no-store" },
+      });
+    }
+
+    if (parts[0] === "checkpoints" && parts[1] === "latest" && parts.length === 2 && request.method === "GET") {
+      const conversationId = assertId(url.searchParams.get("conversationId"), "conversation ID");
+      const caseId = url.searchParams.get("caseId");
+      return Response.json({
+        projectId,
+        conversationId,
+        result: await latestCheckpoint(db, projectId, conversationId, caseId),
+      }, {
         headers: { "cache-control": "no-store" },
       });
     }

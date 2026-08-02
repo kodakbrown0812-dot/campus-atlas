@@ -1,4 +1,5 @@
 import { Row, all, first, parseJson } from "./slice3-support";
+import { unresolvedConflictEvent } from "./reasoning-semantics";
 
 export const REASONING_HEALTH_STATES = [
   "Forming",
@@ -114,9 +115,7 @@ export async function reasoningHealthForConversation(
     const priority = eventPriority(String(a.event_type).toLowerCase()) - eventPriority(String(b.event_type).toLowerCase());
     return priority || String(b.ingested_at).localeCompare(String(a.ingested_at));
   });
-  const conflict = sortedEvents.find((event) =>
-    ["challenge", "correction"].includes(String(event.event_type).toLowerCase()),
-  );
+  const conflict = unresolvedConflictEvent(sortedEvents);
   const unknown = sortedEvents.find((event) => String(event.event_type).toLowerCase() === "unknown");
   const decision = sortedEvents.find((event) => String(event.event_type).toLowerCase() === "decision");
   const outcome = sortedEvents.find((event) => String(event.event_type).toLowerCase() === "outcome");

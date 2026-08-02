@@ -173,7 +173,7 @@ async function seedCanonicalProject(worker, DB, id, name) {
   assert.equal(result.response.status, 201);
 }
 
-async function seedSlice3Case(worker, DB, suffix, eventTypes) {
+async function seedSlice3Case(worker, DB, suffix, eventTypes, eventContents = []) {
   const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
     method: "POST",
     body: { title: `Slice 3 ${suffix}` },
@@ -192,7 +192,7 @@ async function seedSlice3Case(worker, DB, suffix, eventTypes) {
   assert.equal(caseResult.response.status, 201);
   const events = [];
   for (let index = 0; index < eventTypes.length; index += 1) {
-    const content = `${suffix} exact source ${index}: ${eventTypes[index]}`;
+    const content = eventContents[index] || `${suffix} exact source ${index}: ${eventTypes[index]}`;
     const message = await slice2Request(
       worker,
       DB,
@@ -1456,6 +1456,22 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   assert.doesNotMatch(session, /localStorage|sessionStorage/);
 });
 
+test("Native Analyze keeps finding authorship server-side and restores canonical checkpoint detail", async () => {
+  const conversation = await readFile(new URL("../app/projects/[projectId]/conversations/[conversationId]/workspace.tsx", import.meta.url), "utf8");
+  const checkpoint = await readFile(new URL("../worker/checkpoint-service.ts", import.meta.url), "utf8");
+  const health = await readFile(new URL("../worker/reasoning-health.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(conversation, /findingCandidates/);
+  assert.match(conversation, /checkpoints\/latest/);
+  assert.match(conversation, /Existing canonical checkpoint/);
+  assert.match(conversation, /Inspect canonical result/);
+  assert.match(conversation, /No authority changed; findings remain proposals until governed/);
+  assert.match(checkpoint, /serverFindingCandidates/);
+  assert.match(checkpoint, /client-supplied finding wording cannot be accepted/);
+  assert.match(checkpoint, /no_change_until_governed/);
+  assert.match(health, /unresolvedConflictEvent/);
+  assert.doesNotMatch(health, /\["challenge", "correction"\]\.includes/);
+});
+
 test("pre-approval knowledge is excluded and absent from the active Blueprint", async () => {
   const worker = await builtWorker("before-approval");
   const DB = memoryD1();
@@ -1658,7 +1674,6 @@ test("Slice 3 checkpoints select at most seven exact-source nodes and accept zer
       conversationId: seeded.conversationId,
       caseId: seeded.caseId,
       trigger: "analyze_now",
-      findingCandidates: [],
     },
   });
   assert.equal(analyzed.response.status, 201);
@@ -1679,11 +1694,11 @@ test("Slice 3 checkpoints select at most seven exact-source nodes and accept zer
     `/api/v1/projects/sports/checkpoints/${encodeURIComponent(analyzed.value.checkpoint.id)}`,
   );
   assert.equal(refreshed.response.status, 200);
-  assert.deepEqual(refreshed.value, {
-    checkpoint: analyzed.value.checkpoint,
-    selectedNodes: analyzed.value.selectedNodes,
-    findings: [],
-  });
+  assert.deepEqual(refreshed.value.checkpoint, analyzed.value.checkpoint);
+  assert.deepEqual(refreshed.value.selectedNodes, analyzed.value.selectedNodes);
+  assert.deepEqual(refreshed.value.findings, []);
+  assert.equal(refreshed.value.noDurableFindingProposed, true);
+  assert.equal(refreshed.value.retrievalEffect, "none");
 
   const replay = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
     method: "POST",
@@ -1707,6 +1722,177 @@ test("Slice 3 checkpoints select at most seven exact-source nodes and accept zer
   assert.equal(unavailableBody.findingCreated, false);
 });
 
+test("Native Analyze generates one grounded proposed finding server-side and restores its checkpoint read-only", async () => {
+  const worker = await builtWorker("native-server-findings");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Development");
+
+  const evidenceText = "A live-entry rule should require sustained territory, credible chance creation, and control of transition risk—not merely possession. Waiting for confirmation can worsen the price, so the rule also needs a maximum acceptable live price and a clear pass condition.";
+  const correctionText = "My current lean is to wait for sustained territory, credible chance creation, and controlled transition risk before entering a soccer favorite. If the price moves beyond a preset maximum before those signals appear, the correct decision should be to pass. ";
+  const seeded = await seedSlice3Case(
+    worker,
+    DB,
+    "native-dogfood-contract",
+    ["evidence", "correction"],
+    [evidenceText, correctionText],
+  );
+
+  const injected = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "native-client-injection-rejected",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      trigger: "analyze_now",
+      source: "canonical_case_events",
+      findingCandidates: [{
+        findingType: "mechanism_recognition",
+        sourceEventIds: seeded.events.map((event) => event.id),
+        proposalStatement: "The browser must not decide this wording.",
+        reasonForSurfacing: "Client injection.",
+        expectedRetrievalEffect: "Client injection.",
+      }],
+    },
+  });
+  assert.equal(injected.response.status, 400);
+  assert.match(injected.value.error, /server-owned/i);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM checkpoints").get().count, 0);
+
+  const analyzed = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "native-server-generated-finding",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      trigger: "analyze_now",
+      source: "canonical_case_events",
+    },
+  });
+  assert.equal(analyzed.response.status, 201, JSON.stringify(analyzed.value));
+  assert.equal(analyzed.value.checkpoint.candidateCount, 2);
+  assert.equal(analyzed.value.checkpoint.selectedCount, 2);
+  assert.equal(analyzed.value.checkpoint.omittedCount, 0);
+  assert.equal(analyzed.value.checkpoint.healthBefore, "forming");
+  assert.equal(analyzed.value.checkpoint.healthAfter, "awaiting_governance");
+  assert.equal(analyzed.value.checkpoint.metadata.findingCandidatesReceived, 0);
+  assert.equal(analyzed.value.checkpoint.metadata.findingCandidatesGenerated, 1);
+  assert.equal(analyzed.value.checkpoint.metadata.findingCandidateOrigin, "server");
+  assert.equal(analyzed.value.findings.length, 1);
+  assert.equal(analyzed.value.findings[0].type, "mechanism_recognition");
+  assert.equal(analyzed.value.findings[0].proposal, correctionText);
+  assert.equal(analyzed.value.findings[0].status, "proposed");
+  assert.equal(analyzed.value.findings[0].authority, "proposed");
+  assert.equal(analyzed.value.findings[0].proposedScope, "local");
+  assert.deepEqual(new Set(analyzed.value.findings[0].sourceEventIds), new Set(seeded.events.map((event) => event.id)));
+  assert.deepEqual(analyzed.value.findings[0].selectedNodeIds, analyzed.value.selectedNodes.map((node) => node.id));
+  assert.equal(analyzed.value.retrievalEffect, "no_change_until_governed");
+  assert.equal(analyzed.value.noDurableFindingProposed, false);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 0);
+
+  const findingDetail = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(analyzed.value.findings[0].id)}`,
+  );
+  assert.equal(findingDetail.response.status, 200);
+  assert.deepEqual(
+    new Set(findingDetail.value.sourceEvents.map((event) => event.id)),
+    new Set(seeded.events.map((event) => event.id)),
+  );
+  assert.ok(findingDetail.value.sourceEvents.every((event) => event.sourceLinks.length === 1));
+
+  const beforeReadCounts = {
+    checkpoints: DB.database.prepare("SELECT COUNT(*) AS count FROM checkpoints").get().count,
+    findings: DB.database.prepare("SELECT COUNT(*) AS count FROM findings").get().count,
+  };
+  const latest = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/checkpoints/latest?conversationId=${encodeURIComponent(seeded.conversationId)}&caseId=${encodeURIComponent(seeded.caseId)}`,
+  );
+  assert.equal(latest.response.status, 200);
+  assert.equal(latest.value.result.checkpoint.id, analyzed.value.checkpoint.id);
+  assert.deepEqual(latest.value.result.selectedNodes, analyzed.value.selectedNodes);
+  assert.deepEqual(latest.value.result.findings, analyzed.value.findings);
+  assert.deepEqual({
+    checkpoints: DB.database.prepare("SELECT COUNT(*) AS count FROM checkpoints").get().count,
+    findings: DB.database.prepare("SELECT COUNT(*) AS count FROM findings").get().count,
+  }, beforeReadCounts);
+
+  const isolated = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/hockey/checkpoints/latest?conversationId=${encodeURIComponent(seeded.conversationId)}&caseId=${encodeURIComponent(seeded.caseId)}`,
+  );
+  assert.equal(isolated.response.status, 404);
+
+  const duplicate = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "native-server-generated-finding-repeat",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      trigger: "analyze_now",
+      source: "canonical_case_events",
+    },
+  });
+  assert.equal(duplicate.response.status, 201);
+  assert.equal(duplicate.value.findings.length, 0);
+  assert.equal(duplicate.value.suppressedFindingCount, 1);
+  assert.equal(duplicate.value.checkpoint.healthAfter, "awaiting_governance");
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM findings").get().count, 1);
+});
+
+test("Native Reasoning Health distinguishes aligned corrections from real contradictions", async () => {
+  const worker = await builtWorker("native-conflict-semantics");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+
+  const insufficient = await seedSlice3Case(worker, DB, "insufficient-native", ["evidence"]);
+  const zero = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "native-insufficient-zero",
+    body: {
+      conversationId: insufficient.conversationId,
+      caseId: insufficient.caseId,
+      source: "canonical_case_events",
+    },
+  });
+  assert.equal(zero.response.status, 201);
+  assert.equal(zero.value.findings.length, 0);
+  assert.equal(zero.value.noDurableFindingProposed, true);
+
+  const contradiction = await seedSlice3Case(
+    worker,
+    DB,
+    "genuine-conflict",
+    ["evidence", "correction"],
+    [
+      "Use the prior confirmation rule before entering.",
+      "The prior confirmation rule is wrong and must not be used.",
+    ],
+  );
+  const conflicted = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "native-genuine-conflict",
+    body: {
+      conversationId: contradiction.conversationId,
+      caseId: contradiction.caseId,
+      source: "canonical_case_events",
+    },
+  });
+  assert.equal(conflicted.response.status, 201);
+  assert.equal(conflicted.value.checkpoint.healthAfter, "conflict");
+  const conversation = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(contradiction.conversationId)}`,
+  );
+  assert.equal(conversation.value.reasoningHealth.state, "Conflict");
+});
+
 test("Slice 3 Cody revision governs, changes eligibility, and rolls back without rewriting history", async () => {
   const worker = await builtWorker("slice3-governance");
   const DB = await sqliteD1();
@@ -1719,6 +1905,7 @@ test("Slice 3 Cody revision governs, changes eligibility, and rolls back without
     body: {
       conversationId: seeded.conversationId,
       caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
       findingCandidates: [{
         findingType: "mechanism_recognition",
         sourceEventIds: seeded.events.map((event) => event.id),
@@ -1744,6 +1931,7 @@ test("Slice 3 Cody revision governs, changes eligibility, and rolls back without
     body: {
       conversationId: seeded.conversationId,
       caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
       findingCandidates: [{
         findingType: "mechanism_recognition",
         sourceEventIds: [seeded.events[0].id],
@@ -1887,6 +2075,7 @@ test("Slice 3 rejection suppresses unchanged proposals and deferral remains non-
     body: {
       conversationId: seeded.conversationId,
       caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
       findingCandidates: [proposal],
     },
   });
@@ -1916,6 +2105,7 @@ test("Slice 3 rejection suppresses unchanged proposals and deferral remains non-
     body: {
       conversationId: seeded.conversationId,
       caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
       findingCandidates: [proposal],
     },
   });
@@ -1930,6 +2120,7 @@ test("Slice 3 rejection suppresses unchanged proposals and deferral remains non-
     body: {
       conversationId: seeded.conversationId,
       caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
       findingCandidates: [{
         ...proposal,
         proposalStatement: "Revisit broader scope after a second independent case.",
@@ -2136,6 +2327,7 @@ test("Slice 3 Keep local and Challenge produce distinct canonical retrieval effe
     body: {
       conversationId: seeded.conversationId,
       caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
       findingCandidates: [
         {
           findingType: "mechanism_recognition",
@@ -2306,6 +2498,7 @@ test("Slice 4 comparable packets record the exact Slice 3 governance event that 
     body: {
       conversationId: seeded.conversationId,
       caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
       findingCandidates: [{
         findingType: "mechanism_recognition",
         sourceEventIds: [seeded.events[1].id],
