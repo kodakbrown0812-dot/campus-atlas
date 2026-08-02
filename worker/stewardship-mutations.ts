@@ -26,6 +26,11 @@ const CONTEXTUAL_TYPES = new Set([
 ]);
 const REPRESENTATIONS = new Set(["Exact", "Compressed", "Reconstructed"]);
 
+function requiredExactString(value: unknown, label: string) {
+  if (typeof value !== "string" || value.length === 0) throw new Error(`${label} is required.`);
+  return value;
+}
+
 function stableFields(body: Row) {
   return {
     type: body.type,
@@ -261,17 +266,20 @@ async function sourceForContextualEvent(
   conversationId: string,
   body: Row,
 ) {
-  const content = requiredString(body.content, "What happened");
+  const representation = optionalString(body.representation) || "Reconstructed";
+  const content = representation === "Exact"
+    ? requiredExactString(body.content, "What happened")
+    : requiredString(body.content, "What happened");
   const sourceMessageId = optionalString(body.sourceMessageId);
   if (!sourceMessageId) {
-    if (body.representation === "Exact") {
+    if (representation === "Exact") {
       throw new Error("Exact representation requires a canonical source-message span.");
     }
     return {
       exactSourceSpan: content,
       sourceMessageIds: [] as string[],
       spans: [] as Array<{ id: string; messageId: string; start: number; end: number }>,
-      representation: optionalString(body.representation) || "Reconstructed",
+      representation,
     };
   }
   const messageId = assertId(sourceMessageId, "source message ID");
