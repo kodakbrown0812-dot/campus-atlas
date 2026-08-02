@@ -1,6 +1,7 @@
 import { canonicalId } from "./canonical-records";
 import { sha256 } from "./transcript-import";
 import { messageAnchorHref } from "../shared/message-anchors";
+import { hasUnresolvedConflict } from "./reasoning-semantics";
 import {
   all,
   assertId,
@@ -39,6 +40,12 @@ const FINDING_TYPES = new Set([
 const SCOPES = new Set(["local", "project_wide", "cross_project"]);
 const MAX_SELECTED_NODES = 7;
 const EXTRACTION_VERSION = "slice3-sparse-v1";
+const SERVER_FINDING_SOURCE = "canonical_case_events";
+const ANALYZER_CANDIDATE_SOURCES = new Set([
+  "explicit_analyzer_candidates",
+  "slice6b_contract",
+  "user_supplied_case_reconstruction",
+]);
 const FINDING_CANDIDATE_FIELDS = new Set([
   "findingType",
   "sourceEventIds",
@@ -151,10 +158,22 @@ async function checkpointDetail(db: D1Database, projectId: string, checkpointId:
        ORDER BY f.created_at ASC`,
     ).bind(projectId, checkpointId)),
   ]);
+  const metadata = parseJson<Record<string, unknown>>(checkpoint.metadata, {});
+  const selectedNodes = nodes.map(nodeView);
+  const selectedNodeIds = selectedNodes.map((node) => String(node.id));
+  const checkpointFindings = findings.map((row) => ({
+    ...findingView(row),
+    selectedNodeIds,
+  }));
   return {
     checkpoint: checkpointView(checkpoint),
-    selectedNodes: nodes.map(nodeView),
-    findings: findings.map(findingView),
+    selectedNodes,
+    findings: checkpointFindings,
+    suppressedFindingCount: Number(metadata.suppressedFindingCount || 0),
+    noDurableFindingProposed: checkpointFindings.length === 0,
+    retrievalEffect: checkpointFindings.length > 0
+      ? "no_change_until_governed"
+      : "none",
   };
 }
 
@@ -179,10 +198,10 @@ function reasoningNodeType(eventType: unknown) {
   return map[type] || "Context";
 }
 
-function deriveHealth(events: Row[], findingCount: number) {
+function deriveHealth(events: Row[], findingCount: number, existingPendingFindingCount = 0) {
   const types = new Set(events.map((event) => String(event.event_type).toLowerCase()));
-  if (types.has("challenge") || types.has("correction")) return "conflict";
-  if (findingCount > 0) return "awaiting_governance";
+  if (hasUnresolvedConflict(events)) return "conflict";
+  if (findingCount > 0 || existingPendingFindingCount > 0) return "awaiting_governance";
   if (types.has("decision") && !types.has("outcome")) return "awaiting_outcome";
   if (types.has("unknown")) return "missing_information";
   return "forming";
@@ -248,6 +267,80 @@ type FindingCandidate = {
   proposalHash: string;
 };
 
+function eventStatement(event: Row) {
+  return event.compressed_representation
+    ? String(event.compressed_representation)
+    : String(event.exact_source_span || "");
+}
+
+function normalizedTerms(value: string) {
+  const stop = new Set([
+    "about", "after", "again", "against", "before", "being", "could", "current",
+    "from", "have", "into", "merely", "should", "than", "that", "their", "there",
+    "these", "they", "this", "through", "until", "when", "where", "which", "while",
+    "with", "would", "your",
+  ]);
+  return new Set(
+    value.toLowerCase().match(/[a-z0-9]+/g)?.filter((term) => term.length > 3 && !stop.has(term)) || [],
+  );
+}
+
+function mechanismLanguage(value: string) {
+  return /\b(?:require|requires|required|should|must|when|whenever|if|pass|avoid|rerank|check)\b/i.test(value);
+}
+
+function atomicEnough(value: string) {
+  const sentenceCount = value.split(/[.!?]+(?:\s|$)/).filter((part) => part.trim()).length;
+  return value.trim().length >= 24 && value.length <= 700 && sentenceCount <= 3;
+}
+
+function related(primary: Row, candidate: Row) {
+  const primaryTerms = normalizedTerms(eventStatement(primary));
+  const candidateTerms = normalizedTerms(eventStatement(candidate));
+  let overlap = 0;
+  for (const term of primaryTerms) if (candidateTerms.has(term)) overlap += 1;
+  return overlap >= 3;
+}
+
+async function serverFindingCandidates(selectedEvents: Row[]): Promise<FindingCandidate[]> {
+  const primary = selectedEvents.find((event) => {
+    const type = String(event.event_type).toLowerCase();
+    const statement = eventStatement(event);
+    return ["correction", "mechanism_candidate", "principle_candidate", "constraint_change"].includes(type)
+      && mechanismLanguage(statement)
+      && atomicEnough(statement);
+  });
+  if (!primary) return [];
+
+  const relatedEvents = selectedEvents.filter((event) => event === primary || related(primary, event));
+  const supportingEvents = relatedEvents.filter((event) =>
+    ["evidence", "fact", "method", "outcome", "decision", "constraint"].includes(String(event.event_type).toLowerCase()),
+  );
+  const challengeEvents = relatedEvents.filter((event) => String(event.event_type).toLowerCase() === "challenge");
+  const type = String(primary.event_type).toLowerCase();
+  const candidate = {
+    findingType: type === "principle_candidate"
+      ? "principle_proposal"
+      : type === "constraint_change"
+        ? "scope_revision"
+        : "mechanism_recognition",
+    sourceEventIds: relatedEvents.map((event) => String(event.id)),
+    proposalStatement: eventStatement(primary),
+    proposedScope: "local",
+    conditions: [] as string[],
+    exclusions: [] as string[],
+    supportingEvidence: supportingEvents.map((event) => String(event.id)),
+    counterevidence: challengeEvents.map((event) => String(event.id)),
+    uncertainty: null,
+    reasonForSurfacing: "Selected canonical sources express one consequential proposal for Cody to review.",
+    expectedRetrievalEffect: "No retrieval change unless Cody governs the final reviewed wording and scope.",
+  };
+  return [{
+    ...candidate,
+    proposalHash: await sha256(JSON.stringify(candidate)),
+  }];
+}
+
 async function validateFindingCandidate(value: unknown, allowedEventIds: Set<string>): Promise<FindingCandidate> {
   if (!value || typeof value !== "object") throw new Error("Each finding candidate must be an object.");
   const record = value as Row;
@@ -301,21 +394,26 @@ async function analyzeCheckpoint(
   await requireConversationCase(db, projectId, conversationId, caseId);
   const trigger = optionalString(body.trigger) || "analyze_now";
   if (!CHECKPOINT_TRIGGERS.has(trigger)) throw new Error("Unsupported checkpoint trigger.");
-  const source = optionalString(body.source) || "canonical_case_events";
+  const source = optionalString(body.source) || SERVER_FINDING_SOURCE;
   const requestedEventIds = stringArray(body.candidateEventIds, "Candidate event IDs").map((id) => assertId(id, "event ID"));
   const events = await caseEvents(db, projectId, conversationId, caseId, requestedEventIds);
   const allowedEventIds = new Set(events.map((event) => String(event.id)));
-  const rawFindings = body.findingCandidates === undefined ? [] : body.findingCandidates;
-  if (!Array.isArray(rawFindings)) throw new Error("Finding candidates must be an array.");
-  const findingCandidates = await Promise.all(rawFindings.map((candidate) => validateFindingCandidate(candidate, allowedEventIds)));
+  if (source === SERVER_FINDING_SOURCE && body.findingCandidates !== undefined) {
+    throw new Error("Native finding candidates are server-owned; client-supplied finding wording cannot be accepted.");
+  }
+  if (source !== SERVER_FINDING_SOURCE && !ANALYZER_CANDIDATE_SOURCES.has(source)) {
+    throw new Error("Unsupported checkpoint source.");
+  }
   const startedAt = now();
   const checkpointId = canonicalId("checkpoint");
-  const priorCheckpoint = await first<Row>(db.prepare(
-    `SELECT health_after FROM checkpoints
-     WHERE project_id = ? AND case_id = ? AND status = 'complete'
-     ORDER BY completed_at DESC LIMIT 1`,
-  ).bind(projectId, caseId));
   const selectedEvents = events.slice(0, MAX_SELECTED_NODES);
+  const rawFindings = source === SERVER_FINDING_SOURCE
+    ? null
+    : body.findingCandidates === undefined ? [] : body.findingCandidates;
+  if (rawFindings !== null && !Array.isArray(rawFindings)) throw new Error("Finding candidates must be an array.");
+  const findingCandidates = rawFindings === null
+    ? await serverFindingCandidates(selectedEvents)
+    : await Promise.all(rawFindings.map((candidate) => validateFindingCandidate(candidate, allowedEventIds)));
   const statements: D1PreparedStatement[] = [];
   const selectedNodeIds: string[] = [];
 
@@ -389,14 +487,14 @@ async function analyzeCheckpoint(
   let suppressedFindingCount = 0;
   let createdFindingCount = 0;
   for (const candidate of findingCandidates) {
-    const rejected = await first<Row>(db.prepare(
+    const existingEquivalent = await first<Row>(db.prepare(
       `SELECT f.id
        FROM findings f
        JOIN finding_versions v ON v.id = f.current_version_id AND v.project_id = f.project_id
-       WHERE f.project_id = ? AND f.case_id = ? AND f.status = 'rejected' AND v.proposal_hash = ?
+       WHERE f.project_id = ? AND f.case_id = ? AND v.proposal_hash = ?
        LIMIT 1`,
     ).bind(projectId, caseId, candidate.proposalHash));
-    if (rejected) {
+    if (existingEquivalent) {
       suppressedFindingCount += 1;
       continue;
     }
@@ -445,7 +543,14 @@ async function analyzeCheckpoint(
     createdFindingCount += 1;
   }
 
-  const healthAfter = deriveHealth(events, createdFindingCount);
+  const pendingFinding = await first<Row>(db.prepare(
+    `SELECT COUNT(*) AS count FROM findings
+     WHERE project_id = ? AND case_id = ?
+       AND status IN ('proposed', 'under_review', 'deferred', 'challenged')`,
+  ).bind(projectId, caseId));
+  const pendingFindingCount = Number(pendingFinding?.count || 0);
+  const healthBefore = deriveHealth(events, 0, pendingFindingCount);
+  const healthAfter = deriveHealth(events, createdFindingCount, pendingFindingCount);
   const missingState = deriveMissingState(events);
   const completedAt = now();
   statements.unshift(db.prepare(
@@ -468,13 +573,15 @@ async function analyzeCheckpoint(
     events.length,
     selectedEvents.length,
     Math.max(0, events.length - selectedEvents.length),
-    priorCheckpoint?.health_after || "forming",
+    healthBefore,
     healthAfter,
     json(missingState),
     optionalString(body.ambiguity),
     idempotencyKey,
     json({
-      findingCandidatesReceived: findingCandidates.length,
+      findingCandidatesReceived: source === SERVER_FINDING_SOURCE ? 0 : findingCandidates.length,
+      findingCandidatesGenerated: source === SERVER_FINDING_SOURCE ? findingCandidates.length : 0,
+      findingCandidateOrigin: source === SERVER_FINDING_SOURCE ? "server" : "explicit_analyzer",
       findingCount: createdFindingCount,
       suppressedFindingCount,
       selectedNodeIds,
@@ -485,9 +592,28 @@ async function analyzeCheckpoint(
   return {
     ...(await checkpointDetail(db, projectId, checkpointId)),
     idempotentReplay: false,
-    suppressedFindingCount,
-    noDurableFindingProposed: createdFindingCount === 0,
   };
+}
+
+export async function latestCheckpoint(
+  db: D1Database,
+  projectId: string,
+  conversationId: string,
+  caseId?: string | null,
+) {
+  const conversation = await first<Row>(db.prepare(
+    "SELECT id, active_case_id FROM conversations WHERE id = ? AND project_id = ? LIMIT 1",
+  ).bind(conversationId, projectId));
+  if (!conversation) throw new Error("Conversation not found.");
+  const scopedCaseId = caseId || (conversation.active_case_id ? String(conversation.active_case_id) : null);
+  if (!scopedCaseId) return null;
+  await requireConversationCase(db, projectId, conversationId, scopedCaseId);
+  const checkpoint = await first<Row>(db.prepare(
+    `SELECT id FROM checkpoints
+     WHERE project_id = ? AND conversation_id = ? AND case_id = ?
+     ORDER BY started_at DESC, id DESC LIMIT 1`,
+  ).bind(projectId, conversationId, scopedCaseId));
+  return checkpoint ? checkpointDetail(db, projectId, String(checkpoint.id)) : null;
 }
 
 export async function listFindings(

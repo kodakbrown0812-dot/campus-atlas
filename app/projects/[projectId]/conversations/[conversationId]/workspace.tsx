@@ -111,7 +111,14 @@ type CheckpointResult = {
     representationType: string;
     sourceEventIds: string[];
   }>;
-  findings: Array<{ id: string; proposal: string; status: string }>;
+  findings: Array<{
+    id: string;
+    proposal: string;
+    status: string;
+    selectedNodeIds?: string[];
+  }>;
+  retrievalEffect?: "none" | "no_change_until_governed";
+  suppressedFindingCount?: number;
   noDurableFindingProposed?: boolean;
 };
 
@@ -152,6 +159,7 @@ export default function ConversationWorkspace({
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [analysisStatus, setAnalysisStatus] = useState<"idle" | "running" | "complete" | "failed">("idle");
   const [checkpoint, setCheckpoint] = useState<CheckpointResult | null>(null);
+  const [checkpointOrigin, setCheckpointOrigin] = useState<"new" | "restored" | null>(null);
   const [error, setError] = useState("");
 
   const fetchConversation = useCallback(async () => {
@@ -169,6 +177,20 @@ export default function ConversationWorkspace({
     return value as Detail;
   }, [conversationId, projectId]);
 
+  const fetchLatestCheckpoint = useCallback(async (caseId: string | null) => {
+    if (!caseId) return null;
+    const response = await fetch(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/checkpoints/latest?conversationId=${encodeURIComponent(conversationId)}&caseId=${encodeURIComponent(caseId)}`,
+      { cache: "no-store" },
+    );
+    const value = await response.json().catch(() => null) as {
+      error?: string;
+      result?: CheckpointResult | null;
+    } | null;
+    if (!response.ok || !value) throw new Error(value?.error || "Latest checkpoint unavailable.");
+    return value.result || null;
+  }, [conversationId, projectId]);
+
   const refresh = useCallback(async () => {
     const value = await fetchConversation();
     setDetail(value);
@@ -179,10 +201,24 @@ export default function ConversationWorkspace({
   useEffect(() => {
     let active = true;
     fetchConversation()
-      .then((result) => {
+      .then(async (result) => {
         if (!active) return;
         setDetail(result);
         setSelectedCase(result.conversation.activeCaseId || "");
+        try {
+          const latest = await fetchLatestCheckpoint(result.conversation.activeCaseId);
+          if (!active) return;
+          if (latest) {
+            setCheckpoint(latest);
+            setCheckpointOrigin("restored");
+            setAnalysisStatus("complete");
+          }
+        } catch (caught) {
+          if (!active) return;
+          setError(caught instanceof Error
+            ? `${caught.message} The preserved transcript remains valid.`
+            : "Latest checkpoint unavailable. The preserved transcript remains valid.");
+        }
         setStatus("ready");
       })
       .catch((caught) => {
@@ -191,7 +227,7 @@ export default function ConversationWorkspace({
         setStatus("unavailable");
       });
     return () => { active = false; };
-  }, [fetchConversation]);
+  }, [fetchConversation, fetchLatestCheckpoint]);
 
   useEffect(() => {
     if (!detail) return;
@@ -338,6 +374,7 @@ export default function ConversationWorkspace({
     if (!activeCase) return;
     setAnalysisStatus("running");
     setCheckpoint(null);
+    setCheckpointOrigin(null);
     setError("");
     try {
       const result = await postCanonical(
@@ -347,13 +384,16 @@ export default function ConversationWorkspace({
           caseId: activeCase.id,
           trigger: "analyze_now",
           source: "canonical_case_events",
-          findingCandidates: [],
         },
         `analyze-now:${conversationId}:${crypto.randomUUID()}`,
       ) as unknown as CheckpointResult;
       setCheckpoint(result);
+      setCheckpointOrigin("new");
       await refresh();
       setAnalysisStatus("complete");
+      window.requestAnimationFrame(() => {
+        document.getElementById("checkpoint-result")?.scrollIntoView({ block: "start", behavior: "smooth" });
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Checkpoint failed. Nothing was presented as analyzed.");
       setAnalysisStatus("failed");
@@ -426,6 +466,7 @@ export default function ConversationWorkspace({
           <span>Latest checkpoint</span>
           <strong>{detail.reasoningHealth.latestCheckpoint?.status || "Not run"}</strong>
           <small>{detail.reasoningHealth.pendingFindingCount} pending findings</small>
+          {checkpoint && <a href="#checkpoint-result">Inspect canonical result</a>}
         </div>
         <button className={styles.analyzeButton} disabled={!canWrite || !activeCase || analysisStatus === "running"} onClick={analyzeNow} type="button">
           {analysisStatus === "running" ? "Analyzing…" : "Analyze now"}
@@ -566,11 +607,15 @@ export default function ConversationWorkspace({
       </div>
 
       {analysisStatus !== "idle" && (
-        <section className={`${styles.analysisPanel} ${analysisStatus === "failed" ? styles.analysisFailed : ""}`}>
+        <section className={`${styles.analysisPanel} ${analysisStatus === "failed" ? styles.analysisFailed : ""}`} id="checkpoint-result">
           <header>
             <div>
-              <span className={styles.eyebrow}>Checkpoint action</span>
-              <h2>{analysisStatus === "running" ? "Analyze now is running" : analysisStatus === "complete" ? "Analyze now complete" : "Analyze now failed"}</h2>
+              <span className={styles.eyebrow}>{checkpointOrigin === "restored" ? "Existing canonical checkpoint" : "Checkpoint action"}</span>
+              <h2>{analysisStatus === "running"
+                ? "Analyze now is running"
+                : analysisStatus === "complete"
+                  ? checkpointOrigin === "restored" ? "Saved Analyze result" : "Analyze now complete"
+                  : "Analyze now failed"}</h2>
             </div>
             <span className={styles.status}>{checkpoint?.checkpoint.id || "No checkpoint saved yet"}</span>
           </header>
@@ -600,7 +645,9 @@ export default function ConversationWorkspace({
                 <div><dt>Missing state</dt><dd>{checkpoint.checkpoint.missingState.join(", ") || "None recorded"}</dd></div>
                 <div><dt>Ambiguity</dt><dd>{checkpoint.checkpoint.ambiguity || "None recorded"}</dd></div>
                 <div><dt>Findings created</dt><dd>{checkpoint.findings.length}</dd></div>
-                <div><dt>Retrieval effect</dt><dd>No authority changed; findings remain proposals until governed.</dd></div>
+                <div><dt>Retrieval effect</dt><dd>{checkpoint.retrievalEffect === "no_change_until_governed"
+                  ? "No authority changed; findings remain proposals until governed."
+                  : "No retrieval eligibility changed."}</dd></div>
               </dl>
               <div>
                 <h3>Selected nodes</h3>
@@ -613,6 +660,18 @@ export default function ConversationWorkspace({
                   ? "Atlas found no consequence that should change future retrieval."
                   : `${checkpoint.findings.length} atomic finding${checkpoint.findings.length === 1 ? "" : "s"} awaits governance.`}
               </strong>
+              {checkpoint.findings.length > 0 && (
+                <div>
+                  <h3>Atlas Found proposals</h3>
+                  {checkpoint.findings.map((finding) => (
+                    <p key={finding.id}>
+                      <Link href={`/projects/${encodeURIComponent(projectId)}/findings/${encodeURIComponent(finding.id)}`}>
+                        {finding.proposal}
+                      </Link>
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           )}
           {analysisStatus === "failed" && (
