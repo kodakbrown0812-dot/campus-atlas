@@ -4166,6 +4166,177 @@ test("Dogfood Exact Contextual Add UI contract preserves canonical message spans
   }
 });
 
+test("Exact Contextual Add preserves boundary and internal whitespace byte-for-byte", async () => {
+  const worker = await builtWorker("dogfood-exact-whitespace");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Exact whitespace preservation" },
+  });
+  const conversationId = conversation.value.conversation.id;
+  const caseResult = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: "Preserve exact whitespace without promoting authority",
+      conversationId,
+      makeActive: true,
+      actorId: "cody",
+    },
+  });
+  const caseId = caseResult.value.case.id;
+
+  async function preserveExact(label, content) {
+    const message = await slice2Request(
+      worker,
+      DB,
+      `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+      {
+        method: "POST",
+        idempotencyKey: `exact-whitespace-message-${label}`,
+        body: { actorType: "user", actorId: "cody", content },
+      },
+    );
+    assert.equal(message.response.status, 201, JSON.stringify(message.value));
+    assert.equal(message.value.message.exactContent, content);
+
+    const capture = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+      method: "POST",
+      idempotencyKey: `exact-whitespace-event-${label}`,
+      body: {
+        type: "observation",
+        conversationId,
+        caseId,
+        representation: "Exact",
+        sourceMessageId: message.value.message.id,
+        sourceStart: 0,
+        sourceEnd: content.length,
+        content,
+        actorId: "cody",
+        reason: "Exact whitespace preservation contract.",
+      },
+    });
+    assert.equal(capture.response.status, 201, JSON.stringify(capture.value));
+    assert.equal(capture.value.record.exact_source_span, content);
+    assert.equal(capture.value.record.authority_state, "observed");
+    assert.equal(capture.value.receipt.representation, "Exact");
+    assert.equal(capture.value.receipt.authority, "observed");
+    assert.equal(capture.value.receipt.retrievalChanged, false);
+    assert.deepEqual(capture.value.receipt.sourceLineage, {
+      messageId: message.value.message.id,
+      start: 0,
+      end: content.length,
+      href: `/projects/sports/conversations/${encodeURIComponent(conversationId)}#${encodeURIComponent(`message-${message.value.message.id}`)}`,
+    });
+    assert.equal(
+      DB.database.prepare("SELECT exact_source_span FROM events WHERE id = ?").get(capture.value.record.id).exact_source_span,
+      content,
+    );
+    return { message, capture };
+  }
+
+  const exactCases = [
+    ["ending-newline", "Full message ending with a newline\n"],
+    ["beginning-whitespace", " \tFull message beginning with whitespace"],
+    ["boundary-spaces", "  Leading and trailing spaces  "],
+    ["tabs", "Tabs\tremain\tunchanged\t"],
+    ["multi-line", "First line\nSecond line\nThird line\n"],
+    ["repeated-internal", "Repeated   internal\t\twhitespace stays"],
+    ["unicode", "Unicode — punctuation, café, 中文, and 🙂 remain exact\n"],
+  ];
+  for (const [label, content] of exactCases) await preserveExact(label, content);
+
+  const substringMessageContent = "prefix|\t selected exact substring \n|suffix";
+  const substringMessage = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "exact-whitespace-substring-message",
+      body: { actorType: "user", actorId: "cody", content: substringMessageContent },
+    },
+  );
+  const substring = "\t selected exact substring \n";
+  const substringStart = substringMessageContent.indexOf(substring);
+  const substringCapture = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "exact-whitespace-substring-event",
+    body: {
+      type: "correction",
+      conversationId,
+      caseId,
+      representation: "Exact",
+      sourceMessageId: substringMessage.value.message.id,
+      sourceStart: substringStart,
+      sourceEnd: substringStart + substring.length,
+      content: substring,
+      actorId: "cody",
+    },
+  });
+  assert.equal(substringCapture.response.status, 201, JSON.stringify(substringCapture.value));
+  assert.equal(substringCapture.value.record.exact_source_span, substring);
+  assert.equal(substringCapture.value.receipt.retrievalChanged, false);
+
+  const mismatchSource = "One-character mismatch ";
+  const mismatchMessage = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "exact-whitespace-mismatch-message",
+      body: { actorType: "user", actorId: "cody", content: mismatchSource },
+    },
+  );
+  const mismatch = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+    method: "POST",
+    idempotencyKey: "exact-whitespace-mismatch-event",
+    body: {
+      type: "correction",
+      conversationId,
+      caseId,
+      representation: "Exact",
+      sourceMessageId: mismatchMessage.value.message.id,
+      sourceStart: 0,
+      sourceEnd: mismatchSource.length,
+      content: `${mismatchSource.slice(0, -1)}!`,
+      actorId: "cody",
+    },
+  });
+  assert.equal(mismatch.response.status, 400);
+  assert.match(mismatch.value.error, /does not match the exact source span/i);
+
+  for (const representation of ["Reconstructed", "Compressed"]) {
+    const freeText = await slice2Request(worker, DB, "/api/v1/projects/sports/contextual-add", {
+      method: "POST",
+      idempotencyKey: `exact-whitespace-${representation.toLowerCase()}-regression`,
+      body: {
+        type: "observation",
+        conversationId,
+        caseId,
+        representation,
+        content: `  ${representation} free text remains trimmed where appropriate. \n`,
+        actorId: "cody",
+      },
+    });
+    assert.equal(freeText.response.status, 201, JSON.stringify(freeText.value));
+    assert.equal(freeText.value.record.exact_source_span, `${representation} free text remains trimmed where appropriate.`);
+    assert.equal(freeText.value.receipt.representation, representation);
+    assert.equal(freeText.value.receipt.retrievalChanged, false);
+  }
+
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms WHERE project_id = ?").get("sports").count,
+    0,
+  );
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events WHERE project_id = ?").get("sports").count,
+    0,
+  );
+});
+
 test("Slice 6B Inspect and Structure return the same project-scoped canonical snapshots as direct APIs", async () => {
   const worker = await builtWorker("slice6b-inspect-parity");
   const DB = await sqliteD1();
