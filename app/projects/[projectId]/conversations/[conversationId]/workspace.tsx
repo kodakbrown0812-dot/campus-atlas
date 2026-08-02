@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useWriteSession } from "../../../../components/write-session";
+import { messageAnchorId, messageIdFromAnchorHash } from "../../../../../shared/message-anchors";
 import styles from "../conversation.module.css";
 
 type Message = {
@@ -191,6 +192,33 @@ export default function ConversationWorkspace({
       });
     return () => { active = false; };
   }, [fetchConversation]);
+
+  useEffect(() => {
+    if (!detail) return;
+
+    let frame = 0;
+    const revealExactMessage = () => {
+      document.querySelectorAll<HTMLElement>("[data-source-target='true']").forEach((element) => {
+        delete element.dataset.sourceTarget;
+      });
+
+      const messageId = messageIdFromAnchorHash(window.location.hash);
+      if (!messageId) return;
+
+      const target = document.getElementById(messageAnchorId(messageId));
+      if (!target) return;
+
+      target.dataset.sourceTarget = "true";
+      target.scrollIntoView({ block: "center", behavior: "auto" });
+    };
+
+    frame = window.requestAnimationFrame(revealExactMessage);
+    window.addEventListener("hashchange", revealExactMessage);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("hashchange", revealExactMessage);
+    };
+  }, [detail]);
 
   const canWrite = Boolean(session?.writeAuthorization.authorized);
   const activeCase = detail?.cases.find((record) => record.id === detail.conversation.activeCaseId) || null;
@@ -422,7 +450,7 @@ export default function ConversationWorkspace({
             </section>
           )}
           {detail.messages.map((message) => (
-            <article className={styles.message} id={`message-${encodeURIComponent(message.id)}`} key={message.id}>
+            <article className={styles.message} id={messageAnchorId(message.id)} key={message.id}>
               <header>
                 <strong>{message.actorId || message.actorType}</strong>
                 <span>Message {message.sequence}</span>

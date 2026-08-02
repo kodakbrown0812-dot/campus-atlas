@@ -1,5 +1,6 @@
 import { canonicalId } from "./canonical-records";
 import { sha256 } from "./transcript-import";
+import { messageAnchorHref } from "../shared/message-anchors";
 import {
   all,
   assertId,
@@ -580,7 +581,7 @@ export async function findingDetail(db: D1Database, projectId: string, findingId
         compressedRepresentation: event!.compressed_representation,
         sourceLinks: messageIds.map((messageId) => ({
           messageId,
-          href: `/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(String(event!.conversation_id))}#message-${encodeURIComponent(messageId)}`,
+          href: messageAnchorHref(projectId, String(event!.conversation_id), messageId),
           span: Array.isArray(metadata.sourceSpans)
             ? metadata.sourceSpans.find((span) => span && typeof span === "object" && (span as Row).messageId === messageId) ?? null
             : null,

@@ -2,6 +2,7 @@ import { canonicalId } from "./canonical-records";
 import { applyBoundaryProposal, createBoundaryProposal, reverseBoundaryOperation } from "./case-boundaries";
 import { normalizeActor, parseImport, sha256, timestampValue } from "./transcript-import";
 import { reasoningHealthForConversation } from "./reasoning-health";
+import { messageAnchorFragment } from "../shared/message-anchors";
 
 type Row = Record<string, unknown>;
 
@@ -171,7 +172,7 @@ function eventView(row: Row) {
     sourceMessageIds,
     sourceLinks: sourceMessageIds.map((messageId) => ({
       messageId,
-      href: `#message-${encodeURIComponent(messageId)}`,
+      href: messageAnchorFragment(messageId),
       span: Array.isArray(metadata.sourceSpans)
         ? metadata.sourceSpans.find((span) => span && typeof span === "object" && (span as Row).messageId === messageId) ?? null
         : null,

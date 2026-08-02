@@ -864,7 +864,7 @@ test("Slice 2 events can remain unassigned or chat-only and resolve exact messag
   assert.equal(unassigned.response.status, 201);
   assert.equal(unassigned.value.event.caseId, null);
   assert.equal(unassigned.value.event.assignmentState, "unassigned");
-  assert.equal(unassigned.value.event.sourceLinks[0].href, `#message-${encodeURIComponent(messageId)}`);
+  assert.equal(unassigned.value.event.sourceLinks[0].href, `#${encodeURIComponent(`message-${messageId}`)}`);
 
   const chatOnly = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
     method: "POST",
@@ -952,7 +952,7 @@ test("Slice 2 preserves canonical IDs while encoding route and fragment boundari
   assert.equal(event.response.status, 201);
   assert.equal(event.value.event.id, eventId);
   assert.equal(event.value.event.sourceLinks[0].messageId, messageId);
-  assert.equal(event.value.event.sourceLinks[0].href, `#message-${encodeURIComponent(messageId)}`);
+  assert.equal(event.value.event.sourceLinks[0].href, `#${encodeURIComponent(`message-${messageId}`)}`);
   assert.equal(event.value.event.sourceLinks[0].span.id, sourceSpanId);
   assert.equal(DB.database.prepare("SELECT id FROM messages WHERE id = ?").get(messageId).id, messageId);
   assert.equal(DB.database.prepare("SELECT id FROM events WHERE id = ?").get(eventId).id, eventId);
@@ -2120,7 +2120,7 @@ test("Slice 3 can propose a Brewers mechanism from the byte-preserved reconstruc
   assert.equal(finding.value.sourceEvents[0].sourceLinks[0].messageId, sourceMessage.id);
   assert.match(
     finding.value.sourceEvents[0].sourceLinks[0].href,
-    new RegExp(`#message-${encodeURIComponent(sourceMessage.id)}$`),
+    new RegExp(`#${encodeURIComponent(`message-${sourceMessage.id}`)}$`),
   );
   assert.equal(fixtureContract.rawTranscriptAvailable, false);
 });
@@ -4014,7 +4014,7 @@ test("Dogfood Exact Contextual Add UI contract preserves canonical message spans
     messageId: message.value.message.id,
     start: 0,
     end: exactContent.length,
-    href: `/projects/sports/conversations/${encodeURIComponent(conversationId)}#message-${encodeURIComponent(message.value.message.id)}`,
+    href: `/projects/sports/conversations/${encodeURIComponent(conversationId)}#${encodeURIComponent(`message-${message.value.message.id}`)}`,
   });
 
   const substring = "Second exact clause / with reserved: characters?";
@@ -4282,4 +4282,56 @@ test("Slice 6B interface remains canonical and explicit beneath the Slice 6C Ask
   assert.match(service, /No consequential meaning was approved by this capture/);
   assert.doesNotMatch(`${queue}\n${review}\n${inspect}\n${structure}\n${contextualAdd}`, /England|Ghana|makeSeedState/i);
   assert.doesNotMatch(ask, /England|Ghana|seeded answer|makeSeedState/i);
+});
+
+test("Exact-source navigation uses one reserved-character-safe message anchor with delayed scroll and highlighting", async () => {
+  const [
+    anchorContract,
+    conversationWorkspace,
+    conversationStyles,
+    contextualAdd,
+    conversationService,
+    checkpointService,
+    stewardshipService,
+    inspectService,
+  ] = await Promise.all([
+    readFile(new URL("../shared/message-anchors.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/conversations/[conversationId]/workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/conversations/conversation.module.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/contextual-add.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../worker/conversation-cases.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/checkpoint-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/stewardship-mutations.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/inspect-service.ts", import.meta.url), "utf8"),
+  ]);
+
+  const canonicalMessageId = "message:source / v1?part=1#exact&raw=true";
+  const domId = `message-${canonicalMessageId}`;
+  const fragment = `#${encodeURIComponent(domId)}`;
+  assert.equal(decodeURIComponent(fragment.slice(1)), domId);
+  assert.equal(canonicalMessageId, domId.slice("message-".length));
+
+  assert.match(anchorContract, /MESSAGE_ANCHOR_PREFIX = "message-"/);
+  assert.match(anchorContract, /encodeURIComponent\(messageAnchorId\(messageId\)\)/);
+  assert.match(anchorContract, /decodeURIComponent\(hash\.slice\(1\)\)/);
+  assert.match(conversationWorkspace, /id=\{messageAnchorId\(message\.id\)\}/);
+  assert.doesNotMatch(conversationWorkspace, /id=\{`message-\$\{encodeURIComponent\(message\.id\)\}`\}/);
+  assert.match(conversationWorkspace, /requestAnimationFrame\(revealExactMessage\)/);
+  assert.ok(
+    conversationWorkspace.indexOf("document.getElementById(messageAnchorId(messageId))")
+      < conversationWorkspace.indexOf("target.scrollIntoView"),
+    "scroll must occur only after the canonical message element exists",
+  );
+  assert.match(conversationWorkspace, /addEventListener\("hashchange", revealExactMessage\)/);
+  assert.match(conversationWorkspace, /removeEventListener\("hashchange", revealExactMessage\)/);
+  assert.match(conversationWorkspace, /target\.dataset\.sourceTarget = "true"/);
+  assert.match(conversationStyles, /\.message:target/);
+  assert.match(conversationStyles, /\.message\[data-source-target="true"\]/);
+
+  assert.match(contextualAdd, /href=\{receipt\.sourceLineage\.href\}/);
+  assert.match(conversationWorkspace, /href=\{link\.href\}/);
+  for (const source of [conversationService, checkpointService, stewardshipService, inspectService]) {
+    assert.match(source, /messageAnchor(?:Fragment|Href)/);
+    assert.doesNotMatch(source, /#message-\$\{encodeURIComponent/);
+  }
 });
