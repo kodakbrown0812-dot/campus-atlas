@@ -184,8 +184,10 @@
   scroll-margin-top: 22px;
 }
 
-.message:target {
+.message:target,
+.message[data-source-target="true"] {
   border-color: #8aa6ff;
+  background: rgba(77, 124, 254, .12);
   box-shadow: 0 0 0 3px rgba(77, 124, 254, .14);
 }
 

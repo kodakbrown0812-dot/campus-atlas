@@ -1,8 +1,9 @@
 import { all, first, parseJson, requireCase, requireConversation, Row } from "./slice3-support";
 import { reasoningHealthForConversation } from "./reasoning-health";
+import { messageAnchorHref } from "../shared/message-anchors";
 
 function messageHref(projectId: string, conversationId: unknown, messageId: string) {
-  return `/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(String(conversationId))}#message-${encodeURIComponent(messageId)}`;
+  return messageAnchorHref(projectId, String(conversationId), messageId);
 }
 
 function eventView(projectId: string, row: Row) {

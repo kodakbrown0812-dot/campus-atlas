@@ -1,5 +1,6 @@
 import { canonicalId } from "./canonical-records";
 import { sha256 } from "./transcript-import";
+import { messageAnchorHref } from "../shared/message-anchors";
 import {
   assertId,
   first,
@@ -478,7 +479,7 @@ export async function contextualAdd(
         messageId: String(sourceSpan.messageId),
         start: Number(sourceSpan.start),
         end: Number(sourceSpan.end),
-        href: `/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(String(record.conversation_id))}#message-${encodeURIComponent(String(sourceSpan.messageId))}`,
+        href: messageAnchorHref(projectId, String(record.conversation_id), String(sourceSpan.messageId)),
       }
     : null;
   return {
