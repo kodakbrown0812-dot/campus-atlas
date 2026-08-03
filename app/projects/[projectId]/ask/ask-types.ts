@@ -54,6 +54,7 @@ export type TreatmentItem = {
   governanceEventId?: string | null;
   counterevidenceIds?: string[];
   protectedRole?: string | null;
+  packetEligibleProtected?: boolean;
   ranking?: {
     evidenceStrength?: number;
   };

@@ -1,5 +1,9 @@
 import { canonicalId } from "./canonical-records";
 import { discoverAndRankCandidates, RankedCandidate, Treatment } from "./candidate-ranking";
+import {
+  isLineageOnlyPacketAncestor,
+  isPacketEligibleProtectedItem,
+} from "./packet-eligibility";
 import { interpretTask, TaskInterpretation } from "./roadway-service";
 import { sha256 } from "./transcript-import";
 import {
@@ -168,8 +172,10 @@ function minimumSafeItems(items: PacketItemSnapshot[]) {
       && item.protectedRole !== "conflict"
     ))
     .slice(0, 1);
-  const protectedItems = items.filter((item) => item.protectedRole !== null && item.protectedRole !== "required_check");
-  const strongestChallenge = items.find((item) => item.protectedRole === "challenge");
+  const protectedItems = items.filter(isPacketEligibleProtectedItem);
+  const strongestChallenge = items.find((item) => (
+    item.protectedRole === "challenge" && isPacketEligibleProtectedItem(item)
+  ));
   const map = new Map<string, PacketItemSnapshot>();
   for (const item of [...uses, ...protectedItems, ...(strongestChallenge ? [strongestChallenge] : [])]) {
     map.set(`${item.sourceType}:${item.sourceId}`, item);
@@ -233,7 +239,10 @@ function renderPacket(
   const optional = [
     ...useItems,
     ...considerItems,
-    ...excludedItems.filter((item) => /rejected|superseded|stale|scope|mechanism/i.test(item.reason)),
+    ...excludedItems.filter((item) => (
+      !isLineageOnlyPacketAncestor(item)
+      && /rejected|superseded|stale|scope|mechanism/i.test(item.reason)
+    )),
   ].filter((item) => !alreadyIncluded.has(`${item.sourceType}:${item.sourceId}`));
   const includedOptional: PacketItemSnapshot[] = [];
   for (const item of optional) {
@@ -262,10 +271,35 @@ function renderPacket(
 }
 
 function treatmentSummary(items: PacketItemSnapshot[]) {
+  const snapshot = (item: PacketItemSnapshot) => ({
+    ...item,
+    packetEligibleProtected: isPacketEligibleProtectedItem(item),
+  });
   return {
-    Use: items.filter((item) => item.treatment === "Use"),
-    Consider: items.filter((item) => item.treatment === "Consider"),
-    Exclude: items.filter((item) => item.treatment === "Exclude"),
+    Use: items.filter((item) => item.treatment === "Use").map(snapshot),
+    Consider: items.filter((item) => item.treatment === "Consider").map(snapshot),
+    Exclude: items.filter((item) => item.treatment === "Exclude").map(snapshot),
+  };
+}
+
+function storedTreatmentSummary(value: unknown) {
+  const parsed = value && typeof value === "object"
+    ? value as Record<string, unknown>
+    : {};
+  const treatment = (name: Treatment) => (
+    Array.isArray(parsed[name])
+      ? parsed[name]
+        .filter((item): item is PacketItemSnapshot => Boolean(item && typeof item === "object"))
+        .map((item) => ({
+          ...item,
+          packetEligibleProtected: isPacketEligibleProtectedItem(item),
+        }))
+      : []
+  );
+  return {
+    Use: treatment("Use"),
+    Consider: treatment("Consider"),
+    Exclude: treatment("Exclude"),
   };
 }
 
@@ -341,6 +375,14 @@ async function packetDetail(db: D1Database, projectId: string, packetId: string)
     ).bind(projectId, packetId)),
   ]);
   if (!receipt) throw new Error("Packet receipt not found.");
+  const receiptTreatmentSummary = storedTreatmentSummary(
+    parseJson(receipt.candidate_treatment_summary, {}),
+  );
+  const receiptItems = new Map(
+    Object.values(receiptTreatmentSummary).flat().map((item) => (
+      [`${item.sourceType}:${item.sourceId}`, item]
+    )),
+  );
   return {
     packet: {
       id: packet.id,
@@ -361,19 +403,25 @@ async function packetDetail(db: D1Database, projectId: string, packetId: string)
       compilationError: packet.compilation_error,
       createdAt: packet.created_at,
     },
-    items: items.map((item) => ({
-      id: item.id,
-      sourceType: item.source_type,
-      sourceId: item.source_id,
-      sourceVersionId: item.source_version_id,
-      treatment: item.treatment,
-      representation: item.representation_type,
-      scope: item.scope,
-      authority: item.authority_state,
-      freshness: item.freshness,
-      reason: item.inclusion_reason || item.exclusion_reason,
-      sequenceOrder: item.sequence_order,
-    })),
+    items: items.map((item) => {
+      const receiptItem = receiptItems.get(`${item.source_type}:${item.source_id}`);
+      return {
+        id: item.id,
+        sourceType: item.source_type,
+        sourceId: item.source_id,
+        sourceVersionId: item.source_version_id,
+        treatment: item.treatment,
+        representation: item.representation_type,
+        scope: item.scope,
+        authority: item.authority_state,
+        freshness: item.freshness,
+        reason: item.inclusion_reason || item.exclusion_reason,
+        sequenceOrder: item.sequence_order,
+        protectedRole: receiptItem?.protectedRole ?? null,
+        packetEligibleProtected: receiptItem?.packetEligibleProtected ?? false,
+        metadata: receiptItem?.metadata ?? {},
+      };
+    }),
     receipt: {
       id: receipt.id,
       packetId: receipt.packet_id,
@@ -382,7 +430,7 @@ async function packetDetail(db: D1Database, projectId: string, packetId: string)
       selectedRoadwayReason: receipt.selected_roadway_reason,
       alternatives: parseJson(receipt.alternative_roadways_considered, []),
       supportingModules: parseJson(packet.supporting_modules, []),
-      treatmentSummary: parseJson(receipt.candidate_treatment_summary, {}),
+      treatmentSummary: receiptTreatmentSummary,
       governanceCauses: parseJson(receipt.governance_causes, []),
       freshness: parseJson(receipt.freshness_summary, {}),
       inferenceDisclosure: receipt.inference_disclosure,
@@ -620,9 +668,15 @@ export async function previewPacketCandidates(
   const budgetExcluded = rendered.candidates.filter((item) => (
     item.treatment === "Exclude" && item.reason.startsWith("Excluded by the ")
   ));
-  const strongestChallenge = rendered.candidates.find(
-    (item) => item.protectedRole === "challenge",
-  ) || null;
+  const strongestChallenge = rendered.candidates.find((item) => (
+    item.protectedRole === "challenge" && isPacketEligibleProtectedItem(item)
+  )) || null;
+  const protectedCorrections = rendered.candidates.filter((item) => (
+    item.protectedRole === "correction" && isPacketEligibleProtectedItem(item)
+  ));
+  const protectedConflicts = rendered.candidates.filter((item) => (
+    item.protectedRole === "conflict" && isPacketEligibleProtectedItem(item)
+  ));
   const state = rendered.error?.startsWith("required_live_state_missing:")
     ? "missing_required_state"
     : rendered.error?.startsWith("minimum_safe_packet_exceeds_budget:")
@@ -644,20 +698,14 @@ export async function previewPacketCandidates(
       lineageRecordsRetained: rendered.candidates.filter(
         (item) => item.metadata?.lineageOnly === true,
       ).length,
-      protectedCorrectionsRetained: rendered.candidates.filter(
-        (item) => item.protectedRole === "correction" && item.treatment !== "Exclude",
-      ).length,
+      protectedCorrectionsRetained: protectedCorrections.length,
       strongestChallengeRetained: Boolean(
         strongestChallenge && strongestChallenge.treatment !== "Exclude",
       ),
     },
     requiredChecks: checks,
-    protectedCorrections: rendered.candidates.filter(
-      (item) => item.protectedRole === "correction",
-    ),
-    protectedConflicts: rendered.candidates.filter(
-      (item) => item.protectedRole === "conflict",
-    ),
+    protectedCorrections,
+    protectedConflicts,
     strongestChallenge,
     importantExclusions: summary.Exclude.filter((item) => (
       /rejected|retired|superseded|stale|scope|project|mechanism|budget/i.test(item.reason)
