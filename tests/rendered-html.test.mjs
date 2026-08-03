@@ -3767,6 +3767,175 @@ test("Slice 6C previews server-owned candidate treatments without creating a pac
   );
 });
 
+test("Dogfood preview uses canonical case context and collapses governed lineage without mutation", async () => {
+  const worker = await builtWorker("dogfood-case-aware-lineage-treatment");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Engine");
+  const seeded = await seedSlice3Case(
+    worker,
+    DB,
+    "case-aware-lineage",
+    ["evidence", "correction", "challenge"],
+    [
+      "Wait for sustained territory, credible chance creation, and controlled transition risk before entering live on a soccer favorite.",
+      "If the live price exceeds a preset maximum before those signals appear, pass rather than chase; the confirmation rule remains provisional.",
+      "A genuine counterexample shows that early territory can occur without credible chance creation.",
+    ],
+  );
+  const canonicalObjective = "Develop a repeatable rule for deciding when to enter live on a soccer favorite by balancing early control signals against the risk of the price getting worse.";
+  DB.database.prepare("UPDATE cases SET objective = ? WHERE id = ? AND project_id = 'sports'").run(
+    canonicalObjective,
+    seeded.caseId,
+  );
+  const wrongCase = await seedSlice3Case(worker, DB, "wrong-case", ["evidence"]);
+  const checkpoint = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "dogfood-case-lineage-checkpoint",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
+      findingCandidates: [{
+        findingType: "mechanism_recognition",
+        sourceEventIds: [seeded.events[0].id, seeded.events[1].id],
+        proposalStatement: "Atlas provisional live-entry wording.",
+        proposedScope: "local",
+        conditions: ["Use only for this soccer live-entry case."],
+        exclusions: ["Do not treat the unresolved confirmation window as settled."],
+        supportingEvidence: [seeded.events[0].id, seeded.events[1].id],
+        counterevidence: [seeded.events[2].id],
+        uncertainty: "The confirmation window remains provisional.",
+        reasonForSurfacing: "The selected sources support one bounded live-entry consequence.",
+        expectedRetrievalEffect: "No effect until Cody governs the reviewed wording.",
+      }],
+    },
+  });
+  assert.equal(checkpoint.response.status, 201, JSON.stringify(checkpoint.value));
+  const finding = checkpoint.value.findings[0];
+  const governedStatement = "Before entering live on a soccer favorite, require sustained territory, credible chance creation, and controlled transition risk. If the price exceeds a preset maximum before those signals appear, pass rather than chase. The confirmation rule remains provisional until we determine whether it should be primarily time-based, game-state-based, or a combination of both.";
+  const revised = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "dogfood-case-lineage-revise",
+      body: {
+        action: "revise",
+        actorId: "cody",
+        sourceVersionId: finding.currentVersionId,
+        reviewedStatement: governedStatement,
+        scope: "local",
+        reason: "Preserve the useful local rule and its unresolved confirmation window.",
+      },
+    },
+  );
+  assert.equal(revised.response.status, 201);
+  const approved = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "dogfood-case-lineage-approve",
+      body: {
+        action: "approve",
+        actorId: "cody",
+        sourceVersionId: revised.value.record.currentVersionId,
+        scope: "local",
+        reason: "Approve Cody's final reviewed wording for this case only.",
+      },
+    },
+  );
+  assert.equal(approved.response.status, 201);
+  const mechanismId = approved.value.mechanism.id;
+  const task = "Compare the live-entry options for a soccer favorite and identify the strongest decision rule.";
+  const packetCountBefore = DB.database.prepare("SELECT COUNT(*) AS count FROM packets WHERE project_id = 'sports'").get().count;
+  const preview = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/candidates", {
+    method: "POST",
+    body: {
+      task,
+      caseId: seeded.caseId,
+      caseObjective: "Injected client objective about an unrelated baseball payroll task.",
+      roadwayOverride: "broad-lock-finding",
+      tokenBudget: 1600,
+    },
+  });
+  assert.equal(preview.response.status, 200, JSON.stringify(preview.value));
+  assert.equal(preview.value.packetCreated, false);
+  assert.equal(preview.value.interpretation.literalRequest, task);
+  assert.equal(preview.value.interpretation.caseObjective, canonicalObjective);
+  assert.equal(preview.value.interpretation.caseContextUsedForMatching, true);
+  assert.equal(preview.value.treatmentSummary.Use.length, 1);
+  const mechanism = preview.value.treatmentSummary.Use[0];
+  assert.equal(mechanism.sourceId, mechanismId);
+  assert.equal(mechanism.statement, governedStatement);
+  assert.equal(mechanism.authority, "approved_local");
+  assert.equal(mechanism.caseId, seeded.caseId);
+  assert.equal(mechanism.ranking.independentRepetition, 1);
+
+  const representedEventIds = new Set([seeded.events[0].id, seeded.events[1].id]);
+  const checkpointNodeIds = DB.database.prepare(
+    `SELECT c.reasoning_node_id, v.source_event_ids
+     FROM checkpoint_reasoning_nodes c
+     JOIN reasoning_nodes n ON n.id = c.reasoning_node_id
+     JOIN reasoning_node_versions v ON v.id = n.current_version_id
+     WHERE c.checkpoint_id = ? ORDER BY c.selection_order`,
+  ).all(finding.checkpointId)
+    .filter((row) => JSON.parse(row.source_event_ids).some((id) => representedEventIds.has(id)))
+    .map((row) => row.reasoning_node_id);
+  const ancestorIds = new Set([
+    finding.id,
+    ...checkpointNodeIds,
+    seeded.events[0].id,
+    seeded.events[1].id,
+  ]);
+  const ancestors = Object.values(preview.value.treatmentSummary).flat()
+    .filter((item) => ancestorIds.has(item.sourceId));
+  assert.equal(ancestors.length, ancestorIds.size);
+  assert.ok(ancestors.every((item) => item.treatment === "Exclude"));
+  assert.ok(ancestors.every((item) => item.metadata.lineageOnly === true), JSON.stringify(ancestors, null, 2));
+  assert.ok(ancestors.every((item) => item.metadata.representedByMechanismId === mechanismId));
+  assert.ok(ancestors.every((item) => item.ranking.independentRepetition === 0));
+  assert.ok(ancestors.every((item) => /retained for lineage and audit/i.test(item.reason)));
+  assert.equal(preview.value.treatmentSummary.Consider.some((item) => ancestorIds.has(item.sourceId)), false);
+  assert.equal(preview.value.candidateSummary.lineageRecordsRetained, ancestorIds.size);
+  const challenge = preview.value.treatmentSummary.Consider.find((item) => item.sourceId === seeded.events[2].id);
+  assert.ok(challenge);
+  assert.match(challenge.reason, /counterevidence|challenge/i);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets WHERE project_id = 'sports'").get().count, packetCountBefore);
+
+  for (const body of [
+    { task, roadwayOverride: "broad-lock-finding" },
+    { task, caseId: wrongCase.caseId, roadwayOverride: "broad-lock-finding" },
+    { task: "Compare the strongest baseball payroll accounting option.", caseId: seeded.caseId, roadwayOverride: "broad-lock-finding" },
+  ]) {
+    const result = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/candidates", {
+      method: "POST",
+      body: { ...body, tokenBudget: 1600 },
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(
+      result.value.treatmentSummary.Use.some((item) => item.sourceId === mechanismId),
+      false,
+    );
+    if (body.caseId === seeded.caseId) {
+      assert.equal(result.value.interpretation.caseContextUsedForMatching, false);
+    }
+  }
+
+  const isolated = await slice2Request(worker, DB, "/api/v1/projects/hockey/reconstruction/candidates", {
+    method: "POST",
+    body: { task, roadwayOverride: "broad-lock-finding", tokenBudget: 1600 },
+  });
+  assert.equal(isolated.response.status, 200);
+  assert.equal(
+    Object.values(isolated.value.treatmentSummary).flat().some((item) => item.sourceId === mechanismId),
+    false,
+  );
+});
+
 test("Slice 6C lists immutable packet and honest handoff history within project scope", async () => {
   const worker = await builtWorker("slice6c-history");
   const DB = await sqliteD1();

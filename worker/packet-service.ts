@@ -27,6 +27,8 @@ type PacketItemSnapshot = {
   scope: string;
   authority: string;
   freshness: string;
+  status?: string;
+  caseId?: string | null;
   reason: string;
   sequenceOrder: number;
   protectedRole: RankedCandidate["protectedRole"] | "required_check";
@@ -81,6 +83,8 @@ function candidateItem(candidate: RankedCandidate, sequenceOrder: number): Packe
     scope: candidate.scope,
     authority: candidate.authority,
     freshness: candidate.freshness,
+    status: candidate.status,
+    caseId: candidate.caseId,
     reason: candidate.reason,
     sequenceOrder,
     protectedRole: candidate.protectedRole,
@@ -574,6 +578,7 @@ export async function previewPacketCandidates(
         considered: 0,
         excluded: 0,
         redundantRecordsRemoved: 0,
+        lineageRecordsRetained: 0,
         protectedCorrectionsRetained: 0,
         strongestChallengeRetained: false,
       },
@@ -635,6 +640,9 @@ export async function previewPacketCandidates(
       excluded: summary.Exclude.length,
       redundantRecordsRemoved: rendered.candidates.filter(
         (item) => /redundan/i.test(item.reason),
+      ).length,
+      lineageRecordsRetained: rendered.candidates.filter(
+        (item) => item.metadata?.lineageOnly === true,
       ).length,
       protectedCorrectionsRetained: rendered.candidates.filter(
         (item) => item.protectedRole === "correction" && item.treatment !== "Exclude",

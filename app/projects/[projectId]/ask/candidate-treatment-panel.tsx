@@ -74,6 +74,7 @@ export default function CandidateTreatmentPanel({
         <div><span>Considered</span><strong>{preview.candidateSummary.considered}</strong></div>
         <div><span>Excluded</span><strong>{preview.candidateSummary.excluded}</strong></div>
         <div><span>Redundant removed</span><strong>{preview.candidateSummary.redundantRecordsRemoved}</strong></div>
+        <div><span>Lineage retained</span><strong>{preview.candidateSummary.lineageRecordsRetained}</strong></div>
         <div><span>Corrections retained</span><strong>{preview.candidateSummary.protectedCorrectionsRetained}</strong></div>
       </div>
 
