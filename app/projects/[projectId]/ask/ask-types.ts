@@ -14,6 +14,8 @@ export type Interpretation = {
   requestedDecisionOrOutput: string;
   activeProjectId: string;
   caseId: string | null;
+  caseObjective: string | null;
+  caseContextUsedForMatching: boolean;
   domain: string;
   taskOrMarketType: string;
   timeSensitivity: string;
@@ -72,6 +74,7 @@ export type CandidatePreview = {
     considered: number;
     excluded: number;
     redundantRecordsRemoved: number;
+    lineageRecordsRetained: number;
     protectedCorrectionsRetained: number;
     strongestChallengeRetained: boolean;
   };

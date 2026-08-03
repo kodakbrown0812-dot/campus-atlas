@@ -156,6 +156,7 @@ async function mechanismCandidates(db: D1Database, projectId: string): Promise<R
       counterevidenceIds,
       governanceEventId: row.governance_event_id ? String(row.governance_event_id) : null,
       metadata: {
+        sourceFindingId: row.source_finding_id,
         scopeConditions,
         exclusions: parseJson(row.exclusions, []),
         supportingCaseIds: supportingCases,
@@ -231,6 +232,8 @@ async function findingCandidates(db: D1Database, projectId: string): Promise<Raw
     counterevidenceIds: parseJson(row.counterevidence, []),
     governanceEventId: null,
     metadata: {
+      checkpointId: row.checkpoint_id,
+      sourceEventIds: parseJson(row.source_event_ids, []),
       findingType: row.finding_type,
       supportingEvidence: parseJson(row.supporting_evidence, []),
       createdBy: row.created_by,
@@ -361,13 +364,19 @@ async function liveStateCandidates(db: D1Database, projectId: string): Promise<R
   }));
 }
 
+function matchingContext(interpretation: TaskInterpretation) {
+  const caseContext = interpretation.caseContextUsedForMatching ? interpretation.caseObjective || "" : "";
+  return `${interpretation.literalRequest} ${interpretation.requiredReasoningMechanism} ${caseContext}`;
+}
+
 function discoverySignals(candidate: RawCandidate, interpretation: TaskInterpretation): DiscoverySignals {
-  const queryWords = distinct(words(`${interpretation.literalRequest} ${interpretation.requiredReasoningMechanism}`));
+  const context = matchingContext(interpretation);
+  const queryWords = distinct(words(context));
   const candidateWords = words(candidate.statement);
-  const queryFamilies = semanticFamilies(`${interpretation.literalRequest} ${interpretation.requiredReasoningMechanism}`);
+  const queryFamilies = semanticFamilies(context);
   const candidateFamilies = semanticFamilies(candidate.statement);
   const sharedFamilies = candidateFamilies.filter((family) => queryFamilies.includes(family)).length;
-  const queryEntities = entityTerms(interpretation.literalRequest);
+  const queryEntities = entityTerms(context);
   const candidateEntities = entityTerms(candidate.statement);
   const entityHits = candidateEntities.filter((entity) => queryEntities.includes(entity)).length;
   const temporalFit = interpretation.timeSensitivity === "current"
@@ -552,6 +561,89 @@ function markRedundancy(candidates: RankedCandidate[]) {
   }
 }
 
+async function checkpointNodeIds(db: D1Database, projectId: string) {
+  const rows = await all<Row>(db.prepare(
+    `SELECT checkpoint_id, reasoning_node_id
+     FROM checkpoint_reasoning_nodes
+     WHERE project_id = ?`,
+  ).bind(projectId));
+  const byCheckpoint = new Map<string, string[]>();
+  for (const row of rows) {
+    const checkpointId = String(row.checkpoint_id);
+    const ids = byCheckpoint.get(checkpointId) || [];
+    ids.push(String(row.reasoning_node_id));
+    byCheckpoint.set(checkpointId, ids);
+  }
+  return byCheckpoint;
+}
+
+const LINEAGE_ONLY_REASON = "Represented by the approved governing mechanism; retained for lineage and audit, not counted as independent context.";
+
+function collapseGoverningLineage(
+  candidates: RankedCandidate[],
+  nodesByCheckpoint: Map<string, string[]>,
+) {
+  const byId = new Map(candidates.map((candidate) => [candidate.sourceId, candidate]));
+  for (const mechanism of candidates.filter((candidate) => (
+    candidate.sourceType === "Mechanism" && candidate.treatment === "Use"
+  ))) {
+    const sourceFindingId = typeof mechanism.metadata.sourceFindingId === "string"
+      ? mechanism.metadata.sourceFindingId
+      : null;
+    if (!sourceFindingId) continue;
+    const finding = byId.get(sourceFindingId);
+    if (!finding) continue;
+    const checkpointId = typeof finding.metadata.checkpointId === "string"
+      ? finding.metadata.checkpointId
+      : null;
+    const explicitSupportingNodeIds = (Array.isArray(mechanism.metadata.supportingNodeIds)
+      ? mechanism.metadata.supportingNodeIds
+      : []).filter((id): id is string => typeof id === "string");
+    const findingSourceEventIds = (Array.isArray(finding.metadata.sourceEventIds)
+      ? finding.metadata.sourceEventIds
+      : []).filter((id): id is string => typeof id === "string");
+    const findingSourceEvents = new Set(findingSourceEventIds);
+    const nodeIds = distinct([
+      ...explicitSupportingNodeIds,
+      ...(checkpointId ? nodesByCheckpoint.get(checkpointId) || [] : []),
+    ]).filter((nodeId) => {
+      if (explicitSupportingNodeIds.includes(nodeId)) return true;
+      const node = byId.get(nodeId);
+      const nodeSourceEvents = Array.isArray(node?.metadata.sourceEventIds)
+        ? node.metadata.sourceEventIds
+        : [];
+      return nodeSourceEvents.some((eventId) => (
+        typeof eventId === "string" && findingSourceEvents.has(eventId)
+      ));
+    });
+    const sourceEventIds = new Set<string>(findingSourceEventIds);
+    for (const nodeId of nodeIds) {
+      const node = byId.get(nodeId);
+      if (!node) continue;
+      for (const eventId of Array.isArray(node.metadata.sourceEventIds) ? node.metadata.sourceEventIds : []) {
+        if (typeof eventId === "string") sourceEventIds.add(eventId);
+      }
+    }
+    const ancestorIds = distinct([sourceFindingId, ...nodeIds, ...sourceEventIds]);
+    mechanism.metadata = { ...mechanism.metadata, representedAncestorIds: ancestorIds };
+    for (const ancestorId of ancestorIds) {
+      const ancestor = byId.get(ancestorId);
+      if (!ancestor || ancestor.sourceId === mechanism.sourceId) continue;
+      if (ancestor.protectedRole === "challenge" || ancestor.protectedRole === "conflict") continue;
+      if (mechanism.counterevidenceIds.includes(ancestor.sourceId)) continue;
+      ancestor.treatment = "Exclude";
+      ancestor.reason = LINEAGE_ONLY_REASON;
+      ancestor.ranking.independentRepetition = 0;
+      ancestor.ranking.redundancy = 1;
+      ancestor.metadata = {
+        ...ancestor.metadata,
+        lineageOnly: true,
+        representedByMechanismId: mechanism.sourceId,
+      };
+    }
+  }
+}
+
 function conflictPair(left: RankedCandidate, right: RankedCandidate) {
   if (left.sourceType !== "Mechanism" || right.sourceType !== "Mechanism") return false;
   if (left.treatment !== "Use" || right.treatment !== "Use") return false;
@@ -611,8 +703,10 @@ export async function discoverAndRankCandidates(
     artifactCandidates(db, projectId),
     liveStateCandidates(db, projectId),
   ])).flat();
+  const nodesByCheckpoint = await checkpointNodeIds(db, projectId);
   const candidates = raw.map((candidate) => rankCandidate(candidate, interpretation));
   markRedundancy(candidates);
+  collapseGoverningLineage(candidates, nodesByCheckpoint);
   preserveReferencedChallenges(candidates);
   preserveConflicts(candidates);
   candidates.sort(rankingOrder);

@@ -304,6 +304,8 @@ export type TaskInterpretation = {
   requestedDecisionOrOutput: string;
   activeProjectId: string;
   caseId: string | null;
+  caseObjective: string | null;
+  caseContextUsedForMatching: boolean;
   domain: string;
   taskOrMarketType: string;
   timeSensitivity: "current" | "historical" | "not_time_sensitive";
@@ -339,6 +341,26 @@ function matches(text: string, terms: string[]) {
   return terms.filter((term) => text.includes(term));
 }
 
+const CASE_CONTEXT_STOP_WORDS = new Set([
+  "and", "are", "for", "from", "into", "that", "the", "this", "when", "with",
+  "compare", "develop", "identify", "option", "options", "rule", "strongest",
+]);
+
+function boundedCaseContextApplies(task: string, objective: string | null) {
+  if (!objective) return false;
+  const terms = (value: string) => new Set(
+    (value.toLowerCase().match(/[a-z0-9]+/g) || [])
+      .filter((term) => term.length >= 4 && !CASE_CONTEXT_STOP_WORDS.has(term)),
+  );
+  const taskTerms = terms(task);
+  const objectiveTerms = terms(objective);
+  let shared = 0;
+  for (const term of taskTerms) {
+    if (objectiveTerms.has(term)) shared += 1;
+  }
+  return shared >= 2;
+}
+
 function requestedOutput(task: string) {
   if (/\b(explain|why|postmortem|post-mortem|audit)\b/i.test(task)) return "explanation or audit";
   if (/\b(compare|rank|best|strongest|which)\b/i.test(task)) return "comparison and selection";
@@ -365,12 +387,14 @@ export async function interpretTask(
 ): Promise<TaskInterpretation> {
   const task = requiredString(input.task, "Task");
   const caseId = optionalString(input.caseId);
+  let caseObjective: string | null = null;
   if (caseId) {
     assertId(caseId, "case ID");
     const record = await first<Row>(db.prepare(
-      "SELECT id FROM cases WHERE id = ? AND project_id = ? LIMIT 1",
+      "SELECT id, objective FROM cases WHERE id = ? AND project_id = ? LIMIT 1",
     ).bind(caseId, projectId));
     if (!record) throw new Error("Case not found.");
+    caseObjective = String(record.objective);
   }
   const registry = await ensureRoadwayRegistry(db, projectId);
   const bySlug = new Map(registry.map((roadway) => [roadway.slug, roadway]));
@@ -447,12 +471,15 @@ export async function interpretTask(
     : primary
       ? `Selected from explicit intent and mechanism signals: ${selectedSignals.join(", ")}.`
       : "Materially different roadway interpretations remain; compilation requires clarification or an explicit current-run override.";
+  const caseContextUsedForMatching = boundedCaseContextApplies(task, caseObjective);
 
   return {
     literalRequest: task,
     requestedDecisionOrOutput: optionalString(input.requestedDecisionOrOutput) || requestedOutput(task),
     activeProjectId: projectId,
     caseId,
+    caseObjective,
+    caseContextUsedForMatching,
     domain,
     taskOrMarketType,
     timeSensitivity: current ? "current" : historical ? "historical" : "not_time_sensitive",
