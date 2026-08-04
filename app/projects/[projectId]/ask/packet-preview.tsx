@@ -39,7 +39,7 @@ export default function PacketPreview({
   const changedIds = new Set(differences.map((item) => String(item.sourceId || "")));
   const protectedUnchanged = Object.values(result.receipt.treatmentSummary)
     .flat()
-    .filter((item) => item.protectedRole && !changedIds.has(item.sourceId));
+    .filter((item) => item.packetEligibleProtected === true && !changedIds.has(item.sourceId));
 
   return (
     <section className={styles.stagePanel} aria-labelledby="packet-preview-title">

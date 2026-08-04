@@ -2766,9 +2766,11 @@ test("Slice 4 calibration treatments enforce mechanism, scope, authority, eviden
   );
   assert.equal(byId.get(challenge.id).treatment, expectations.strong_counterexample.expectedTreatment);
   assert.match(byId.get(challenge.id).reason, /counterevidence|challenge/i);
+  assert.equal(byId.get(challenge.id).packetEligibleProtected, true);
   for (const id of ["mechanism:conflict-include", "mechanism:conflict-exclude"]) {
     assert.equal(byId.get(id).treatment, expectations.conflicting_approved_mechanisms.expectedTreatment);
     assert.equal(byId.get(id).representation, expectations.conflicting_approved_mechanisms.expectedRepresentation);
+    assert.equal(byId.get(id).packetEligibleProtected, true);
   }
   assert.equal(byId.get(stale.value.snapshot.id).treatment, expectations.superseded_live_snapshot.expectedTreatment);
   assert.equal(byId.get(rejectedFindingId).treatment, expectations.rejected_resurfacing.expectedTreatment);
@@ -3031,6 +3033,7 @@ test("Slice 4 canonical reconstruction remains available beneath the final Ask w
   assert.match(interfaceSource, /reconstruction\/candidates/);
   assert.match(candidateSource, /canonical server results/);
   assert.match(packetSource, /same immutable packet response/i);
+  assert.match(packetSource, /packetEligibleProtected === true/);
   const slice4Source = await Promise.all([
     "roadway-service.ts",
     "candidate-ranking.ts",
@@ -3449,6 +3452,13 @@ test("Slice 5 causal receipt connects a comparable packet diff to the exact gove
   assert.equal(after.value.packet.priorComparablePacketId, before.value.packet.id);
   assert.ok(after.value.receipt.governanceCauses.some((cause) => cause.governanceEventId === governanceEventId));
   assert.ok(after.value.receipt.exactPacketDifference.some((change) => change.sourceId === mechanism.id));
+  const independentCorrection = Object.values(after.value.receipt.treatmentSummary).flat().find(
+    (item) => item.sourceId === seeded.events[1].id,
+  );
+  assert.ok(independentCorrection);
+  assert.equal(independentCorrection.treatment, "Consider");
+  assert.equal(independentCorrection.packetEligibleProtected, true);
+  assert.match(after.value.packet.compiledContent, /Cody corrected the scope: winning is not covering/i);
 
   const adapter = {
     fixtureType: "slice5_test_only",
@@ -3901,9 +3911,22 @@ test("Dogfood preview uses canonical case context and collapses governed lineage
   assert.ok(ancestors.every((item) => /retained for lineage and audit/i.test(item.reason)));
   assert.equal(preview.value.treatmentSummary.Consider.some((item) => ancestorIds.has(item.sourceId)), false);
   assert.equal(preview.value.candidateSummary.lineageRecordsRetained, ancestorIds.size);
+  const correctionLineage = ancestors.filter((item) => (
+    item.sourceId === seeded.events[1].id
+    || (
+      item.sourceType === "ReasoningNode"
+      && item.metadata.sourceEventIds.includes(seeded.events[1].id)
+    )
+  ));
+  assert.equal(correctionLineage.length, 2, JSON.stringify(correctionLineage, null, 2));
+  assert.ok(correctionLineage.every((item) => item.protectedRole === "correction"));
+  assert.ok(correctionLineage.every((item) => item.packetEligibleProtected === false));
+  assert.equal(preview.value.protectedCorrections.length, 0);
+  assert.equal(preview.value.candidateSummary.protectedCorrectionsRetained, 0);
   const challenge = preview.value.treatmentSummary.Consider.find((item) => item.sourceId === seeded.events[2].id);
   assert.ok(challenge);
   assert.match(challenge.reason, /counterevidence|challenge/i);
+  assert.equal(challenge.packetEligibleProtected, true);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets WHERE project_id = 'sports'").get().count, packetCountBefore);
 
   for (const body of [
@@ -3934,6 +3957,77 @@ test("Dogfood preview uses canonical case context and collapses governed lineage
     Object.values(isolated.value.treatmentSummary).flat().some((item) => item.sourceId === mechanismId),
     false,
   );
+
+  const packet = await createSlice4Packet(worker, DB, {
+    task,
+    caseId: seeded.caseId,
+    roadwayOverride: "broad-lock-finding",
+    tokenBudget: 1600,
+  }, "dogfood-lineage-protected-boundary-packet");
+  assert.equal(packet.response.status, 201, JSON.stringify(packet.value));
+  assert.equal(packet.value.packet.status, "compiled");
+  assert.equal(packet.value.packet.finalTokenCount, preview.value.estimatedFinalSize);
+  const packetExcluded = packet.value.receipt.treatmentSummary.Exclude.filter(
+    (item) => correctionLineage.some((ancestor) => ancestor.sourceId === item.sourceId),
+  );
+  assert.equal(packetExcluded.length, 2);
+  assert.ok(packetExcluded.every((item) => item.packetEligibleProtected === false));
+  assert.ok(packetExcluded.every((item) => item.metadata.lineageOnly === true));
+  assert.ok(packetExcluded.every((item) => item.metadata.representedByMechanismId === mechanismId));
+  for (const ancestor of correctionLineage) {
+    const packetItem = packet.value.items.find((item) => item.sourceId === ancestor.sourceId);
+    assert.ok(packetItem);
+    assert.equal(packetItem.treatment, "Exclude");
+    assert.equal(packetItem.packetEligibleProtected, false);
+    assert.equal(packetItem.metadata.lineageOnly, true);
+    assert.equal(packet.value.packet.compiledContent.includes(ancestor.statement), false);
+  }
+  assert.equal(packet.value.packet.compiledContent.includes("retained for lineage and audit"), false);
+  assert.match(packet.value.packet.compiledContent, /A genuine counterexample shows that early territory/i);
+
+  const handoff = await createSlice5Handoff(
+    worker,
+    DB,
+    "sports",
+    {
+      packetId: packet.value.packet.id,
+      provider: "test",
+      model: "atlas-test-receiver-v1",
+      actorId: "cody",
+    },
+    "dogfood-lineage-protected-boundary-handoff",
+    {
+      ATLAS_TEST_RECEIVING_MODEL_ADAPTER: {
+        fixtureType: "slice5_test_only",
+        async execute() {
+          return {
+            providerResponseId: "response:dogfood-lineage-boundary",
+            model: "atlas-test-receiver-v1",
+            answerText: "Test-only lineage boundary answer.",
+            completedAt: "2026-08-03T23:00:00.000Z",
+            additionalLiveRetrieval: {
+              performed: false,
+              requested: false,
+              retrievedAt: null,
+              tools: [],
+              reliedOnNewerStateThanPacket: false,
+            },
+            metadata: { fixture: true },
+          };
+        },
+      },
+    },
+  );
+  assert.equal(handoff.response.status, 201, JSON.stringify(handoff.value));
+  assert.equal(handoff.value.receipt.corrections.length, 0);
+  assert.ok(handoff.value.receipt.strongestChallenges.some(
+    (item) => item.sourceId === seeded.events[2].id,
+  ));
+  const handoffExcluded = handoff.value.receipt.treatmentSummary.Exclude.filter(
+    (item) => correctionLineage.some((ancestor) => ancestor.sourceId === item.sourceId),
+  );
+  assert.equal(handoffExcluded.length, 2);
+  assert.ok(handoffExcluded.every((item) => item.metadata.lineageOnly === true));
 });
 
 test("Slice 6C lists immutable packet and honest handoff history within project scope", async () => {

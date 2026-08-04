@@ -1,5 +1,6 @@
 import { canonicalId } from "./canonical-records";
 import { getPacket } from "./packet-service";
+import { isPacketEligibleProtectedItem } from "./packet-eligibility";
 import {
   AdditionalLiveRetrieval,
   buildReceivingModelInput,
@@ -120,8 +121,12 @@ function receiptSnapshot(
     handoffStatus: currentStatus(events),
     lineage: parseJson(row.lineage, []),
     treatmentSummary,
-    strongestChallenges: treatmentItems.filter((item) => item.protectedRole === "challenge"),
-    corrections: treatmentItems.filter((item) => item.protectedRole === "correction"),
+    strongestChallenges: treatmentItems.filter((item) => (
+      item.protectedRole === "challenge" && isPacketEligibleProtectedItem(item)
+    )),
+    corrections: treatmentItems.filter((item) => (
+      item.protectedRole === "correction" && isPacketEligibleProtectedItem(item)
+    )),
     authorityAndScope: parseJson(row.authority_and_scope, {}),
     freshness: parseJson(row.freshness_summary, {}),
     inferenceDisclosure: row.inference_disclosure,
