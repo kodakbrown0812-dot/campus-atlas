@@ -695,6 +695,50 @@ function openApi(origin: string) {
     info: { title: "Campus Atlas Actions", version: "4.6.0", description: "Project-scoped governed context retrieval and proposed writes for ChatGPT. Browser and sidecar share one canonical workspace; models never grant their own promotion authority." },
     servers: [{ url: origin }],
     paths: {
+      "/api/v1/projects/{projectId}/continuity/check": {
+        post: {
+          operationId: "checkCanonicalContinuity",
+          tags: ["Canonical V1.7.1"],
+          summary: "Determine whether a task needs none, light, or full governed continuity",
+          description: "A read-only canonical façade. It creates no packet, receipt, handoff, answer, provider call, authority change, or retrieval-eligibility change.",
+          parameters: [{
+            name: "projectId",
+            in: "path",
+            required: true,
+            schema: { type: "string" },
+          }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ContinuityCheckRequest" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Non-mutating Need Gate and compact canonical continuity projection",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ContinuityCheckResponse" },
+                },
+              },
+            },
+            "400": {
+              description: "Invalid or client-authored canonical input",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalError" } } },
+            },
+            "404": {
+              description: "Project or case not found within the requested project",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalError" } } },
+            },
+            "500": {
+              description: "Canonical state or read-only roadway registry unavailable",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalError" } } },
+            },
+          },
+        },
+      },
       "/api/context": { post: { operationId: "buildContextPacket", summary: "Build the smallest useful context packet", requestBody: { required: true, content: { "application/json": { schema: tools[0].inputSchema } } }, responses: { "200": { description: "Inspectable context packet" } } } },
       "/api/blueprint": { get: { operationId: "getProjectBlueprint", summary: "Get a project reasoning blueprint", parameters: [{ name: "project", in: "query", required: true, schema: { type: "string" } }, { name: "workspaceId", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Project blueprint" } } } },
       "/api/precedents": { post: { operationId: "retrievePrecedents", summary: "Retrieve explainable precedents", requestBody: { required: true, content: { "application/json": { schema: tools[2].inputSchema } } }, responses: { "200": { description: "Ranked precedents" } } } },
@@ -702,6 +746,73 @@ function openApi(origin: string) {
       "/api/outcomes": { post: { operationId: "recordOutcome", summary: "Record reality evidence", requestBody: { required: true, content: { "application/json": { schema: tools[5].inputSchema } } }, responses: { "201": { description: "Evidence event and action receipt" } } } },
       "/api/events": { post: { operationId: "submitCaseEvent", summary: "Attach evidence, a correction, or proposed learning to a Case", requestBody: { required: true, content: { "application/json": { schema: tools[6].inputSchema } } }, responses: { "201": { description: "Governed event or proposed learning plus receipt" } } } },
       "/api/receipts": { get: { operationId: "getAtlasReceipt", summary: "Inspect an action receipt", parameters: [{ name: "id", in: "query", required: true, schema: { type: "string" } }, { name: "workspaceId", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Action receipt" } } } },
+    },
+    components: {
+      schemas: {
+        ContinuityCheckRequest: {
+          type: "object",
+          additionalProperties: false,
+          required: ["task"],
+          properties: {
+            task: { type: "string", minLength: 1, description: "Exact current caller task; remains controlling." },
+            requestedOutput: { type: "string", minLength: 1 },
+            caseId: { type: "string", minLength: 3 },
+            roadwayOverride: { type: "string", minLength: 3, description: "Current-run override only; never updates the registry." },
+            tokenBudget: { type: "integer", enum: [400, 800, 1600], default: 800 },
+          },
+        },
+        ContinuityCheckResponse: {
+          type: "object",
+          required: ["apiVersion", "projectId", "literalTask", "need", "status", "continuity", "freshness", "budget", "effects", "diagnostics", "next"],
+          properties: {
+            apiVersion: { type: "string", const: "v1.7.1" },
+            projectId: { type: "string" },
+            caseId: { type: ["string", "null"] },
+            literalTask: { type: "string" },
+            need: {
+              type: "object",
+              required: ["level", "reasonCodes", "explanation"],
+              properties: {
+                level: { type: "string", enum: ["none", "light", "full"] },
+                reasonCodes: { type: "array", items: { type: "string" } },
+                explanation: { type: "string" },
+              },
+            },
+            status: {
+              type: "string",
+              enum: ["not_needed", "light_context_available", "ready", "clarification_required", "missing_required_state", "unsafe_under_selected_budget"],
+            },
+            interpretation: { type: ["object", "null"] },
+            roadway: { type: "object" },
+            compactCapsule: { type: ["object", "null"] },
+            continuity: { type: "object" },
+            freshness: { type: "object" },
+            budget: { type: "object" },
+            treatmentCounts: { type: "object" },
+            effects: {
+              type: "object",
+              required: ["packetCreated", "providerCallPerformed", "authorityChanged", "canonicalMutationPerformed"],
+              properties: {
+                packetCreated: { type: "boolean", const: false },
+                receiptCreated: { type: "boolean", const: false },
+                handoffCreated: { type: "boolean", const: false },
+                answerCreated: { type: "boolean", const: false },
+                providerCallPerformed: { type: "boolean", const: false },
+                authorityChanged: { type: "boolean", const: false },
+                retrievalEligibilityChanged: { type: "boolean", const: false },
+                canonicalMutationPerformed: { type: "boolean", const: false },
+              },
+            },
+            diagnostics: { type: "object" },
+            next: { type: "object" },
+          },
+        },
+        CanonicalError: {
+          type: "object",
+          required: ["error"],
+          properties: { error: { type: "string" } },
+        },
+      },
     },
   };
 }
