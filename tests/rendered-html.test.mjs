@@ -4962,3 +4962,393 @@ test("Exact-source navigation uses one reserved-character-safe message anchor wi
     assert.doesNotMatch(source, /#message-\$\{encodeURIComponent/);
   }
 });
+
+async function initializeRoadways(worker, DB, projectId) {
+  const result = await slice2Request(worker, DB, `/api/v1/projects/${projectId}/roadways`);
+  assert.equal(result.response.status, 200, JSON.stringify(result.value));
+  assert.equal(result.value.roadways.length, 3);
+  return result.value.roadways;
+}
+
+async function continuityRequest(worker, DB, projectId, body) {
+  const response = await worker.fetch(new Request(
+    `http://localhost/api/v1/projects/${encodeURIComponent(projectId)}/continuity/check`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  ), {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "configured-but-not-supplied-for-read",
+  }, ctx);
+  return { response, value: await response.json() };
+}
+
+function canonicalMutationCounts(DB) {
+  const tables = [
+    "projects",
+    "conversations",
+    "conversation_imports",
+    "messages",
+    "events",
+    "cases",
+    "case_event_attachments",
+    "reasoning_nodes",
+    "reasoning_node_versions",
+    "checkpoints",
+    "checkpoint_reasoning_nodes",
+    "findings",
+    "finding_versions",
+    "mechanisms",
+    "mechanism_versions",
+    "governance_events",
+    "roadways",
+    "roadway_versions",
+    "live_state_snapshots",
+    "packets",
+    "packet_items",
+    "receipts",
+    "handoffs",
+    "handoff_lifecycle_events",
+    "handoff_answers",
+    "handoff_receipts",
+  ];
+  return Object.fromEntries(tables.map((table) => [
+    table,
+    DB.database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count,
+  ]));
+}
+
+async function createContinuityCase(worker, DB, projectId, suffix, objective) {
+  const conversation = await slice2Request(worker, DB, `/api/v1/projects/${projectId}/conversations`, {
+    method: "POST",
+    body: { title: `Continuity ${suffix}` },
+  });
+  assert.equal(conversation.response.status, 201, JSON.stringify(conversation.value));
+  const caseResult = await slice2Request(worker, DB, `/api/v1/projects/${projectId}/cases`, {
+    method: "POST",
+    body: {
+      objective,
+      conversationId: conversation.value.conversation.id,
+      makeActive: true,
+      actorId: "cody",
+    },
+  });
+  assert.equal(caseResult.response.status, 201, JSON.stringify(caseResult.value));
+  return {
+    conversationId: conversation.value.conversation.id,
+    caseId: caseResult.value.case.id,
+  };
+}
+
+test("V1.7.1 continuity/check exposes the additive OpenAPI contract without relabeling V4.6", async () => {
+  const worker = await builtWorker("v171-continuity-openapi");
+  const DB = memoryD1();
+  const response = await worker.fetch(
+    new Request("http://localhost/.well-known/openapi.json"),
+    { DB, ASSETS: assets },
+    ctx,
+  );
+  assert.equal(response.status, 200);
+  const spec = await response.json();
+  assert.equal(spec.info.version, "4.6.0");
+  const operation = spec.paths["/api/v1/projects/{projectId}/continuity/check"].post;
+  assert.equal(operation.operationId, "checkCanonicalContinuity");
+  assert.equal(
+    operation.requestBody.content["application/json"].schema.$ref,
+    "#/components/schemas/ContinuityCheckRequest",
+  );
+  assert.deepEqual(
+    spec.components.schemas.ContinuityCheckRequest.properties.tokenBudget.enum,
+    [400, 800, 1600],
+  );
+  assert.deepEqual(
+    spec.components.schemas.ContinuityCheckResponse.properties.need.properties.level.enum,
+    ["none", "light", "full"],
+  );
+  assert.equal(
+    spec.components.schemas.ContinuityCheckResponse.properties.effects.properties.packetCreated.const,
+    false,
+  );
+});
+
+test("V1.7.1 continuity/check records deterministic outcomes for all five architecture stress cases", async () => {
+  const expected = {
+    broadBestBet: {
+      need: "full",
+      roadway: "Broad Lock-Finding",
+      status: "missing_required_state",
+      requiredChecks: 5,
+    },
+    upperAB: {
+      need: "full",
+      roadway: "Broad Lock-Finding",
+      governingMechanisms: 1,
+      gateState: ["current_schedule", "soreness_severity", "injury_status", "recent_load", "available_equipment"],
+    },
+    mobileCodex: {
+      need: "light",
+      candidatePreviewInvoked: false,
+      exactSourcesOpened: 0,
+    },
+    brewers: {
+      need: "full",
+      roadway: "Outcome / Postmortem",
+      representation: "Reconstructed",
+      historicalRawTranscriptStatus: "unavailable_cannot_truthfully_reconstruct",
+    },
+    soccer: {
+      need: "full",
+      roadway: "Broad Lock-Finding",
+      governingMechanisms: 1,
+      gateState: ["current_price", "game_state", "territory_signal", "chance_creation", "transition_risk"],
+    },
+  };
+
+  {
+    const worker = await builtWorker("v171-stress-broad-best-bet");
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    const before = canonicalMutationCounts(DB);
+    const result = await continuityRequest(worker, DB, "sports", { task: "Any best bets today?" });
+    assert.equal(result.response.status, 200, JSON.stringify(result.value));
+    assert.equal(result.value.need.level, expected.broadBestBet.need);
+    assert.equal(result.value.roadway.primary.name, expected.broadBestBet.roadway);
+    assert.equal(result.value.status, expected.broadBestBet.status);
+    assert.equal(result.value.continuity.requiredChecks, expected.broadBestBet.requiredChecks);
+    assert.deepEqual(result.value.freshness.missing.sort(), ["current_price", "market_availability", "participant_status"].sort());
+    assert.equal(result.value.effects.canonicalMutationPerformed, false);
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+
+  {
+    const worker = await builtWorker("v171-stress-upper-ab");
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "training", "Training Engine");
+    await initializeRoadways(worker, DB, "training");
+    const boundedCase = await createContinuityCase(
+      worker,
+      DB,
+      "training",
+      "upper-ab",
+      "Compare today's Upper A and Upper B training options while preserving their distinct purpose.",
+    );
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:upper-ab-purpose",
+      projectId: "training",
+      statement: "Compare training options while preserving the distinct purpose of Upper A and Upper B; sore traps constrain today's selection without rewriting the program.",
+      authority: "approved_local",
+      supportingCaseIds: [boundedCase.caseId],
+    });
+    const before = canonicalMutationCounts(DB);
+    const result = await continuityRequest(worker, DB, "training", {
+      task: "What's training today? My traps are sore.",
+      caseId: boundedCase.caseId,
+      roadwayOverride: "broad-lock-finding",
+    });
+    assert.equal(result.response.status, 200, JSON.stringify(result.value));
+    assert.equal(result.value.need.level, expected.upperAB.need);
+    assert.equal(result.value.roadway.primary.name, expected.upperAB.roadway);
+    assert.equal(result.value.continuity.governingMechanisms, expected.upperAB.governingMechanisms);
+    for (const category of expected.upperAB.gateState) assert.ok(result.value.freshness.gateRequired.includes(category));
+    assert.equal(result.value.interpretation.literalRequest, "What's training today? My traps are sore.");
+    assert.equal(result.value.interpretation.caseObjective, "Compare today's Upper A and Upper B training options while preserving their distinct purpose.");
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+
+  {
+    const worker = await builtWorker("v171-stress-mobile-codex");
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "workflow", "Workflow Engine");
+    await initializeRoadways(worker, DB, "workflow");
+    const preference = "When Cody requests a Codex-ready transfer from mobile, use concise plain text that can be copied directly; this does not suppress visual teaching in other contexts.";
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:mobile-codex-transfer",
+      projectId: "workflow",
+      statement: preference,
+    });
+    const before = canonicalMutationCounts(DB);
+    const result = await continuityRequest(worker, DB, "workflow", {
+      task: "Prepare a Codex-ready transfer from mobile.",
+    });
+    assert.equal(result.response.status, 200, JSON.stringify(result.value));
+    assert.equal(result.value.need.level, expected.mobileCodex.need);
+    assert.equal(result.value.compactCapsule.statement, preference);
+    assert.equal(result.value.diagnostics.candidatePreviewInvoked, expected.mobileCodex.candidatePreviewInvoked);
+    assert.equal(result.value.diagnostics.exactSourcesOpened, expected.mobileCodex.exactSourcesOpened);
+    assert.equal(result.value.effects.packetCreated, false);
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+
+  {
+    const worker = await builtWorker("v171-stress-brewers-contradiction");
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    const artifactText = "The Brewers reconstruction preserves the late workload contradiction and the insufficient rerank lesson. It does not establish a simplistic strong-team-versus-weak-team rule.";
+    const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+      method: "POST",
+      idempotencyKey: "v171-brewers-reconstruction",
+      body: {
+        format: "text",
+        title: "Brewers workload contradiction and insufficient rerank lesson",
+        sourceName: "V1.7 stress reconstruction",
+        sourceType: "user_supplied_case_reconstruction",
+        representationType: "Reconstructed",
+        authorityState: "observed",
+        importId: "v171-brewers-stress-reconstruction",
+        transcript: artifactText,
+        provenance: {
+          historicalRawTranscriptStatus: "unavailable_cannot_truthfully_reconstruct",
+          originalRawTranscriptAvailable: false,
+          notExactTranscript: true,
+        },
+      },
+    });
+    assert.equal(imported.response.status, 201, JSON.stringify(imported.value));
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:brewers-workload-rerank",
+      statement: "A late workload contradiction affecting a pitcher prop should trigger a genuine rerank or pass rather than a cosmetic confidence change.",
+    });
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:simplistic-strong-team",
+      statement: "A strong team against a weak team is sufficient reason to prefer every related market.",
+    });
+    const before = canonicalMutationCounts(DB);
+    const body = { task: "Use the Brewers lesson for this pitcher prop." };
+    const result = await continuityRequest(worker, DB, "sports", body);
+    assert.equal(result.response.status, 200, JSON.stringify(result.value));
+    assert.equal(result.value.need.level, expected.brewers.need);
+    assert.equal(result.value.roadway.primary.name, expected.brewers.roadway);
+    assert.ok(result.value.freshness.required.includes("final_outcome"));
+    const direct = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/candidates", {
+      method: "POST",
+      body,
+    });
+    assert.equal(direct.response.status, 200, JSON.stringify(direct.value));
+    const artifact = Object.values(direct.value.treatmentSummary).flat().find((item) => item.sourceType === "SourceArtifact");
+    assert.equal(artifact.representation, expected.brewers.representation);
+    assert.equal(artifact.metadata.historicalSourceLimitation, expected.brewers.historicalRawTranscriptStatus);
+    const simplistic = direct.value.treatmentSummary.Exclude.find((item) => item.sourceId === "mechanism:simplistic-strong-team");
+    assert.ok(simplistic);
+    assert.match(simplistic.reason, /does not match the selected task mechanism/i);
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+
+  {
+    const worker = await builtWorker("v171-stress-soccer-live-entry");
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    const boundedCase = await createContinuityCase(
+      worker,
+      DB,
+      "sports",
+      "soccer-live-entry",
+      "Develop a repeatable rule for deciding when to enter live on a soccer favorite by balancing early control signals against the risk of the price getting worse.",
+    );
+    const statement = "Before entering live on a soccer favorite, require sustained territory, credible chance creation, and controlled transition risk. If the price exceeds a preset maximum before those signals appear, pass rather than chase. The confirmation rule remains provisional until it is determined whether it should be time-based, game-state-based, or both.";
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:soccer-live-entry",
+      statement,
+      authority: "approved_local",
+      supportingCaseIds: [boundedCase.caseId],
+    });
+    const before = canonicalMutationCounts(DB);
+    const body = {
+      task: "Should I enter this favorite now or wait?",
+      caseId: boundedCase.caseId,
+      roadwayOverride: "broad-lock-finding",
+    };
+    const result = await continuityRequest(worker, DB, "sports", body);
+    assert.equal(result.response.status, 200, JSON.stringify(result.value));
+    assert.equal(result.value.need.level, expected.soccer.need);
+    assert.equal(result.value.roadway.primary.name, expected.soccer.roadway);
+    assert.equal(result.value.continuity.governingMechanisms, expected.soccer.governingMechanisms);
+    for (const category of expected.soccer.gateState) assert.ok(result.value.freshness.gateRequired.includes(category));
+    assert.equal(result.value.status, "missing_required_state");
+    const direct = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/candidates", {
+      method: "POST",
+      body,
+    });
+    assert.equal(direct.response.status, 200, JSON.stringify(direct.value));
+    assert.equal(result.value.roadway.primary.id, direct.value.interpretation.primaryRoadway.id);
+    assert.equal(result.value.interpretation.scope, direct.value.interpretation.scope);
+    assert.equal(result.value.roadway.materialAmbiguity, direct.value.interpretation.materialAmbiguity);
+    assert.deepEqual(result.value.treatmentCounts, {
+      Use: direct.value.treatmentSummary.Use.length,
+      Consider: direct.value.treatmentSummary.Consider.length,
+      Exclude: direct.value.treatmentSummary.Exclude.length,
+    });
+    assert.deepEqual(result.value.freshness.engineMissing, direct.value.freshness.missing);
+    assert.equal(direct.value.treatmentSummary.Use[0].statement, statement);
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+});
+
+test("V1.7.1 continuity/check keeps none/light/full read-only, isolated, and server-owned", async () => {
+  const worker = await builtWorker("v171-continuity-contracts");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Engine");
+  await initializeRoadways(worker, DB, "sports");
+  await initializeRoadways(worker, DB, "hockey");
+  const boundedCase = await createContinuityCase(
+    worker,
+    DB,
+    "sports",
+    "isolation",
+    "Compare soccer live-entry options within Sports Engine.",
+  );
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:sports-only-continuity",
+    statement: "Compare soccer live-entry options by price, chance creation, and transition risk.",
+    authority: "approved_local",
+    supportingCaseIds: [boundedCase.caseId],
+  });
+  const before = canonicalMutationCounts(DB);
+
+  const none = await continuityRequest(worker, DB, "sports", {
+    task: "Convert four inches to centimeters.",
+  });
+  assert.equal(none.response.status, 200);
+  assert.equal(none.value.need.level, "none");
+  assert.equal(none.value.diagnostics.candidatePreviewInvoked, false);
+  assert.equal(none.value.diagnostics.exactSourcesOpened, 0);
+  assert.equal(none.value.next.action, "proceed_without_atlas");
+
+  const injected = await continuityRequest(worker, DB, "sports", {
+    task: "Compare soccer live-entry options.",
+    caseId: boundedCase.caseId,
+    caseObjective: "Client-authored baseball objective",
+  });
+  assert.equal(injected.response.status, 400);
+  assert.match(injected.value.error, /unsupported client-authored continuity field/i);
+
+  const crossProject = await continuityRequest(worker, DB, "hockey", {
+    task: "Compare soccer live-entry options.",
+    caseId: boundedCase.caseId,
+    roadwayOverride: "broad-lock-finding",
+  });
+  assert.equal(crossProject.response.status, 404);
+  assert.match(crossProject.value.error, /case not found/i);
+
+  assert.deepEqual(canonicalMutationCounts(DB), before);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM handoffs").get().count, 0);
+});
+
+test("V1.7.1 continuity/check never initializes missing canonical roadways during a read", async () => {
+  const worker = await builtWorker("v171-continuity-read-only-roadways");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const before = canonicalMutationCounts(DB);
+  const result = await continuityRequest(worker, DB, "sports", { task: "Any best bets today?" });
+  assert.equal(result.response.status, 500);
+  assert.match(result.value.error, /roadway registry is unavailable/i);
+  assert.deepEqual(canonicalMutationCounts(DB), before);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM roadways").get().count, 0);
+});

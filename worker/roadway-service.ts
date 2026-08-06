@@ -243,6 +243,12 @@ async function registryRows(db: D1Database, projectId: string) {
   ).bind(projectId));
 }
 
+export async function readRoadwayRegistry(db: D1Database, projectId: string) {
+  const project = await first<Row>(db.prepare("SELECT id FROM projects WHERE id = ? LIMIT 1").bind(projectId));
+  if (!project) throw new Error("Project not found.");
+  return (await registryRows(db, projectId)).map(roadwayView);
+}
+
 export async function ensureRoadwayRegistry(db: D1Database, projectId: string) {
   const project = await first<Row>(db.prepare("SELECT id FROM projects WHERE id = ? LIMIT 1").bind(projectId));
   if (!project) throw new Error("Project not found.");
@@ -297,6 +303,10 @@ type InterpretationInput = Row & {
   task?: unknown;
   caseId?: unknown;
   roadwayOverride?: unknown;
+};
+
+export type InterpretTaskOptions = {
+  registryMode?: "ensure" | "read_only";
 };
 
 export type TaskInterpretation = {
@@ -384,6 +394,7 @@ export async function interpretTask(
   db: D1Database,
   projectId: string,
   input: InterpretationInput,
+  options: InterpretTaskOptions = {},
 ): Promise<TaskInterpretation> {
   const task = requiredString(input.task, "Task");
   const caseId = optionalString(input.caseId);
@@ -396,7 +407,12 @@ export async function interpretTask(
     if (!record) throw new Error("Case not found.");
     caseObjective = String(record.objective);
   }
-  const registry = await ensureRoadwayRegistry(db, projectId);
+  const registry = options.registryMode === "read_only"
+    ? await readRoadwayRegistry(db, projectId)
+    : await ensureRoadwayRegistry(db, projectId);
+  if (options.registryMode === "read_only" && registry.length < ROADWAY_DEFINITIONS.length) {
+    throw new Error("Canonical roadway registry is unavailable for a read-only continuity check.");
+  }
   const bySlug = new Map(registry.map((roadway) => [roadway.slug, roadway]));
   const scores = interpretationScores(task);
   const explicitOverride = optionalString(input.roadwayOverride);

@@ -4,7 +4,7 @@ import {
   isLineageOnlyPacketAncestor,
   isPacketEligibleProtectedItem,
 } from "./packet-eligibility";
-import { interpretTask, TaskInterpretation } from "./roadway-service";
+import { interpretTask, InterpretTaskOptions, TaskInterpretation } from "./roadway-service";
 import { sha256 } from "./transcript-import";
 import {
   all,
@@ -609,12 +609,17 @@ export async function previewPacketCandidates(
   db: D1Database,
   projectId: string,
   body: Row,
+  options: {
+    interpretation?: TaskInterpretation;
+    interpretOptions?: InterpretTaskOptions;
+  } = {},
 ) {
   const budget = Number(body.tokenBudget ?? 800);
   if (!SUPPORTED_TOKEN_BUDGETS.has(budget)) {
     throw new Error("Token budget must be exactly 400, 800, or 1600.");
   }
-  const interpretation = await interpretTask(db, projectId, body);
+  const interpretation = options.interpretation
+    || await interpretTask(db, projectId, body, options.interpretOptions);
   if (interpretation.clarificationRequired || !interpretation.primaryRoadway) {
     return {
       status: "clarification_required",

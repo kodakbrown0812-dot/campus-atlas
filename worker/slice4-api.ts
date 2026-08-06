@@ -5,6 +5,7 @@ import {
   listPackets,
   previewPacketCandidates,
 } from "./packet-service";
+import { checkContinuity } from "./continuity-check-service";
 import { ensureRoadwayRegistry, interpretTask } from "./roadway-service";
 import {
   assertId,
@@ -26,6 +27,13 @@ export async function handleSlice4(
     if (!match) return Response.json({ error: "Slice 4 route not found." }, { status: 404 });
     const projectId = assertProjectId(decodeURIComponent(match[1]));
     const parts = match[2].split("/").map(decodeURIComponent);
+
+    if (parts[0] === "continuity" && parts[1] === "check" && parts.length === 2 && request.method === "POST") {
+      const body = await request.json() as Row;
+      return Response.json(await checkContinuity(db, projectId, body), {
+        headers: { "cache-control": "no-store" },
+      });
+    }
 
     if (parts[0] === "roadways" && parts.length === 1 && request.method === "GET") {
       return Response.json({

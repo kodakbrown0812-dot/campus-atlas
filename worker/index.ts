@@ -74,7 +74,7 @@ const worker = {
       return handleSlice3(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
-    if (/^\/api\/v1\/projects\/[^/]+\/(?:roadways|reconstruction|packets|live-state)(?:\/|$)/.test(url.pathname)) {
+    if (/^\/api\/v1\/projects\/[^/]+\/(?:continuity|roadways|reconstruction|packets|live-state)(?:\/|$)/.test(url.pathname)) {
       return handleSlice4(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
