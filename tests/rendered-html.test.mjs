@@ -4986,6 +4986,27 @@ async function continuityRequest(worker, DB, projectId, body) {
   return { response, value: await response.json() };
 }
 
+async function reconstructionRunRequest(worker, DB, projectId, body, idempotencyKey, extraEnv = {}) {
+  const response = await worker.fetch(new Request(
+    `http://localhost/api/v1/projects/${encodeURIComponent(projectId)}/reconstruction/run`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: "Bearer slice-2-test-key",
+        ...(idempotencyKey ? { "idempotency-key": idempotencyKey } : {}),
+      },
+      body: JSON.stringify(body),
+    },
+  ), {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "slice-2-test-key",
+    ...extraEnv,
+  }, ctx);
+  return { response, value: await response.json() };
+}
+
 function canonicalMutationCounts(DB) {
   const tables = [
     "projects",
@@ -5351,4 +5372,469 @@ test("V1.7.1 continuity/check never initializes missing canonical roadways durin
   assert.match(result.value.error, /roadway registry is unavailable/i);
   assert.deepEqual(canonicalMutationCounts(DB), before);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM roadways").get().count, 0);
+});
+
+async function seedReconstructionRunFixture(worker, DB, suffix = "default") {
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await initializeRoadways(worker, DB, "sports");
+  seedSlice4Mechanism(DB, {
+    id: `mechanism:reconstruction-run-${suffix}`,
+    statement: "Compare candidate decision rules under a common evidence standard before selecting the strongest governed option.",
+  });
+  return {
+    task: "Compare the strongest candidate decision rule.",
+    roadwayOverride: "broad-lock-finding",
+    tokenBudget: 800,
+  };
+}
+
+async function seedSoccerReconstructionFixture(worker, DB) {
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await initializeRoadways(worker, DB, "sports");
+  const seeded = await seedSlice3Case(
+    worker,
+    DB,
+    "v171-slice-b-soccer",
+    ["evidence", "correction"],
+    [
+      "Wait for sustained territory, credible chance creation, and controlled transition risk before entering live on a soccer favorite.",
+      "If the live price exceeds a preset maximum before those signals appear, pass rather than chase; the confirmation rule remains provisional.",
+    ],
+  );
+  DB.database.prepare("UPDATE cases SET objective = ? WHERE id = ? AND project_id = 'sports'").run(
+    "Develop a repeatable rule for deciding when to enter live on a soccer favorite by balancing early control signals against the risk of the price getting worse.",
+    seeded.caseId,
+  );
+  const checkpoint = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "v171-slice-b-soccer-checkpoint",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
+      findingCandidates: [{
+        findingType: "mechanism_recognition",
+        sourceEventIds: seeded.events.map((event) => event.id),
+        proposalStatement: "Atlas provisional soccer favorite decision rule.",
+        proposedScope: "local",
+        conditions: ["Use only for this soccer live-entry case."],
+        exclusions: ["Do not treat the confirmation window as settled."],
+        supportingEvidence: seeded.events.map((event) => event.id),
+        counterevidence: [],
+        uncertainty: "The confirmation rule remains provisional.",
+        reasonForSurfacing: "Two Exact sources support one bounded live-entry consequence.",
+        expectedRetrievalEffect: "No effect until Cody governs the reviewed wording.",
+      }],
+    },
+  });
+  assert.equal(checkpoint.response.status, 201, JSON.stringify(checkpoint.value));
+  const finding = checkpoint.value.findings[0];
+  const statement = "Before entering live on a soccer favorite, require sustained territory, credible chance creation, and controlled transition risk. If the price exceeds a preset maximum before those signals appear, pass rather than chase. The confirmation rule remains provisional until we determine whether it should be primarily time-based, game-state-based, or a combination of both.";
+  const revised = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "v171-slice-b-soccer-revise",
+      body: {
+        action: "revise",
+        actorId: "cody",
+        sourceVersionId: finding.currentVersionId,
+        reviewedStatement: statement,
+        scope: "local",
+        reason: "Preserve the complete pass condition and provisional confirmation uncertainty.",
+      },
+    },
+  );
+  assert.equal(revised.response.status, 201, JSON.stringify(revised.value));
+  const approved = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`,
+    {
+      method: "POST",
+      idempotencyKey: "v171-slice-b-soccer-approve",
+      body: {
+        action: "approve",
+        actorId: "cody",
+        sourceVersionId: revised.value.record.currentVersionId,
+        scope: "local",
+        reason: "Approve Cody's reviewed wording for this exact case.",
+      },
+    },
+  );
+  assert.equal(approved.response.status, 201, JSON.stringify(approved.value));
+  return {
+    seeded,
+    finding,
+    mechanism: approved.value.mechanism,
+    statement,
+    body: {
+      task: "Compare all the governed options for a soccer favorite and identify the strongest decision rule.",
+      caseId: seeded.caseId,
+      roadwayOverride: "broad-lock-finding",
+      tokenBudget: 800,
+    },
+  };
+}
+
+test("V1.7.1 reconstruction/run exposes a write-authorized additive OpenAPI contract", async () => {
+  const worker = await builtWorker("v171-slice-b-openapi");
+  const response = await worker.fetch(
+    new Request("http://localhost/.well-known/openapi.json"),
+    { DB: memoryD1(), ASSETS: assets },
+    ctx,
+  );
+  assert.equal(response.status, 200);
+  const spec = await response.json();
+  assert.equal(spec.info.version, "4.6.0");
+  assert.ok(spec.paths["/api/v1/projects/{projectId}/continuity/check"]);
+  const operation = spec.paths["/api/v1/projects/{projectId}/reconstruction/run"].post;
+  assert.equal(operation.operationId, "runCanonicalReconstruction");
+  assert.ok(operation.parameters.some((parameter) => parameter.name === "Idempotency-Key" && parameter.required));
+  assert.deepEqual(spec.components.schemas.ReconstructionRunRequest.properties.tokenBudget.enum, [400, 800, 1600]);
+  assert.deepEqual(
+    spec.components.schemas.ReconstructionRunStoppedResponse.properties.status.enum,
+    ["clarification_required", "atlas_not_needed", "light_continuity_only", "missing_required_state", "unsafe_under_selected_budget"],
+  );
+  assert.equal(spec.components.schemas.ReconstructionRunEffects.properties.handoffCreated.const, false);
+  assert.equal(spec.components.schemas.ReconstructionRunEffects.properties.providerCallPerformed.const, false);
+  assert.equal(spec.components.securitySchemes.bearerAuth.scheme, "bearer");
+});
+
+test("V1.7.1 reconstruction/run compiles one atomic packet and matches the canonical compiler", async () => {
+  const worker = await builtWorker("v171-slice-b-parity");
+  const directDB = await sqliteD1();
+  const facadeDB = await sqliteD1();
+  const directBody = await seedReconstructionRunFixture(worker, directDB, "parity");
+  const facadeBody = await seedReconstructionRunFixture(worker, facadeDB, "parity");
+  facadeBody.task = `  ${facadeBody.task}  `;
+
+  const direct = await createSlice4Packet(worker, directDB, directBody, "v171-slice-b-direct");
+  assert.equal(direct.response.status, 201, JSON.stringify(direct.value));
+  const before = canonicalMutationCounts(facadeDB);
+  let adapterCalls = 0;
+  const facade = await reconstructionRunRequest(
+    worker,
+    facadeDB,
+    "sports",
+    facadeBody,
+    "v171-slice-b-facade",
+    { ATLAS_TEST_RECEIVING_MODEL_ADAPTER: { async execute() { adapterCalls += 1; throw new Error("must not execute"); } } },
+  );
+  assert.equal(facade.response.status, 201, JSON.stringify(facade.value));
+  assert.equal(facade.value.status, "compiled");
+  assert.equal(facade.value.idempotentReplay, false);
+  assert.equal(facade.value.effects.packetCreated, true);
+  assert.equal(facade.value.effects.receiptCreated, true);
+  assert.equal(facade.value.effects.handoffCreated, false);
+  assert.equal(facade.value.effects.providerCallPerformed, false);
+  assert.equal(adapterCalls, 0);
+
+  assert.equal(facade.value.literalTask, facadeBody.task);
+  assert.equal(facade.value.packet.compiledContent, direct.value.packet.compiledContent);
+  assert.equal(facade.value.caseId, direct.value.packet.caseId);
+  assert.equal(facade.value.roadway.id, direct.value.packet.primaryRoadwayId);
+  assert.equal(facade.value.roadway.versionId, direct.value.packet.primaryRoadwayVersionId);
+  assert.equal(facade.value.packet.finalTokenCount, direct.value.packet.finalTokenCount);
+  assert.deepEqual(facade.value.receipt.freshness, direct.value.receipt.freshness);
+  assert.deepEqual(facade.value.receipt.governanceCauses, direct.value.receipt.governanceCauses);
+  assert.deepEqual(facade.value.receipt.unresolvedConflicts, direct.value.receipt.unresolvedConflicts);
+  assert.deepEqual(facade.value.receipt.exactPacketDifference, direct.value.receipt.exactPacketDifference);
+  assert.deepEqual(facade.value.receipt.treatmentSummary, direct.value.receipt.treatmentSummary);
+  assert.deepEqual(facade.value.receipt.treatmentCounts, {
+    Use: direct.value.receipt.treatmentSummary.Use.length,
+    Consider: direct.value.receipt.treatmentSummary.Consider.length,
+    Exclude: direct.value.receipt.treatmentSummary.Exclude.length,
+  });
+  assert.match(facade.value.receipt.honestyStatement, /does not establish outcome correctness/i);
+
+  const after = canonicalMutationCounts(facadeDB);
+  assert.equal(after.packets, before.packets + 1);
+  assert.equal(after.receipts, before.receipts + 1);
+  assert.ok(after.packet_items > before.packet_items);
+  for (const table of Object.keys(before)) {
+    if (!["packets", "packet_items", "receipts"].includes(table)) assert.equal(after[table], before[table], table);
+  }
+  assert.equal(after.handoffs, 0);
+  assert.equal(after.handoff_answers, 0);
+
+  const saved = await slice2Request(
+    worker,
+    facadeDB,
+    `/api/v1/projects/sports/packets/${encodeURIComponent(facade.value.packet.id)}`,
+  );
+  assert.equal(saved.response.status, 200);
+  assert.equal(saved.value.packet.compiledContent, facade.value.packet.compiledContent);
+  assert.equal(saved.value.receipt.id, facade.value.receipt.id);
+  assert.equal(facade.value.links.packet, `/api/v1/projects/sports/packets/${encodeURIComponent(facade.value.packet.id)}`);
+  assert.equal(facadeDB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 1);
+});
+
+test("V1.7.1 reconstruction/run reproduces the reviewed soccer mechanism and lineage boundary", async () => {
+  const worker = await builtWorker("v171-slice-b-soccer-parity");
+  const DB = await sqliteD1();
+  const fixture = await seedSoccerReconstructionFixture(worker, DB);
+  const before = canonicalMutationCounts(DB);
+  const result = await reconstructionRunRequest(
+    worker,
+    DB,
+    "sports",
+    fixture.body,
+    "v171-slice-b-soccer-run",
+  );
+  assert.equal(result.response.status, 201, JSON.stringify(result.value));
+  assert.equal(result.value.need.level, "full");
+  assert.equal(result.value.roadway.name, "Broad Lock-Finding");
+  assert.equal(result.value.summary.governingMechanismsSupplied, 1);
+  assert.equal(result.value.summary.requiredChecksSupplied, 5);
+  assert.equal(result.value.summary.considerItemsSupplied, 0);
+  assert.equal(result.value.summary.auditOnlyProvenanceRetained, 5);
+  assert.equal(result.value.summary.protectedCorrectionsSupplied, 0);
+  assert.equal(result.value.packet.tokenBudget, 800);
+  assert.equal(result.value.packet.finalTokenCount, 278);
+  assert.equal(result.value.packet.compiledContent.includes(fixture.seeded.events[0].id), false);
+  assert.equal(result.value.effects.authorityChanged, false);
+  const after = canonicalMutationCounts(DB);
+  for (const table of Object.keys(before)) {
+    if (!["packets", "packet_items", "receipts"].includes(table)) assert.equal(after[table], before[table], table);
+  }
+  const packetDetail = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/packets/${encodeURIComponent(result.value.packet.id)}`,
+  );
+  const lineage = packetDetail.value.items.filter((item) => item.metadata?.lineageOnly === true);
+  assert.equal(lineage.length, 5);
+  assert.ok(lineage.every((item) => item.treatment === "Exclude"));
+  assert.ok(lineage.every((item) => item.packetEligibleProtected === false));
+  assert.ok(lineage.every((item) => !result.value.packet.compiledContent.includes(item.sourceId)));
+  const governed = packetDetail.value.receipt.treatmentSummary.Use.find((item) => item.sourceType === "Mechanism");
+  assert.equal(governed.sourceId, fixture.mechanism.id);
+  assert.equal(governed.statement, fixture.statement);
+  assert.match(governed.statement, /pass rather than chase/i);
+  assert.match(governed.statement, /time-based, game-state-based, or a combination of both/i);
+});
+
+test("V1.7.1 reconstruction/run stops without writes for none, light, ambiguity, missing state, and unsafe budget", async () => {
+  const worker = await builtWorker("v171-slice-b-stopped-results");
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    const before = canonicalMutationCounts(DB);
+    const result = await reconstructionRunRequest(worker, DB, "sports", { task: "Convert four inches to centimeters." }, "slice-b-none");
+    assert.equal(result.response.status, 422);
+    assert.equal(result.value.status, "atlas_not_needed");
+    assert.equal(result.value.need.level, "none");
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "workflow", "Workflow Engine");
+    await initializeRoadways(worker, DB, "workflow");
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:slice-b-mobile-transfer",
+      projectId: "workflow",
+      statement: "When Cody requests a Codex-ready transfer from mobile, use concise plain text; this does not suppress visual teaching elsewhere.",
+    });
+    const before = canonicalMutationCounts(DB);
+    const result = await reconstructionRunRequest(worker, DB, "workflow", { task: "Prepare a Codex-ready transfer from mobile." }, "slice-b-light");
+    assert.equal(result.response.status, 422);
+    assert.equal(result.value.status, "light_continuity_only");
+    assert.equal(result.value.need.level, "light");
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    const before = canonicalMutationCounts(DB);
+    const result = await reconstructionRunRequest(worker, DB, "sports", {
+      task: "Compare the best option and explain why the prior outcome failed.",
+      tokenBudget: 800,
+    }, "slice-b-ambiguity");
+    assert.equal(result.response.status, 409);
+    assert.equal(result.value.status, "clarification_required");
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    const before = canonicalMutationCounts(DB);
+    const result = await reconstructionRunRequest(worker, DB, "sports", { task: "Any best bets today?" }, "slice-b-missing");
+    assert.equal(result.response.status, 422);
+    assert.equal(result.value.status, "missing_required_state");
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "overflow", "Overflow Engine");
+    await initializeRoadways(worker, DB, "overflow");
+    const longClause = " while preserving price, distribution, one-score paths, outright-loss scripts, corrections, and counterevidence";
+    for (let index = 0; index < 8; index += 1) {
+      seedSlice4Mechanism(DB, {
+        id: `mechanism:slice-b-overflow-${index}`,
+        projectId: "overflow",
+        statement: `${index % 2 === 0 ? "Always include" : "Never include"} margin evidence ${index}${longClause.repeat(3)}.`,
+        counterevidenceIds: [`mechanism:slice-b-overflow-${index % 2 === 0 ? index + 1 : index - 1}`],
+      });
+    }
+    const before = canonicalMutationCounts(DB);
+    const result = await reconstructionRunRequest(worker, DB, "overflow", {
+      task: "Can the favorite win by two, or is the one-score margin path too large?",
+      roadwayOverride: "margin-run-line-value",
+      tokenBudget: 400,
+    }, "slice-b-unsafe");
+    assert.equal(result.response.status, 422, JSON.stringify(result.value));
+    assert.equal(result.value.status, "unsafe_under_selected_budget");
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "unavailable", "Unavailable Engine");
+    const before = canonicalMutationCounts(DB);
+    const result = await reconstructionRunRequest(worker, DB, "unavailable", {
+      task: "Compare the strongest candidate decision rule.",
+      roadwayOverride: "broad-lock-finding",
+    }, "slice-b-unavailable-roadways");
+    assert.equal(result.response.status, 500);
+    assert.match(result.value.error, /roadway registry is unavailable/i);
+    assert.deepEqual(canonicalMutationCounts(DB), before);
+  }
+});
+
+test("V1.7.1 reconstruction/run enforces isolation, server ownership, and complete idempotency", async () => {
+  const worker = await builtWorker("v171-slice-b-isolation-idempotency");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Engine");
+  await initializeRoadways(worker, DB, "sports");
+  await initializeRoadways(worker, DB, "hockey");
+  const bounded = await createContinuityCase(worker, DB, "sports", "slice-b-isolation", "Compare governed soccer favorite decision rules.");
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:slice-b-case-local",
+    statement: "Compare governed soccer favorite decision rules within the active case.",
+    authority: "approved_local",
+    supportingCaseIds: [bounded.caseId],
+  });
+  const body = {
+    task: "Compare the strongest soccer favorite decision rule.",
+    requestedOutput: "one governed decision rule",
+    caseId: bounded.caseId,
+    roadwayOverride: "broad-lock-finding",
+    tokenBudget: 800,
+  };
+  const beforeAuthorizationChecks = canonicalMutationCounts(DB);
+  const noKey = await reconstructionRunRequest(worker, DB, "sports", body, undefined);
+  assert.equal(noKey.response.status, 400);
+  assert.match(noKey.value.error, /idempotency key is required/i);
+  const unauthorizedResponse = await worker.fetch(new Request(
+    "http://localhost/api/v1/projects/sports/reconstruction/run",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json", "idempotency-key": "slice-b-unauthorized" },
+      body: JSON.stringify(body),
+    },
+  ), { DB, ASSETS: assets, CAMPUS_ATLAS_ACTION_KEY: "slice-2-test-key" }, ctx);
+  assert.equal(unauthorizedResponse.status, 401);
+  assert.match((await unauthorizedResponse.json()).error, /write authorization required/i);
+  const invalidBudget = await reconstructionRunRequest(
+    worker,
+    DB,
+    "sports",
+    { ...body, tokenBudget: 500 },
+    "slice-b-invalid-budget",
+  );
+  assert.equal(invalidBudget.response.status, 400);
+  assert.match(invalidBudget.value.error, /token budget must be exactly/i);
+  assert.deepEqual(canonicalMutationCounts(DB), beforeAuthorizationChecks);
+  const created = await reconstructionRunRequest(worker, DB, "sports", body, "slice-b-idempotency");
+  assert.equal(created.response.status, 201, JSON.stringify(created.value));
+  const counts = canonicalMutationCounts(DB);
+  const replay = await reconstructionRunRequest(worker, DB, "sports", body, "slice-b-idempotency");
+  assert.equal(replay.response.status, 200, JSON.stringify(replay.value));
+  assert.equal(replay.value.idempotentReplay, true);
+  assert.equal(replay.value.packet.id, created.value.packet.id);
+  assert.equal(replay.value.receipt.id, created.value.receipt.id);
+  assert.equal(replay.value.effects.packetCreated, false);
+  assert.equal(replay.value.effects.receiptCreated, false);
+  assert.deepEqual(canonicalMutationCounts(DB), counts);
+
+  for (const changed of [
+    { ...body, task: "Compare a different strongest option." },
+    { ...body, requestedOutput: "a different output" },
+    { ...body, caseId: undefined },
+    { ...body, roadwayOverride: "margin-run-line-value" },
+    { ...body, tokenBudget: 1600 },
+  ]) {
+    const conflict = await reconstructionRunRequest(worker, DB, "sports", changed, "slice-b-idempotency");
+    assert.equal(conflict.response.status, 409, JSON.stringify(conflict.value));
+    assert.match(conflict.value.error, /idempotency key conflicts/i);
+    assert.deepEqual(canonicalMutationCounts(DB), counts);
+  }
+
+  const crossProject = await reconstructionRunRequest(worker, DB, "hockey", body, "slice-b-cross-project");
+  assert.equal(crossProject.response.status, 404);
+  assert.match(crossProject.value.error, /case not found/i);
+  assert.deepEqual(canonicalMutationCounts(DB), counts);
+
+  for (const [field, value] of [
+    ["caseObjective", "client injection"],
+    ["authority", "approved_project_wide"],
+    ["eligibility", true],
+    ["treatments", { Use: [] }],
+    ["candidates", []],
+    ["mechanismWording", "client mechanism"],
+    ["findingWording", "client finding"],
+    ["packetText", "client packet"],
+    ["packetItems", []],
+    ["receiptContents", {}],
+  ]) {
+    const rejected = await reconstructionRunRequest(worker, DB, "sports", { ...body, [field]: value }, `slice-b-injection-${field}`);
+    assert.equal(rejected.response.status, 400, field);
+    assert.match(rejected.value.error, /unsupported client-authored continuity field/i);
+    assert.deepEqual(canonicalMutationCounts(DB), counts);
+  }
+
+  assert.throws(
+    () => DB.database.prepare("UPDATE packets SET compiled_content = 'mutated' WHERE id = ?").run(created.value.packet.id),
+    /immutable/i,
+  );
+  const beforeRead = canonicalMutationCounts(DB);
+  const read = await slice2Request(worker, DB, `/api/v1/projects/sports/packets/${encodeURIComponent(created.value.packet.id)}`);
+  assert.equal(read.response.status, 200);
+  assert.equal(read.value.packet.compiledContent, created.value.packet.compiledContent);
+  assert.deepEqual(canonicalMutationCounts(DB), beforeRead);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM handoffs").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM handoff_answers").get().count, 0);
+});
+
+test("V1.7.1 reconstruction/run rolls back packet and items when the atomic receipt write fails", async () => {
+  const worker = await builtWorker("v171-slice-b-atomicity");
+  const DB = await sqliteD1();
+  const body = await seedReconstructionRunFixture(worker, DB, "atomicity");
+  DB.database.exec(`
+    CREATE TRIGGER slice_b_receipt_failure
+    BEFORE INSERT ON receipts
+    BEGIN
+      SELECT RAISE(ABORT, 'injected receipt failure');
+    END;
+  `);
+  const before = canonicalMutationCounts(DB);
+  const failed = await reconstructionRunRequest(worker, DB, "sports", body, "slice-b-atomicity");
+  assert.equal(failed.response.status, 500);
+  assert.match(failed.value.error, /injected receipt failure/i);
+  assert.deepEqual(canonicalMutationCounts(DB), before);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
 });
