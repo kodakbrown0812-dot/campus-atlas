@@ -739,6 +739,72 @@ function openApi(origin: string) {
           },
         },
       },
+      "/api/v1/projects/{projectId}/reconstruction/run": {
+        post: {
+          operationId: "runCanonicalReconstruction",
+          tags: ["Canonical V1.7.1"],
+          summary: "Compile one immutable governed reconstruction packet and receipt",
+          description: "For a new Idempotency-Key, re-runs the current server-owned Need Gate, interpretation, and candidate preview before atomically invoking the existing packet compiler. An exact idempotent replay returns the saved immutable packet and receipt without reevaluating current canonical eligibility; use a new key for a new current-state reconstruction. It performs no receiving-model or provider call.",
+          parameters: [
+            {
+              name: "projectId",
+              in: "path",
+              required: true,
+              schema: { type: "string" },
+            },
+            {
+              name: "Idempotency-Key",
+              in: "header",
+              required: true,
+              schema: { type: "string", minLength: 1 },
+              description: "Stable key for one normalized project-scoped reconstruction request.",
+            },
+          ],
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ReconstructionRunRequest" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "One immutable packet and receipt were atomically created",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/ReconstructionRunCompiledResponse" } } },
+            },
+            "200": {
+              description: "Saved-snapshot replay of the existing immutable packet and receipt; current canonical eligibility was not reevaluated",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/ReconstructionRunCompiledResponse" } } },
+            },
+            "409": {
+              description: "Material clarification is required or the idempotency key conflicts",
+              content: { "application/json": { schema: { oneOf: [{ $ref: "#/components/schemas/ReconstructionRunStoppedResponse" }, { $ref: "#/components/schemas/CanonicalError" }] } } },
+            },
+            "422": {
+              description: "Atlas is not needed, light continuity is sufficient, required state is missing, or the selected budget is unsafe",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/ReconstructionRunStoppedResponse" } } },
+            },
+            "400": {
+              description: "Invalid input, missing idempotency key, or client-authored canonical content",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalError" } } },
+            },
+            "401": {
+              description: "Canonical write authorization is unavailable or invalid",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalError" } } },
+            },
+            "404": {
+              description: "Project or case not found within the requested project",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalError" } } },
+            },
+            "500": {
+              description: "Canonical project, case, roadway, packet, or receipt state is unavailable",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/CanonicalError" } } },
+            },
+          },
+        },
+      },
       "/api/context": { post: { operationId: "buildContextPacket", summary: "Build the smallest useful context packet", requestBody: { required: true, content: { "application/json": { schema: tools[0].inputSchema } } }, responses: { "200": { description: "Inspectable context packet" } } } },
       "/api/blueprint": { get: { operationId: "getProjectBlueprint", summary: "Get a project reasoning blueprint", parameters: [{ name: "project", in: "query", required: true, schema: { type: "string" } }, { name: "workspaceId", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Project blueprint" } } } },
       "/api/precedents": { post: { operationId: "retrievePrecedents", summary: "Retrieve explainable precedents", requestBody: { required: true, content: { "application/json": { schema: tools[2].inputSchema } } }, responses: { "200": { description: "Ranked precedents" } } } },
@@ -748,6 +814,13 @@ function openApi(origin: string) {
       "/api/receipts": { get: { operationId: "getAtlasReceipt", summary: "Inspect an action receipt", parameters: [{ name: "id", in: "query", required: true, schema: { type: "string" } }, { name: "workspaceId", in: "query", required: false, schema: { type: "string" } }], responses: { "200": { description: "Action receipt" } } } },
     },
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          description: "Existing canonical write authorization boundary. This is not a claim of complete hosted multi-user authentication.",
+        },
+      },
       schemas: {
         ContinuityCheckRequest: {
           type: "object",
@@ -805,6 +878,127 @@ function openApi(origin: string) {
             },
             diagnostics: { type: "object" },
             next: { type: "object" },
+          },
+        },
+        ReconstructionRunRequest: {
+          type: "object",
+          additionalProperties: false,
+          required: ["task"],
+          properties: {
+            task: { type: "string", minLength: 1, description: "Exact current caller task; remains controlling." },
+            requestedOutput: { type: "string", minLength: 1 },
+            caseId: { type: "string", minLength: 3 },
+            roadwayOverride: { type: "string", minLength: 3, description: "Current-run override only; never updates the registry." },
+            tokenBudget: { type: "integer", enum: [400, 800, 1600], default: 800 },
+          },
+        },
+        ReconstructionRunCompiledResponse: {
+          type: "object",
+          required: ["apiVersion", "status", "projectId", "literalTask", "need", "roadway", "packet", "summary", "receipt", "effects", "idempotentReplay", "replaySource", "currentPreflightPerformed", "links"],
+          properties: {
+            apiVersion: { type: "string", const: "v1.7.1" },
+            status: { type: "string", const: "compiled" },
+            projectId: { type: "string" },
+            caseId: { type: ["string", "null"] },
+            literalTask: { type: "string" },
+            need: { $ref: "#/components/schemas/AtlasNeedGate" },
+            roadway: {
+              type: "object",
+              required: ["id", "versionId", "name"],
+              properties: {
+                id: { type: "string" },
+                versionId: { type: "string" },
+                name: { type: ["string", "null"] },
+              },
+            },
+            packet: {
+              type: "object",
+              required: ["id", "version", "status", "tokenBudget", "finalTokenCount", "compiledContent", "createdAt"],
+              properties: {
+                id: { type: "string" },
+                version: { type: "integer" },
+                status: { type: "string", const: "compiled" },
+                tokenBudget: { type: "integer", enum: [400, 800, 1600] },
+                finalTokenCount: { type: "integer" },
+                compiledContent: { type: "string" },
+                priorComparablePacketId: { type: ["string", "null"] },
+                createdAt: { type: "string", format: "date-time" },
+              },
+            },
+            summary: { type: "object" },
+            receipt: {
+              type: "object",
+              required: ["id", "governanceCauses", "treatmentSummary", "treatmentCounts", "freshness", "inferenceDisclosure", "unresolvedConflicts", "exactPacketDifference", "historicalLimitations", "honestyStatement"],
+              properties: {
+                id: { type: "string" },
+                governanceCauses: { type: "array", items: { type: "object" } },
+                treatmentSummary: { type: "object", description: "Exact saved canonical Use, Consider, and Exclude receipt projection." },
+                treatmentCounts: { type: "object" },
+                freshness: { type: "object" },
+                inferenceDisclosure: { type: "string" },
+                unresolvedConflicts: { type: "array", items: { type: "object" } },
+                exactPacketDifference: { type: "array", items: { type: "object" } },
+                historicalLimitations: { type: "array", items: { type: "object" } },
+                honestyStatement: { type: "string" },
+              },
+            },
+            effects: { $ref: "#/components/schemas/ReconstructionRunEffects" },
+            idempotentReplay: { type: "boolean" },
+            replaySource: {
+              type: ["string", "null"],
+              enum: ["saved_immutable_packet", null],
+              description: "Set only for an idempotent saved-snapshot replay.",
+            },
+            currentPreflightPerformed: {
+              type: "boolean",
+              description: "False on saved-snapshot replay; true when current canonical state was evaluated for this response.",
+            },
+            links: { type: "object" },
+          },
+        },
+        ReconstructionRunStoppedResponse: {
+          type: "object",
+          required: ["apiVersion", "status", "projectId", "literalTask", "need", "preflight", "packet", "receipt", "effects", "idempotentReplay", "replaySource", "currentPreflightPerformed"],
+          properties: {
+            apiVersion: { type: "string", const: "v1.7.1" },
+            status: {
+              type: "string",
+              enum: ["clarification_required", "atlas_not_needed", "light_continuity_only", "missing_required_state", "unsafe_under_selected_budget"],
+            },
+            projectId: { type: "string" },
+            caseId: { type: ["string", "null"] },
+            literalTask: { type: "string" },
+            need: { $ref: "#/components/schemas/AtlasNeedGate" },
+            roadway: { type: "object" },
+            preflight: { type: "object" },
+            packet: { type: "null" },
+            summary: { type: "null" },
+            receipt: { type: "null" },
+            effects: { $ref: "#/components/schemas/ReconstructionRunEffects" },
+            idempotentReplay: { type: "boolean", const: false },
+            replaySource: { type: "null" },
+            currentPreflightPerformed: { type: "boolean", const: true },
+            links: { type: "null" },
+          },
+        },
+        AtlasNeedGate: {
+          type: "object",
+          required: ["level", "reasonCodes", "explanation"],
+          properties: {
+            level: { type: "string", enum: ["none", "light", "full"] },
+            reasonCodes: { type: "array", items: { type: "string" } },
+            explanation: { type: "string" },
+          },
+        },
+        ReconstructionRunEffects: {
+          type: "object",
+          required: ["packetCreated", "receiptCreated", "handoffCreated", "providerCallPerformed", "authorityChanged"],
+          properties: {
+            packetCreated: { type: "boolean" },
+            receiptCreated: { type: "boolean" },
+            handoffCreated: { type: "boolean", const: false },
+            providerCallPerformed: { type: "boolean", const: false },
+            authorityChanged: { type: "boolean", const: false },
           },
         },
         CanonicalError: {

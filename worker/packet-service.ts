@@ -1,5 +1,6 @@
 import { canonicalId } from "./canonical-records";
 import { discoverAndRankCandidates, RankedCandidate, Treatment } from "./candidate-ranking";
+import { CONTINUITY_TOKEN_BUDGETS } from "./continuity-request-contract";
 import {
   isLineageOnlyPacketAncestor,
   isPacketEligibleProtectedItem,
@@ -19,7 +20,7 @@ import {
 } from "./slice3-support";
 
 export const PACKET_VERSION = 1;
-export const SUPPORTED_TOKEN_BUDGETS = new Set([400, 800, 1600]);
+export const SUPPORTED_TOKEN_BUDGETS = CONTINUITY_TOKEN_BUDGETS;
 
 type PacketItemSnapshot = {
   sourceType: string;
@@ -454,6 +455,14 @@ export async function compilePacket(
   projectId: string,
   body: Row,
   idempotencyKey: string,
+  options: {
+    stopBeforeFailedWrite?: boolean;
+    literalTask?: string;
+    reconstructionRequest?: {
+      requestedOutput: string | null;
+      roadwayOverride: string | null;
+    };
+  } = {},
 ) {
   const replay = await first<Row>(db.prepare(
     "SELECT id, task, token_budget FROM packets WHERE project_id = ? AND idempotency_key = ? LIMIT 1",
@@ -470,6 +479,16 @@ export async function compilePacket(
     throw new Error("Token budget must be exactly 400, 800, or 1600.");
   }
   const interpretation = await interpretTask(db, projectId, body);
+  if (options.literalTask !== undefined) interpretation.literalRequest = options.literalTask;
+  const storedInterpretation = options.reconstructionRequest
+    ? {
+      ...interpretation,
+      reconstructionRunRequest: {
+        requestedOutput: options.reconstructionRequest.requestedOutput,
+        roadwayOverride: options.reconstructionRequest.roadwayOverride,
+      },
+    }
+    : interpretation;
   if (interpretation.clarificationRequired || !interpretation.primaryRoadway) {
     return {
       status: "clarification_required",
@@ -494,6 +513,23 @@ export async function compilePacket(
     candidateSnapshots,
     missingLiveState,
   );
+  if (options.stopBeforeFailedWrite && rendered.error) {
+    return {
+      status: rendered.error.startsWith("required_live_state_missing:")
+        ? "missing_required_state"
+        : "unsafe_under_selected_budget",
+      interpretation,
+      packet: null,
+      receipt: null,
+      idempotentReplay: false,
+      failure: {
+        reason: rendered.error,
+        missingRequiredState: missingLiveState,
+        estimatedSafeMinimum: rendered.minimumTokenCount,
+        selectedBudget: budget,
+      },
+    };
+  }
   const allItems = [...checks, ...rendered.candidates].map((item, index) => ({ ...item, sequenceOrder: index + 1 }));
   const beforeItems = await priorItems(db, projectId, priorPacketId);
   const difference = packetDifference(beforeItems, allItems);
@@ -531,7 +567,7 @@ export async function compilePacket(
       interpretation.caseId,
       interpretation.literalRequest,
       interpretation.requiredReasoningMechanism,
-      json(interpretation),
+      json(storedInterpretation),
       interpretation.primaryRoadway.id,
       interpretation.primaryRoadway.versionId,
       json(interpretation.supportingModules),

@@ -6,6 +6,7 @@ import {
   previewPacketCandidates,
 } from "./packet-service";
 import { checkContinuity } from "./continuity-check-service";
+import { runReconstruction } from "./reconstruction-run-service";
 import { ensureRoadwayRegistry, interpretTask } from "./roadway-service";
 import {
   assertId,
@@ -31,6 +32,22 @@ export async function handleSlice4(
     if (parts[0] === "continuity" && parts[1] === "check" && parts.length === 2 && request.method === "POST") {
       const body = await request.json() as Row;
       return Response.json(await checkContinuity(db, projectId, body), {
+        headers: { "cache-control": "no-store" },
+      });
+    }
+
+    if (parts[0] === "reconstruction" && parts[1] === "run" && parts.length === 2 && request.method === "POST") {
+      authorizeWrite(request, actionKey);
+      const idempotencyKey = requireIdempotencyKey(request);
+      const body = await request.json() as Row;
+      const result = await runReconstruction(db, projectId, body, idempotencyKey);
+      const status = result.status === "compiled"
+        ? result.idempotentReplay ? 200 : 201
+        : result.status === "clarification_required"
+          ? 409
+          : 422;
+      return Response.json(result, {
+        status,
         headers: { "cache-control": "no-store" },
       });
     }
