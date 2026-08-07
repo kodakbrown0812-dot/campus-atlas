@@ -1,17 +1,15 @@
 import { checkContinuity } from "./continuity-check-service";
-import { compilePacket, getPacket, SUPPORTED_TOKEN_BUDGETS } from "./packet-service";
+import {
+  canonicalContinuityInput,
+  ContinuityRequestInput,
+  ValidatedContinuityRequest,
+  validateContinuityRequest,
+} from "./continuity-request-contract";
+import { compilePacket, getPacket } from "./packet-service";
 import {
   first,
   Row,
 } from "./slice3-support";
-
-type ReconstructionRunInput = Row & {
-  task?: unknown;
-  requestedOutput?: unknown;
-  caseId?: unknown;
-  roadwayOverride?: unknown;
-  tokenBudget?: unknown;
-};
 
 type PacketDetail = Awaited<ReturnType<typeof getPacket>>;
 
@@ -53,6 +51,8 @@ function stoppedResult(
       authorityChanged: false,
     },
     idempotentReplay: false,
+    replaySource: null,
+    currentPreflightPerformed: true,
     links: null,
   };
 }
@@ -73,30 +73,29 @@ function roadwayMatchesOverride(
 }
 
 function assertReplayRequest(
-  input: ReconstructionRunInput,
-  preflight: Awaited<ReturnType<typeof checkContinuity>>,
+  request: ValidatedContinuityRequest,
   detail: PacketDetail,
 ) {
   const stored = detail.packet.interpretation as Record<string, unknown>;
-  const requestedBudget = Number(input.tokenBudget ?? 800);
-  const requestedOutput = typeof input.requestedOutput === "string" && input.requestedOutput.trim()
-    ? input.requestedOutput
-    : preflight.interpretation && typeof preflight.interpretation === "object"
-      ? String((preflight.interpretation as Record<string, unknown>).requestedDecisionOrOutput ?? "")
-      : "";
+  const requestSnapshot = stored.reconstructionRunRequest && typeof stored.reconstructionRunRequest === "object"
+    ? stored.reconstructionRunRequest as Record<string, unknown>
+    : {};
+  const storedRequestedOutput = Object.prototype.hasOwnProperty.call(requestSnapshot, "requestedOutput")
+    ? requestSnapshot.requestedOutput ?? null
+    : stored.requestedDecisionOrOutput ?? null;
   const conflict = (
-    detail.packet.task !== preflight.literalTask
-    || Number(detail.packet.tokenBudget) !== requestedBudget
-    || (detail.packet.caseId ?? null) !== (preflight.caseId ?? null)
-    || String(stored.requestedDecisionOrOutput ?? "") !== requestedOutput
-    || !roadwayMatchesOverride(input.roadwayOverride, stored, String(detail.packet.primaryRoadwayId))
+    detail.packet.task !== request.literalTask
+    || Number(detail.packet.tokenBudget) !== request.tokenBudget
+    || (detail.packet.caseId ?? null) !== request.caseId
+    || storedRequestedOutput !== request.requestedOutput
+    || !roadwayMatchesOverride(request.roadwayOverride, stored, String(detail.packet.primaryRoadwayId))
   );
   if (conflict) throw new Error("Idempotency key conflicts with a different reconstruction request.");
 }
 
 function compactProjection(
   detail: PacketDetail,
-  preflight: Awaited<ReturnType<typeof checkContinuity>>,
+  preflight: Awaited<ReturnType<typeof checkContinuity>> | null,
   idempotentReplay: boolean,
 ) {
   const use = detail.receipt.treatmentSummary.Use;
@@ -125,7 +124,11 @@ function compactProjection(
     projectId: detail.packet.projectId,
     caseId: detail.packet.caseId,
     literalTask: detail.packet.task,
-    need: preflight.need,
+    need: preflight?.need ?? {
+      level: "full",
+      reasonCodes: ["idempotent_saved_reconstruction"],
+      explanation: "The previously compiled immutable reconstruction is being returned without current-state reevaluation.",
+    },
     roadway: {
       id: detail.packet.primaryRoadwayId,
       versionId: detail.packet.primaryRoadwayVersionId,
@@ -176,6 +179,8 @@ function compactProjection(
       authorityChanged: false,
     },
     idempotentReplay,
+    replaySource: idempotentReplay ? "saved_immutable_packet" : null,
+    currentPreflightPerformed: !idempotentReplay,
     links: {
       packet: packetPath,
       receipt: `${packetPath}/receipt`,
@@ -187,44 +192,33 @@ function compactProjection(
 export async function runReconstruction(
   db: D1Database,
   projectId: string,
-  input: ReconstructionRunInput,
+  input: ContinuityRequestInput,
   idempotencyKey: string,
 ) {
-  const tokenBudget = Number(input.tokenBudget ?? 800);
-  if (!SUPPORTED_TOKEN_BUDGETS.has(tokenBudget)) {
-    throw new Error("Token budget must be exactly 400, 800, or 1600.");
-  }
-  if (input.roadwayOverride !== undefined && (
-    typeof input.roadwayOverride !== "string" || !input.roadwayOverride.trim()
-  )) {
-    throw new Error("Roadway override must be a non-empty string.");
-  }
-  const preflight = await checkContinuity(db, projectId, input);
+  const request = validateContinuityRequest(input);
   const replay = await first<Row>(db.prepare(
     "SELECT id FROM packets WHERE project_id = ? AND idempotency_key = ? LIMIT 1",
   ).bind(projectId, idempotencyKey));
   if (replay) {
     const detail = await getPacket(db, projectId, String(replay.id));
-    assertReplayRequest(input, preflight, detail);
-    return compactProjection(detail, preflight, true);
+    assertReplayRequest(request, detail);
+    return compactProjection(detail, null, true);
   }
+
+  const preflight = await checkContinuity(db, projectId, input);
 
   if (preflight.need.level !== "full" || preflight.status !== "ready") {
     return stoppedResult(preflight);
   }
 
-  const compileInput: Row = {
-    task: preflight.literalTask,
-    ...(typeof input.requestedOutput === "string" && input.requestedOutput.trim()
-      ? { requestedDecisionOrOutput: input.requestedOutput }
-      : {}),
-    ...(preflight.caseId ? { caseId: preflight.caseId } : {}),
-    ...(input.roadwayOverride !== undefined ? { roadwayOverride: input.roadwayOverride } : {}),
-    tokenBudget: input.tokenBudget ?? 800,
-  };
+  const compileInput = canonicalContinuityInput(request);
   const compiled = await compilePacket(db, projectId, compileInput, idempotencyKey, {
     stopBeforeFailedWrite: true,
     literalTask: preflight.literalTask,
+    reconstructionRequest: {
+      requestedOutput: request.requestedOutput,
+      roadwayOverride: request.roadwayOverride,
+    },
   });
   if (!compiled.packet || !compiled.receipt) {
     return stoppedResult(preflight, String(compiled.status));

@@ -1,4 +1,9 @@
 import { previewPacketCandidates } from "./packet-service";
+import {
+  canonicalContinuityInput,
+  ContinuityRequestInput,
+  validateContinuityRequest,
+} from "./continuity-request-contract";
 import { interpretTask } from "./roadway-service";
 import {
   all,
@@ -9,14 +14,6 @@ import {
 } from "./slice3-support";
 
 export type AtlasNeedLevel = "none" | "light" | "full";
-
-type ContinuityCheckInput = Row & {
-  task?: unknown;
-  requestedOutput?: unknown;
-  caseId?: unknown;
-  roadwayOverride?: unknown;
-  tokenBudget?: unknown;
-};
 
 type CompactMechanism = {
   id: string;
@@ -40,14 +37,6 @@ type CompactContext = {
   recordsScanned: number;
 };
 
-const ALLOWED_FIELDS = new Set([
-  "task",
-  "requestedOutput",
-  "caseId",
-  "roadwayOverride",
-  "tokenBudget",
-]);
-
 const STOP_WORDS = new Set([
   "about", "after", "again", "against", "also", "and", "are", "before",
   "but", "can", "current", "for", "from", "have", "how", "into", "its",
@@ -57,24 +46,6 @@ const STOP_WORDS = new Set([
 
 const FULL_TASK_PATTERN = /\b(best bets?|best option|compare|decision rule|strongest|training|pitcher prop|postmortem|lesson|audit|rerank|enter|wait|choose|plan)\b/i;
 const PRESENTATION_PATTERN = /\b(mobile|codex|transfer|copy[- ]ready|plain[- ]text|presentation|format)\b/i;
-
-function exactTask(value: unknown) {
-  if (typeof value !== "string" || !value.trim()) throw new Error("Task is required.");
-  return value;
-}
-
-function optionalExactString(value: unknown, label: string) {
-  if (value === undefined || value === null || value === "") return null;
-  if (typeof value !== "string" || !value.trim()) throw new Error(`${label} must be a non-empty string.`);
-  return value;
-}
-
-function validateInput(input: ContinuityCheckInput) {
-  const unsupported = Object.keys(input).filter((key) => !ALLOWED_FIELDS.has(key));
-  if (unsupported.length) {
-    throw new Error(`Unsupported client-authored continuity field: ${unsupported.sort().join(", ")}.`);
-  }
-}
 
 function words(value: string) {
   return [...new Set(
@@ -282,17 +253,16 @@ function candidateItems(preview: Awaited<ReturnType<typeof previewPacketCandidat
 export async function checkContinuity(
   db: D1Database,
   projectId: string,
-  input: ContinuityCheckInput,
+  input: ContinuityRequestInput,
 ) {
-  validateInput(input);
-  const literalTask = exactTask(input.task);
-  const caseId = optionalExactString(input.caseId, "Case ID");
-  const requestedOutput = optionalExactString(input.requestedOutput, "Requested output");
+  const request = validateContinuityRequest(input);
+  const literalTask = request.literalTask;
+  const caseId = request.caseId;
   const preflightStarted = Date.now();
   const context = await compactContext(db, projectId, caseId, literalTask);
   const preflightLatency = Date.now() - preflightStarted;
   const need = needDecision(literalTask, context, caseId);
-  const budget = input.tokenBudget === undefined ? 800 : Number(input.tokenBudget);
+  const budget = request.tokenBudget;
 
   const common = {
     apiVersion: "v1.7.1",
@@ -360,13 +330,7 @@ export async function checkContinuity(
     };
   }
 
-  const normalizedInput: Row = {
-    task: literalTask,
-    ...(requestedOutput ? { requestedDecisionOrOutput: requestedOutput } : {}),
-    ...(caseId ? { caseId } : {}),
-    ...(input.roadwayOverride !== undefined ? { roadwayOverride: input.roadwayOverride } : {}),
-    tokenBudget: budget,
-  };
+  const normalizedInput = canonicalContinuityInput(request);
   const interpretationStarted = Date.now();
   const interpretation = await interpretTask(db, projectId, normalizedInput, {
     registryMode: "read_only",

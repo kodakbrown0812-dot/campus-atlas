@@ -5500,6 +5500,8 @@ test("V1.7.1 reconstruction/run exposes a write-authorized additive OpenAPI cont
   );
   assert.equal(spec.components.schemas.ReconstructionRunEffects.properties.handoffCreated.const, false);
   assert.equal(spec.components.schemas.ReconstructionRunEffects.properties.providerCallPerformed.const, false);
+  assert.equal(spec.components.schemas.ReconstructionRunCompiledResponse.properties.replaySource.enum[0], "saved_immutable_packet");
+  assert.equal(spec.components.schemas.ReconstructionRunCompiledResponse.properties.currentPreflightPerformed.type, "boolean");
   assert.equal(spec.components.securitySchemes.bearerAuth.scheme, "bearer");
 });
 
@@ -5767,6 +5769,10 @@ test("V1.7.1 reconstruction/run enforces isolation, server ownership, and comple
   assert.equal(replay.value.receipt.id, created.value.receipt.id);
   assert.equal(replay.value.effects.packetCreated, false);
   assert.equal(replay.value.effects.receiptCreated, false);
+  assert.equal(replay.value.currentPreflightPerformed, false);
+  assert.equal(replay.value.replaySource, "saved_immutable_packet");
+  assert.equal(replay.value.need.level, "full");
+  assert.deepEqual(replay.value.need.reasonCodes, ["idempotent_saved_reconstruction"]);
   assert.deepEqual(canonicalMutationCounts(DB), counts);
 
   for (const changed of [
@@ -5816,6 +5822,84 @@ test("V1.7.1 reconstruction/run enforces isolation, server ownership, and comple
   assert.deepEqual(canonicalMutationCounts(DB), beforeRead);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM handoffs").get().count, 0);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM handoff_answers").get().count, 0);
+});
+
+test("V1.7.1 reconstruction/run exact replay bypasses current canonical preflight", async () => {
+  const worker = await builtWorker("v171-slice-b-replay-before-preflight");
+  const DB = await sqliteD1();
+  const body = await seedReconstructionRunFixture(worker, DB, "replay-before-preflight");
+  body.requestedOutput = "one bounded governed reconstruction";
+  body.roadwayOverride = "broad-lock-finding";
+  const key = "v171-slice-b-replay-before-preflight";
+  let adapterCalls = 0;
+  const adapter = {
+    ATLAS_TEST_RECEIVING_MODEL_ADAPTER: {
+      async execute() {
+        adapterCalls += 1;
+        throw new Error("receiving model must not execute");
+      },
+    },
+  };
+
+  const created = await reconstructionRunRequest(worker, DB, "sports", body, key, adapter);
+  assert.equal(created.response.status, 201, JSON.stringify(created.value));
+  assert.equal(created.value.currentPreflightPerformed, true);
+  assert.equal(created.value.replaySource, null);
+  const counts = canonicalMutationCounts(DB);
+
+  const blockedPreflight = {
+    database: DB.database,
+    batch: DB.batch.bind(DB),
+    prepare(sql) {
+      if (/\b(?:FROM|JOIN)\s+(?:projects|cases|mechanisms|mechanism_versions|reasoning_nodes|roadways|roadway_versions|events|findings|finding_versions|live_state_snapshots|relationships)\b/i.test(sql)) {
+        throw new Error("current canonical preflight must not execute during saved replay");
+      }
+      return DB.prepare(sql);
+    },
+  };
+  const replay = await reconstructionRunRequest(worker, blockedPreflight, "sports", body, key, adapter);
+  assert.equal(replay.response.status, 200, JSON.stringify(replay.value));
+  assert.equal(replay.value.packet.id, created.value.packet.id);
+  assert.equal(replay.value.receipt.id, created.value.receipt.id);
+  assert.equal(replay.value.packet.compiledContent, created.value.packet.compiledContent);
+  assert.equal(replay.value.idempotentReplay, true);
+  assert.equal(replay.value.effects.packetCreated, false);
+  assert.equal(replay.value.effects.receiptCreated, false);
+  assert.equal(replay.value.currentPreflightPerformed, false);
+  assert.equal(replay.value.replaySource, "saved_immutable_packet");
+  assert.deepEqual(canonicalMutationCounts(DB), counts);
+  assert.equal(adapterCalls, 0);
+
+  const conflict = await reconstructionRunRequest(
+    worker,
+    blockedPreflight,
+    "sports",
+    { ...body, task: `${body.task} changed` },
+    key,
+    adapter,
+  );
+  assert.equal(conflict.response.status, 409, JSON.stringify(conflict.value));
+  assert.match(conflict.value.error, /idempotency key conflicts/i);
+  assert.deepEqual(canonicalMutationCounts(DB), counts);
+  assert.equal(adapterCalls, 0);
+
+  const noReadsAllowed = {
+    database: DB.database,
+    async batch() { throw new Error("validation must not write"); },
+    prepare() { throw new Error("unsupported input must be rejected before database access"); },
+  };
+  const rejected = await reconstructionRunRequest(
+    worker,
+    noReadsAllowed,
+    "sports",
+    { ...body, packetText: "client-authored packet" },
+    key,
+    adapter,
+  );
+  assert.equal(rejected.response.status, 400, JSON.stringify(rejected.value));
+  assert.match(rejected.value.error, /unsupported client-authored continuity field/i);
+  assert.deepEqual(canonicalMutationCounts(DB), counts);
+  assert.equal(adapterCalls, 0);
 });
 
 test("V1.7.1 reconstruction/run rolls back packet and items when the atomic receipt write fails", async () => {

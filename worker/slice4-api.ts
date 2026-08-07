@@ -38,8 +38,9 @@ export async function handleSlice4(
 
     if (parts[0] === "reconstruction" && parts[1] === "run" && parts.length === 2 && request.method === "POST") {
       authorizeWrite(request, actionKey);
+      const idempotencyKey = requireIdempotencyKey(request);
       const body = await request.json() as Row;
-      const result = await runReconstruction(db, projectId, body, requireIdempotencyKey(request));
+      const result = await runReconstruction(db, projectId, body, idempotencyKey);
       const status = result.status === "compiled"
         ? result.idempotentReplay ? 200 : 201
         : result.status === "clarification_required"

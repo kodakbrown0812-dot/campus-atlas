@@ -1,5 +1,6 @@
 import { canonicalId } from "./canonical-records";
 import { discoverAndRankCandidates, RankedCandidate, Treatment } from "./candidate-ranking";
+import { CONTINUITY_TOKEN_BUDGETS } from "./continuity-request-contract";
 import {
   isLineageOnlyPacketAncestor,
   isPacketEligibleProtectedItem,
@@ -19,7 +20,7 @@ import {
 } from "./slice3-support";
 
 export const PACKET_VERSION = 1;
-export const SUPPORTED_TOKEN_BUDGETS = new Set([400, 800, 1600]);
+export const SUPPORTED_TOKEN_BUDGETS = CONTINUITY_TOKEN_BUDGETS;
 
 type PacketItemSnapshot = {
   sourceType: string;
@@ -454,7 +455,14 @@ export async function compilePacket(
   projectId: string,
   body: Row,
   idempotencyKey: string,
-  options: { stopBeforeFailedWrite?: boolean; literalTask?: string } = {},
+  options: {
+    stopBeforeFailedWrite?: boolean;
+    literalTask?: string;
+    reconstructionRequest?: {
+      requestedOutput: string | null;
+      roadwayOverride: string | null;
+    };
+  } = {},
 ) {
   const replay = await first<Row>(db.prepare(
     "SELECT id, task, token_budget FROM packets WHERE project_id = ? AND idempotency_key = ? LIMIT 1",
@@ -472,6 +480,15 @@ export async function compilePacket(
   }
   const interpretation = await interpretTask(db, projectId, body);
   if (options.literalTask !== undefined) interpretation.literalRequest = options.literalTask;
+  const storedInterpretation = options.reconstructionRequest
+    ? {
+      ...interpretation,
+      reconstructionRunRequest: {
+        requestedOutput: options.reconstructionRequest.requestedOutput,
+        roadwayOverride: options.reconstructionRequest.roadwayOverride,
+      },
+    }
+    : interpretation;
   if (interpretation.clarificationRequired || !interpretation.primaryRoadway) {
     return {
       status: "clarification_required",
@@ -550,7 +567,7 @@ export async function compilePacket(
       interpretation.caseId,
       interpretation.literalRequest,
       interpretation.requiredReasoningMechanism,
-      json(interpretation),
+      json(storedInterpretation),
       interpretation.primaryRoadway.id,
       interpretation.primaryRoadway.versionId,
       json(interpretation.supportingModules),

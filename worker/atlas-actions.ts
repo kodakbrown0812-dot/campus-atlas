@@ -744,7 +744,7 @@ function openApi(origin: string) {
           operationId: "runCanonicalReconstruction",
           tags: ["Canonical V1.7.1"],
           summary: "Compile one immutable governed reconstruction packet and receipt",
-          description: "Re-runs the current server-owned Need Gate, interpretation, and candidate preview before atomically invoking the existing packet compiler. It performs no receiving-model or provider call.",
+          description: "For a new Idempotency-Key, re-runs the current server-owned Need Gate, interpretation, and candidate preview before atomically invoking the existing packet compiler. An exact idempotent replay returns the saved immutable packet and receipt without reevaluating current canonical eligibility; use a new key for a new current-state reconstruction. It performs no receiving-model or provider call.",
           parameters: [
             {
               name: "projectId",
@@ -775,7 +775,7 @@ function openApi(origin: string) {
               content: { "application/json": { schema: { $ref: "#/components/schemas/ReconstructionRunCompiledResponse" } } },
             },
             "200": {
-              description: "Idempotent replay of the existing immutable packet and receipt",
+              description: "Saved-snapshot replay of the existing immutable packet and receipt; current canonical eligibility was not reevaluated",
               content: { "application/json": { schema: { $ref: "#/components/schemas/ReconstructionRunCompiledResponse" } } },
             },
             "409": {
@@ -894,7 +894,7 @@ function openApi(origin: string) {
         },
         ReconstructionRunCompiledResponse: {
           type: "object",
-          required: ["apiVersion", "status", "projectId", "literalTask", "need", "roadway", "packet", "summary", "receipt", "effects", "idempotentReplay", "links"],
+          required: ["apiVersion", "status", "projectId", "literalTask", "need", "roadway", "packet", "summary", "receipt", "effects", "idempotentReplay", "replaySource", "currentPreflightPerformed", "links"],
           properties: {
             apiVersion: { type: "string", const: "v1.7.1" },
             status: { type: "string", const: "compiled" },
@@ -944,12 +944,21 @@ function openApi(origin: string) {
             },
             effects: { $ref: "#/components/schemas/ReconstructionRunEffects" },
             idempotentReplay: { type: "boolean" },
+            replaySource: {
+              type: ["string", "null"],
+              enum: ["saved_immutable_packet", null],
+              description: "Set only for an idempotent saved-snapshot replay.",
+            },
+            currentPreflightPerformed: {
+              type: "boolean",
+              description: "False on saved-snapshot replay; true when current canonical state was evaluated for this response.",
+            },
             links: { type: "object" },
           },
         },
         ReconstructionRunStoppedResponse: {
           type: "object",
-          required: ["apiVersion", "status", "projectId", "literalTask", "need", "preflight", "packet", "receipt", "effects", "idempotentReplay"],
+          required: ["apiVersion", "status", "projectId", "literalTask", "need", "preflight", "packet", "receipt", "effects", "idempotentReplay", "replaySource", "currentPreflightPerformed"],
           properties: {
             apiVersion: { type: "string", const: "v1.7.1" },
             status: {
@@ -967,6 +976,8 @@ function openApi(origin: string) {
             receipt: { type: "null" },
             effects: { $ref: "#/components/schemas/ReconstructionRunEffects" },
             idempotentReplay: { type: "boolean", const: false },
+            replaySource: { type: "null" },
+            currentPreflightPerformed: { type: "boolean", const: true },
             links: { type: "null" },
           },
         },
