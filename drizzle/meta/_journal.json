@@ -64,6 +64,13 @@
       "when": 1785227584976,
       "tag": "0008_complete_timeslip",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1786599460000,
+      "tag": "0009_canonical_sports_project",
+      "breakpoints": true
     }
   ]
 }
