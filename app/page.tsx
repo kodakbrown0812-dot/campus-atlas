@@ -60,7 +60,7 @@ export default function CampusAtlasRoot() {
         <p className="root-eyebrow">Campus Atlas V1.7</p>
         {state.status === "loading" && (
           <>
-            <h1>Restoring your canonical Work context</h1>
+            <h1>Restoring your project Home</h1>
             <p>Checking project activity and persistent D1 state. No fixture is used while this loads.</p>
             <div className="root-progress" aria-label="Loading canonical state"><i /></div>
           </>

@@ -894,7 +894,7 @@ function openApi(origin: string) {
         },
         ReconstructionRunCompiledResponse: {
           type: "object",
-          required: ["apiVersion", "status", "projectId", "literalTask", "need", "roadway", "packet", "summary", "receipt", "effects", "idempotentReplay", "replaySource", "currentPreflightPerformed", "links"],
+          required: ["apiVersion", "status", "projectId", "literalTask", "need", "roadway", "capsule", "packet", "summary", "receipt", "effects", "idempotentReplay", "replaySource", "currentPreflightPerformed", "links"],
           properties: {
             apiVersion: { type: "string", const: "v1.7.1" },
             status: { type: "string", const: "compiled" },
@@ -911,6 +911,7 @@ function openApi(origin: string) {
                 name: { type: ["string", "null"] },
               },
             },
+            capsule: { type: "null" },
             packet: {
               type: "object",
               required: ["id", "version", "status", "tokenBudget", "finalTokenCount", "compiledContent", "createdAt"],
@@ -958,7 +959,7 @@ function openApi(origin: string) {
         },
         ReconstructionRunStoppedResponse: {
           type: "object",
-          required: ["apiVersion", "status", "projectId", "literalTask", "need", "preflight", "packet", "receipt", "effects", "idempotentReplay", "replaySource", "currentPreflightPerformed"],
+          required: ["apiVersion", "status", "projectId", "literalTask", "need", "capsule", "preflight", "packet", "receipt", "effects", "idempotentReplay", "replaySource", "currentPreflightPerformed"],
           properties: {
             apiVersion: { type: "string", const: "v1.7.1" },
             status: {
@@ -970,6 +971,10 @@ function openApi(origin: string) {
             literalTask: { type: "string" },
             need: { $ref: "#/components/schemas/AtlasNeedGate" },
             roadway: { type: "object" },
+            capsule: {
+              type: ["object", "null"],
+              description: "Present only for light_continuity_only. Its compiledContent is the exact server-produced current-room deliverable.",
+            },
             preflight: { type: "object" },
             packet: { type: "null" },
             summary: { type: "null" },

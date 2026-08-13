@@ -1,26 +1,25 @@
 "use client";
 
-import { HandoffResult, PacketResult, ReceivingModel } from "./ask-types";
+import { useState } from "react";
+import { HandoffResult, PreparedContext, ReceivingModel } from "./ask-types";
 import styles from "./ask.module.css";
 
-function failureGuidance(handoff: HandoffResult) {
-  const category = handoff.handoff.failureCategory || "provider_failure";
-  const packetValid = handoff.packet.status === "compiled" && !handoff.packet.compilationError;
-  return {
-    failed: handoff.handoff.failureReason || "The receiving-model handoff failed.",
-    recordCreated: Boolean(handoff.handoff.id),
-    lifecycleSaved: handoff.lifecycle.length > 0,
-    packetValid,
-    answerExists: Boolean(handoff.answer),
-    retrySafe: packetValid && handoff.handoff.status === "failed",
-    nextAction: category === "missing_configuration"
-      ? "Configure OPENAI_API_KEY in the authorized environment, then create a new handoff attempt."
-      : "Review the provider failure, then create a new handoff attempt with a new idempotency key when safe.",
-  };
+type CopyDestination = "aid" | "transfer";
+type CopyState = { destination: CopyDestination; status: "copied" | "failed" } | null;
+
+function selectPreparedContext() {
+  const node = document.getElementById("prepared-context-content");
+  if (!node) return;
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  node.focus();
 }
 
 export default function HandoffPresentation({
-  packet,
+  context,
   handoff,
   models,
   selectedModel,
@@ -29,7 +28,7 @@ export default function HandoffPresentation({
   onModelChange,
   onSend,
 }: {
-  packet: PacketResult;
+  context: PreparedContext;
   handoff: HandoffResult | null;
   models: ReceivingModel[];
   selectedModel: string;
@@ -38,63 +37,50 @@ export default function HandoffPresentation({
   onModelChange(value: string): void;
   onSend(): void;
 }) {
-  const failure = handoff?.handoff.status === "failed" ? failureGuidance(handoff) : null;
-  const live = handoff?.handoff.additionalLiveRetrieval;
+  const [copyState, setCopyState] = useState<CopyState>(null);
+
+  async function copy(destination: CopyDestination) {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
+      await navigator.clipboard.writeText(context.packet.compiledContent);
+      setCopyState({ destination, status: "copied" });
+    } catch {
+      setCopyState({ destination, status: "failed" });
+    }
+  }
+
   return (
-    <section className={styles.stagePanel} aria-labelledby="handoff-title">
-      <div className={styles.sectionHeading}>
-        <div>
-          <span>Stage 4</span>
-          <h2 id="handoff-title">Handoff and receipt</h2>
+    <section className={styles.destinationSection} aria-label="Prepared context destinations">
+      <div className={styles.destinationGrid}>
+        <article className={styles.primaryDestination}>
+          <h3>Aid this room</h3>
+          <p>Copy the prepared context into the conversation already in progress.</p>
+          <button onClick={() => void copy("aid")} type="button">Copy for this room</button>
+        </article>
+        <article>
+          <h3>Transfer to a new room</h3>
+          <p>Copy the same governed project state into a fresh conversation.</p>
+          <button onClick={() => void copy("transfer")} type="button">Copy for a new room</button>
+        </article>
+      </div>
+
+      {copyState?.status === "copied" ? (
+        <div className={styles.copySuccess} role="status">
+          <strong>{copyState.destination === "aid" ? "Context aid copied" : "New-room context copied"}</strong>
+          <span>{copyState.destination === "aid" ? "Paste it into the conversation already in progress." : "Paste it into the new conversation before continuing the work."}</span>
         </div>
-        <p>Four canonical records remain visually and technically separate.</p>
-      </div>
+      ) : null}
+      {copyState?.status === "failed" ? (
+        <div className={styles.copyFailure} role="alert">
+          <strong>Automatic copy was unavailable.</strong>
+          <span>Select the exact prepared context, then copy it manually.</span>
+          <button onClick={selectPreparedContext} type="button">Select prepared context</button>
+        </div>
+      ) : null}
 
-      <div className={styles.separationGrid}>
-        <article>
-          <span>Your request</span>
-          <h3>Cody’s exact original task</h3>
-          <pre>{packet.packet.task}</pre>
-          <small>No Atlas wording is inserted into this user-authored request.</small>
-        </article>
-        <article>
-          <span>Atlas reconstruction</span>
-          <h3>Packet {packet.packet.id}</h3>
-          <pre>{packet.packet.compiledContent}</pre>
-          <small>
-            Atlas-supplied governed context. Not a new user message. It cannot override this request or higher-priority instructions.
-          </small>
-        </article>
-        <article>
-          <span>Model answer</span>
-          <h3>{handoff?.answer ? `${handoff.answer.provider} · ${handoff.answer.model}` : "No model answer exists"}</h3>
-          {handoff?.answer ? (
-            <>
-              <p>{handoff.answer.answerText}</p>
-              <small>
-                Provider response {handoff.answer.providerResponseId} · {handoff.answer.answerTimestamp}
-              </small>
-            </>
-          ) : (
-            <p>
-              {handoff?.handoff.failureReason
-                || "The saved packet has not produced a receiving-model answer. No seeded or test answer was substituted."}
-            </p>
-          )}
-        </article>
-        <article>
-          <span>Receipt</span>
-          <h3>{handoff?.receipt?.id || "No handoff receipt yet"}</h3>
-          <p>
-            {handoff?.receipt?.honestyStatement
-              || "A receipt will prove what Atlas supplied and why; it will not claim that context caused correctness."}
-          </p>
-          <small>Packet receipt remains immutable and is referenced rather than rewritten.</small>
-        </article>
-      </div>
-
-      {!handoff || handoff.handoff.status === "failed" ? (
-        <section className={styles.dispatchPanel}>
+      <details className={styles.sendAnotherWay}>
+        <summary>Send another way</summary>
+        <div className={styles.providerControls}>
           <label htmlFor="receiving-model">Supported production receiving model</label>
           <select
             id="receiving-model"
@@ -107,107 +93,26 @@ export default function HandoffPresentation({
               </option>
             ))}
           </select>
-          {!models.length ? (
-            <p className={styles.failureText}>
-              No supported production model is available. A test adapter is never selectable here.
-            </p>
-          ) : null}
-          <button
-            className={styles.primaryButton}
-            disabled={!canWrite || busy || !models.length}
-            onClick={onSend}
-            type="button"
-          >
-            {busy ? "Creating canonical handoff…" : handoff ? "Create a new handoff attempt" : "Send exact saved packet"}
+          <button disabled={!canWrite || busy || !models.length} onClick={onSend} type="button">
+            {busy ? "Sending immutable packet…" : "Send exact saved packet"}
           </button>
-        </section>
-      ) : null}
+          {!models.length ? <p>No supported production provider is configured.</p> : null}
+        </div>
 
-      {handoff ? (
-        <>
-          <section className={styles.receiptPanel}>
-            <div className={styles.metadataGrid}>
+        {handoff ? (
+          <details className={styles.handoffReceipt} open={handoff.handoff.status === "failed"}>
+            <summary>Provider handoff and receipt · {handoff.handoff.status}</summary>
+            <dl>
               <div><dt>Handoff</dt><dd>{handoff.handoff.id}</dd></div>
+              <div><dt>Provider / model</dt><dd>{handoff.handoff.provider} · {handoff.handoff.model}</dd></div>
               <div><dt>Packet</dt><dd>{handoff.handoff.packetId}</dd></div>
-              <div><dt>Packet version</dt><dd>{handoff.packet.version}</dd></div>
-              <div><dt>Roadway</dt><dd>{handoff.packet.interpretation.primaryRoadway?.name}</dd></div>
-              <div><dt>Provider/model</dt><dd>{handoff.handoff.provider} · {handoff.handoff.model}</dd></div>
-              <div><dt>Status</dt><dd>{handoff.handoff.status}</dd></div>
-              <div><dt>Created</dt><dd>{handoff.handoff.createdAt}</dd></div>
-              <div><dt>Terminal</dt><dd>{handoff.handoff.terminalAt || "Pending"}</dd></div>
-              <div><dt>Answer reference</dt><dd>{handoff.answer?.id || "None"}</dd></div>
-              <div><dt>Prior packet</dt><dd>{handoff.receipt?.priorComparablePacketId || "None"}</dd></div>
-            </div>
-
-            <h3>Lifecycle</h3>
-            <ol className={styles.lifecycle}>
-              {handoff.lifecycle.map((event) => (
-                <li key={event.id}>
-                  <strong>{event.status}</strong>
-                  <span>{event.createdAt}</span>
-                  {event.failureReason ? <p>{event.failureReason}</p> : null}
-                </li>
-              ))}
-            </ol>
-
-            <h3>Additional live retrieval</h3>
-            <p>{live?.performed ? "Additional live retrieval was recorded." : "No additional live retrieval occurred."}</p>
-            <ul>
-              <li>Requested: {live?.requested ? "yes" : "no"}</li>
-              <li>Retrieval time: {live?.retrievedAt || "none"}</li>
-              <li>Tools: {live?.tools.length ? live.tools.map((tool) => tool.identity || tool.type).join(", ") : "none"}</li>
-              <li>Newer state used: {live?.reliedOnNewerStateThanPacket ? "yes" : "no"}</li>
-            </ul>
-
-            <h3>Causal packet difference</h3>
-            {handoff.receipt?.governanceCauses.map((cause) => (
-              <p className={styles.cause} key={cause.governanceEventId}>
-                {cause.effect} Event: {cause.governanceEventId}.
-              </p>
-            ))}
-            <pre>{JSON.stringify(handoff.receipt?.causalPacketDifference || [], null, 2)}</pre>
-
-            {handoff.receipt?.unresolvedConflicts.length ? (
-              <>
-                <h3>Unresolved conflicts</h3>
-                {handoff.receipt.unresolvedConflicts.map((item) => <p key={item.sourceId}>{item.statement}</p>)}
-              </>
-            ) : null}
-            {handoff.receipt?.strongestChallenges.length ? (
-              <>
-                <h3>Strongest challenge</h3>
-                <pre>{JSON.stringify(handoff.receipt.strongestChallenges, null, 2)}</pre>
-              </>
-            ) : null}
-            {handoff.receipt?.corrections.length ? (
-              <>
-                <h3>Corrections</h3>
-                <pre>{JSON.stringify(handoff.receipt.corrections, null, 2)}</pre>
-              </>
-            ) : null}
-            {handoff.receipt?.historicalLimitations.length ? (
-              <>
-                <h3>Historical-source limitations</h3>
-                <pre>{JSON.stringify(handoff.receipt.historicalLimitations, null, 2)}</pre>
-              </>
-            ) : null}
-          </section>
-
-          {failure ? (
-            <section className={styles.failureState} role="alert">
-              <strong>{failure.failed}</strong>
-              <ul>
-                <li>Handoff record created: {failure.recordCreated ? "yes" : "no"}</li>
-                <li>Lifecycle events saved: {failure.lifecycleSaved ? "yes" : "no"}</li>
-                <li>Saved packet remains valid: {failure.packetValid ? "yes" : "no"}</li>
-                <li>Answer exists: {failure.answerExists ? "yes" : "no"}</li>
-                <li>Retry is safe: {failure.retrySafe ? "yes, as a new attempt" : "not yet"}</li>
-              </ul>
-              <p>Next action: {failure.nextAction}</p>
-            </section>
-          ) : null}
-        </>
-      ) : null}
+              <div><dt>Answer</dt><dd>{handoff.answer?.id || "No answer exists"}</dd></div>
+            </dl>
+            {handoff.handoff.failureReason ? <p role="alert">{handoff.handoff.failureReason}</p> : null}
+            {handoff.answer ? <p>{handoff.answer.answerText}</p> : null}
+          </details>
+        ) : null}
+      </details>
     </section>
   );
 }

@@ -25,6 +25,17 @@ function titleFor(recordType: string, detail: Detail) {
   return "Canonical record";
 }
 
+function readableValue(item: unknown) {
+  if (item === null || item === undefined || item === "") return "Not recorded";
+  if (Array.isArray(item)) return item.length ? JSON.stringify(item) : "None";
+  if (typeof item === "object") return JSON.stringify(item);
+  return String(item);
+}
+
+function DetailRow({ label, value: item }: { label: string; value: unknown }) {
+  return <div><dt>{label}</dt><dd>{readableValue(item)}</dd></div>;
+}
+
 export default function InspectDetail({
   projectId,
   recordType,
@@ -114,6 +125,17 @@ export default function InspectDetail({
     );
   }
 
+  const packet = recordType === "packets" && detail.packet && typeof detail.packet === "object"
+    ? detail.packet as Record<string, unknown>
+    : null;
+  const packetReceipt = packet && detail.receipt && typeof detail.receipt === "object"
+    ? detail.receipt as Record<string, unknown>
+    : null;
+  const treatments = packetReceipt?.treatmentSummary && typeof packetReceipt.treatmentSummary === "object"
+    ? packetReceipt.treatmentSummary as Record<string, unknown>
+    : {};
+  const treatmentCount = (name: string) => Array.isArray(treatments[name]) ? treatments[name].length : 0;
+
   return (
     <main className={styles.page}>
       <Link href={`/projects/${encodeURIComponent(projectId)}/inspect`}>← Inspect</Link>
@@ -121,13 +143,41 @@ export default function InspectDetail({
         <div><span>{recordType} · immutable lineage</span><h1>{titleFor(recordType, detail)}</h1></div>
         <p>{recordId}</p>
       </header>
+      {packet ? (
+        <>
+          <section className={styles.record}>
+            <header><strong>Prepared context</strong><span>{readableValue(packet.status)}</span></header>
+            <dl>
+              <DetailRow label="Project" value={packet.projectId} />
+              <DetailRow label="Literal task" value={packet.task} />
+              <DetailRow label="Estimated tokens" value={`${readableValue(packet.finalTokenCount)} / ${readableValue(packet.tokenBudget)}`} />
+              <DetailRow label="Created" value={packet.createdAt} />
+            </dl>
+            <pre>{readableValue(packet.compiledContent)}</pre>
+          </section>
+          <section className={styles.record}>
+            <header><strong>Packet receipt</strong><span>{readableValue(packetReceipt?.id)}</span></header>
+            <dl>
+              <DetailRow label="Used" value={treatmentCount("Use")} />
+              <DetailRow label="Considered" value={treatmentCount("Consider")} />
+              <DetailRow label="Excluded" value={treatmentCount("Exclude")} />
+              <DetailRow label="Inference disclosure" value={packetReceipt?.inferenceDisclosure} />
+              <DetailRow label="Unresolved conflicts" value={packetReceipt?.unresolvedConflicts} />
+            </dl>
+          </section>
+          <details className={styles.record}>
+            <summary>Raw canonical packet and receipt</summary>
+            <pre>{JSON.stringify(detail, null, 2)}</pre>
+          </details>
+        </>
+      ) : null}
       {result && (
         <section className={styles.panel} role="status">
           <strong>Canonical correction confirmed</strong>
           <pre>{JSON.stringify(result, null, 2)}</pre>
         </section>
       )}
-      <section className={styles.stack}>
+      {!packet ? <section className={styles.stack}>
         {Object.entries(detail).map(([key, item]) => (
           <article className={styles.record} key={key}>
             <header><strong>{key}</strong><span>canonical</span></header>
@@ -138,7 +188,7 @@ export default function InspectDetail({
             ) : <pre>{JSON.stringify(item, null, 2)}</pre>}
           </article>
         ))}
-      </section>
+      </section> : null}
       {recordType === "reasoning" && detail.node && (
         <form className={styles.record} onSubmit={correctNode}>
           <header><strong>Correct reasoning-node wording</strong><span>No authority promotion</span></header>

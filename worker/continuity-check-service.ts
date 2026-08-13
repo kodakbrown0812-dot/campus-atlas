@@ -162,7 +162,20 @@ function gateRequiredState(task: string) {
   return [];
 }
 
-function needDecision(task: string, context: CompactContext, caseId: string | null) {
+function needDecision(
+  task: string,
+  requestedOutput: string | null,
+  context: CompactContext,
+  caseId: string | null,
+) {
+  const fullTransferRequested = /\bfull room transfer\b/i.test(requestedOutput || "");
+  if (fullTransferRequested) {
+    return {
+      level: "full" as const,
+      reasonCodes: ["explicit_full_room_transfer"],
+      explanation: "A full governed project-state packet was explicitly requested for room transfer.",
+    };
+  }
   const presentation = PRESENTATION_PATTERN.test(task);
   if (presentation && context.matchingMechanisms.length) {
     return {
@@ -228,8 +241,14 @@ function nextAction(status: string, level: AtlasNeedLevel) {
   return "review_then_request_reconstruction_run";
 }
 
-function compactMechanismView(mechanism: CompactMechanism | undefined) {
+function compactMechanismView(mechanism: CompactMechanism | undefined, literalTask: string) {
   if (!mechanism) return null;
+  const compiledContent = [
+    "# Atlas context aid",
+    `Task: ${literalTask}`,
+    "",
+    `- [USE] ${mechanism.statement} [Mechanism:${mechanism.id}; Compressed; ${mechanism.authority}]`,
+  ].join("\n");
   return {
     sourceType: "Mechanism",
     sourceId: mechanism.id,
@@ -238,7 +257,12 @@ function compactMechanismView(mechanism: CompactMechanism | undefined) {
     representation: "Compressed",
     authority: mechanism.authority,
     scope: mechanism.scope,
+    treatment: "Use" as const,
+    role: "governing_context" as const,
     reason: "Compact governed continuity matched the current presentation context.",
+    compiledContent,
+    includedItems: 1,
+    estimatedTokens: Math.ceil(compiledContent.length / 4),
   };
 }
 
@@ -261,7 +285,7 @@ export async function checkContinuity(
   const preflightStarted = Date.now();
   const context = await compactContext(db, projectId, caseId, literalTask);
   const preflightLatency = Date.now() - preflightStarted;
-  const need = needDecision(literalTask, context, caseId);
+  const need = needDecision(literalTask, request.requestedOutput, context, caseId);
   const budget = request.tokenBudget;
 
   const common = {
@@ -285,7 +309,7 @@ export async function checkContinuity(
         materialAmbiguity: false,
       },
       compactCapsule: need.level === "light"
-        ? compactMechanismView(context.matchingMechanisms[0])
+        ? compactMechanismView(context.matchingMechanisms[0], literalTask)
         : null,
       continuity: {
         governingMechanisms: need.level === "light" && context.matchingMechanisms.length ? 1 : 0,

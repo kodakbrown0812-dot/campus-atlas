@@ -19,7 +19,7 @@ export default function AskHistory({
   onOpenHandoff(id: string): void;
 }) {
   return (
-    <aside className={styles.history} aria-label="Canonical Ask history">
+    <aside className={styles.history} aria-label="Atlas Steward history">
       <header>
         <span>Immutable history</span>
         <h2>Packets, handoffs, answers, and receipts</h2>

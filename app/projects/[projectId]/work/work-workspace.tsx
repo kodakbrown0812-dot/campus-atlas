@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useWriteSession } from "../../../components/write-session";
+import { useStewardTask } from "../../../components/steward-task";
 import styles from "./work.module.css";
 
 type ReasoningHealth = {
@@ -37,6 +38,7 @@ type WorkOverview = {
     id: string;
     name: string;
     description: string | null;
+    pendingFindingCount: number;
   };
   activeConversationId: string | null;
   conversations: WorkConversation[];
@@ -111,10 +113,12 @@ function ConversationCard({
 export default function WorkWorkspace({ projectId }: { projectId: string }) {
   const router = useRouter();
   const { session, authorizationHeaders } = useWriteSession();
+  const { carryTask } = useStewardTask();
   const [overview, setOverview] = useState<WorkOverview | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "unavailable">("loading");
   const [mode, setMode] = useState<"none" | "native" | "import">("none");
   const [error, setError] = useState("");
+  const [stewardTask, setStewardTask] = useState("");
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/work`, {
@@ -146,18 +150,20 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     return () => { active = false; };
   }, [load]);
 
-  const sections = useMemo(() => {
+  const projectWork = useMemo(() => {
     const conversations = overview?.conversations || [];
-    return [
-      { title: "Active conversations", items: conversations.filter((item) => item.status === "active") },
-      { title: "Needs decision", items: conversations.filter((item) => item.reasoningHealth.state === "Awaiting decision") },
-      { title: "Needs outcome", items: conversations.filter((item) => item.reasoningHealth.state === "Awaiting outcome") },
-      { title: "Deferred", items: conversations.filter((item) => item.activeCaseStatus === "deferred") },
-    ];
+    return conversations.filter((item) => item.id !== overview?.activeConversationId);
   }, [overview]);
 
   const activeConversation = overview?.conversations.find((item) => item.id === overview.activeConversationId) || null;
   const canWrite = Boolean(session?.writeAuthorization.authorized);
+
+  function openSteward(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!stewardTask.trim()) return;
+    carryTask(projectId, stewardTask);
+    router.push(`/projects/${encodeURIComponent(projectId)}/ask`);
+  }
 
   async function createNative(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -249,8 +255,8 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     return (
       <div className={styles.page}>
         <section className={styles.loadingState}>
-          <span>Canonical Work</span>
-          <h1>Restoring meaningful activity…</h1>
+          <span>Project Home</span>
+          <h1>Restoring your project…</h1>
           <p>Reading project conversations, active cases, checkpoints, and pending findings from D1.</p>
         </section>
       </div>
@@ -261,8 +267,8 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     return (
       <div className={styles.page}>
         <section className={styles.failureState} role="alert">
-          <span>Canonical Work unavailable</span>
-          <h1>Work could not be loaded</h1>
+          <span>Project Home unavailable</span>
+          <h1>Home could not be loaded</h1>
           <p>{error}</p>
           <strong>No seeded conversation or project was substituted.</strong>
           <button onClick={() => window.location.reload()} type="button">Retry canonical read</button>
@@ -275,19 +281,39 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
-          <span className={styles.eyebrow}>Work · {overview.source}</span>
+          <span className={styles.eyebrow}>Home · {overview.source}</span>
           <h1>{overview.project.name}</h1>
           <p>{overview.project.description || "Continue the canonical conversation that matters now."}</p>
         </div>
-        <div className={styles.headerActions}>
-          <button onClick={() => setMode(mode === "native" ? "none" : "native")} type="button">
-            Start Atlas conversation
-          </button>
-          <button onClick={() => setMode(mode === "import" ? "none" : "import")} type="button">
-            Import conversation
-          </button>
-        </div>
       </header>
+
+      <form className={styles.stewardEntry} onSubmit={openSteward}>
+        <div>
+          <span className={styles.eyebrow}>Atlas Steward</span>
+          <h2>Keep this project coherent.</h2>
+          <p>
+            Atlas finds the prior work this task needs, reconstructs the current project state, and prepares a reviewable context packet.
+          </p>
+        </div>
+        <label htmlFor="home-steward-task">What are you trying to continue?</label>
+        <textarea
+          id="home-steward-task"
+          onChange={(event) => setStewardTask(event.target.value)}
+          placeholder="Describe the decision, task, or missing project context."
+          value={stewardTask}
+        />
+        <button disabled={!stewardTask.trim()} type="submit">Prepare context</button>
+      </form>
+
+      <div className={styles.secondaryActions} aria-label="Additional project actions">
+        <span>Other ways to continue</span>
+        <button onClick={() => setMode(mode === "native" ? "none" : "native")} type="button">
+          Start Atlas conversation
+        </button>
+        <button onClick={() => setMode(mode === "import" ? "none" : "import")} type="button">
+          Import conversation
+        </button>
+      </div>
 
       {!canWrite && (
         <div className={styles.readOnlyNotice}>
@@ -364,40 +390,44 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         </section>
       )}
 
-      {sections.map((section) => {
-        const items = section.items.filter((item) => item.id !== activeConversation?.id);
-        if (!items.length) return null;
-        return (
-          <section className={styles.section} key={section.title}>
-            <div className={styles.sectionHeading}>
-              <h2>{section.title}</h2>
-              <span>{items.length}</span>
-            </div>
-            <div className={styles.cardGrid}>
-              {items.map((conversation) => (
-                <ConversationCard conversation={conversation} key={conversation.id} projectId={projectId} />
-              ))}
-            </div>
-          </section>
-        );
-      })}
+      {overview.project.pendingFindingCount > 0 ? (
+        <Link className={styles.reviewNotice} href={`/projects/${encodeURIComponent(projectId)}/findings`}>
+          <span className={styles.eyebrow}>Needs review</span>
+          <strong>{overview.project.pendingFindingCount} governed finding{overview.project.pendingFindingCount === 1 ? "" : "s"} require attention</strong>
+          <small>Reviewing can change what Atlas is allowed to use later.</small>
+        </Link>
+      ) : null}
+
+      {projectWork.length ? (
+        <section className={styles.section}>
+          <div className={styles.sectionHeading}>
+            <h2>Project work</h2>
+            <span>{projectWork.length}</span>
+          </div>
+          <div className={styles.cardGrid}>
+            {projectWork.map((conversation) => (
+              <ConversationCard conversation={conversation} key={conversation.id} projectId={projectId} />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <section className={styles.section}>
         <div className={styles.sectionHeading}>
-          <h2>Recently changed packets</h2>
+          <h2>Recent context packets</h2>
           <span>{overview.recentlyChangedPackets.length}</span>
         </div>
         {overview.recentlyChangedPackets.length ? (
           <div className={styles.packetList}>
             {overview.recentlyChangedPackets.map((packet) => (
-              <Link href={`/projects/${encodeURIComponent(projectId)}/ask`} key={packet.id}>
+              <Link href={`/projects/${encodeURIComponent(projectId)}/ask?packet=${encodeURIComponent(packet.id)}`} key={packet.id}>
                 <strong>{packet.task}</strong>
                 <span>{packet.status} · {packet.finalTokenCount}/{packet.tokenBudget} tokens · {formatTime(packet.createdAt)}</span>
               </Link>
             ))}
           </div>
         ) : (
-          <p className={styles.quietEmpty}>Packets appear after Atlas reconstructs context for a task.</p>
+          <p className={styles.quietEmpty}>Packets appear after Atlas prepares context for a task.</p>
         )}
       </section>
     </div>

@@ -249,3 +249,105 @@ export type HandoffSummary = {
   answerTimestamp: string | null;
   receiptId: string | null;
 };
+
+export type PreparedPacket = {
+  id: string;
+  version: number;
+  status: string;
+  tokenBudget: number;
+  finalTokenCount: number;
+  compiledContent: string;
+  priorComparablePacketId: string | null;
+  createdAt: string;
+  compilationError?: string | null;
+};
+
+export type PreparedReceipt = {
+  id: string;
+  treatmentSummary: Record<"Use" | "Consider" | "Exclude", TreatmentItem[]>;
+  treatmentCounts?: Record<"Use" | "Consider" | "Exclude", number>;
+  freshness: { required?: string[]; missing?: string[]; safeToCompile?: boolean };
+  inferenceDisclosure: string;
+  unresolvedConflicts: Array<{ sourceId: string; statement: string }>;
+  exactPacketDifference: Array<Record<string, unknown>>;
+  governanceCauses: Array<{
+    governanceEventId: string;
+    sourceId?: string;
+    effect: string;
+    correctnessClaim?: false;
+  }>;
+  honestyStatement?: string;
+};
+
+export type PreparedContext = {
+  projectId: string;
+  literalTask: string;
+  packet: PreparedPacket;
+  receipt: PreparedReceipt;
+  links: {
+    packet: string;
+    receipt: string;
+    inspect: string;
+  };
+  raw: unknown;
+};
+
+export type TargetedContextCapsule = {
+  sourceType: string;
+  sourceId: string;
+  sourceVersionId: string;
+  statement: string;
+  representation: string;
+  authority: string;
+  scope: string;
+  treatment: "Use";
+  role: string;
+  reason: string;
+  compiledContent: string;
+  includedItems: number;
+  estimatedTokens: number;
+};
+
+export type ReconstructionRunResult = {
+  status:
+    | "compiled"
+    | "clarification_required"
+    | "atlas_not_needed"
+    | "light_continuity_only"
+    | "missing_required_state"
+    | "unsafe_under_selected_budget";
+  projectId: string;
+  caseId: string | null;
+  literalTask: string;
+  need: {
+    level: "none" | "light" | "full";
+    reasonCodes: string[];
+    explanation: string;
+  };
+  roadway: {
+    id?: string;
+    versionId?: string;
+    name?: string | null;
+    primary?: { id: string; versionId: string; name: string } | null;
+    candidates?: Array<{ roadwayId: string; versionId: string; name: string; reason: string }>;
+    materialAmbiguity?: boolean;
+  };
+  capsule: TargetedContextCapsule | null;
+  preflight?: {
+    status: string;
+    freshness: { required: string[]; missing: string[]; safe: boolean };
+    budget: { selected: number; estimatedMinimumSafe: number | null; estimatedFinal: number | null; safe: boolean };
+    next: { action: string; reconstructionRunAvailable: boolean };
+  };
+  packet: PreparedPacket | null;
+  receipt: PreparedReceipt | null;
+  effects: {
+    packetCreated: boolean;
+    receiptCreated: boolean;
+    handoffCreated: boolean;
+    providerCallPerformed: boolean;
+    authorityChanged: boolean;
+  };
+  links: PreparedContext["links"] | null;
+  idempotentReplay: boolean;
+};

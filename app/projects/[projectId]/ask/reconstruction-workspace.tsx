@@ -1,71 +1,81 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import { useStewardTask } from "../../../components/steward-task";
 import { useWriteSession } from "../../../components/write-session";
 import AskHistory from "./ask-history";
 import {
-  CandidatePreview,
   HandoffResult,
   HandoffSummary,
-  Interpretation,
   PacketResult,
   PacketSummary,
+  PreparedContext,
   ReceivingModel,
+  ReconstructionRunResult,
   Roadway,
 } from "./ask-types";
-import CandidateTreatmentPanel from "./candidate-treatment-panel";
 import HandoffPresentation from "./handoff-presentation";
+import ContextAidPresentation from "./context-aid-presentation";
 import PacketPreview from "./packet-preview";
 import styles from "./ask.module.css";
 
 type CaseChoice = { id: string; objective: string; status: string };
-type Stage = 1 | 2 | 3 | 4;
+type ProjectChoice = { id: string; name: string };
+type ViewState = "idle" | "preparing" | "clarification" | "not_needed" | "light" | "ready" | "failure";
 
 const budgets = [400, 800, 1600] as const;
-const stages: Array<{ id: Stage; label: string; detail: string }> = [
-  { id: 1, label: "Interpret", detail: "Confirm intent and roadway" },
-  { id: 2, label: "Treat candidates", detail: "Inspect Use, Consider, Exclude" },
-  { id: 3, label: "Compile packet", detail: "Save bounded immutable context" },
-  { id: 4, label: "Handoff and receipt", detail: "Separate request, context, answer" },
-];
 
 function endpoint(projectId: string, suffix: string) {
   return `/api/v1/projects/${encodeURIComponent(projectId)}/${suffix}`;
 }
 
-function fullFailure(message: string, saved = false) {
-  return `${message} ${saved
-    ? "The canonical failure record and all earlier records remain valid."
-    : "Nothing new was presented as saved; earlier canonical records remain valid."} Review the state and retry only when the required condition is resolved.`;
+function preparedFromPacket(projectId: string, result: PacketResult): PreparedContext {
+  const packetPath = endpoint(projectId, `packets/${encodeURIComponent(result.packet.id)}`);
+  return {
+    projectId,
+    literalTask: result.packet.task,
+    packet: result.packet,
+    receipt: result.receipt,
+    links: {
+      packet: packetPath,
+      receipt: `${packetPath}/receipt`,
+      inspect: `/projects/${encodeURIComponent(projectId)}/inspect/packets/${encodeURIComponent(result.packet.id)}`,
+    },
+    raw: result,
+  };
 }
 
 export default function ReconstructionWorkspace({ projectId }: { projectId: string }) {
   const { session, authorizationHeaders } = useWriteSession();
-  const [stage, setStage] = useState<Stage>(1);
+  const { pendingTask, clearTask } = useStewardTask();
   const [roadways, setRoadways] = useState<Roadway[]>([]);
+  const [projectName, setProjectName] = useState(projectId);
   const [cases, setCases] = useState<CaseChoice[]>([]);
   const [models, setModels] = useState<ReceivingModel[]>([]);
   const [packets, setPackets] = useState<PacketSummary[]>([]);
   const [handoffs, setHandoffs] = useState<HandoffSummary[]>([]);
-  const [task, setTask] = useState("");
+  const [task, setTask] = useState(() => (
+    pendingTask?.projectId === projectId ? pendingTask.literalTask : ""
+  ));
   const [requestedOutput, setRequestedOutput] = useState("");
   const [caseId, setCaseId] = useState("");
   const [budget, setBudget] = useState<number>(800);
   const [roadwayOverride, setRoadwayOverride] = useState("");
-  const [interpretation, setInterpretation] = useState<Interpretation | null>(null);
-  const [preview, setPreview] = useState<CandidatePreview | null>(null);
-  const [result, setResult] = useState<PacketResult | null>(null);
   const [receivingModel, setReceivingModel] = useState("");
+  const [view, setView] = useState<ViewState>("idle");
+  const [run, setRun] = useState<ReconstructionRunResult | null>(null);
+  const [prepared, setPrepared] = useState<PreparedContext | null>(null);
   const [handoff, setHandoff] = useState<HandoffResult | null>(null);
+  const [fullTransferRequested, setFullTransferRequested] = useState(false);
   const [selectedPacketId, setSelectedPacketId] = useState<string | null>(null);
   const [selectedHandoffId, setSelectedHandoffId] = useState<string | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "working" | "unavailable">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     let active = true;
     Promise.all([
+      fetch("/api/v1/projects", { cache: "no-store" }),
       fetch(endpoint(projectId, "roadways"), { cache: "no-store" }),
       fetch(endpoint(projectId, "cases"), { cache: "no-store" }),
       fetch(endpoint(projectId, "handoffs/models"), { cache: "no-store" }),
@@ -73,22 +83,21 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
       fetch(endpoint(projectId, "handoffs"), { cache: "no-store" }),
     ])
       .then(async (responses) => {
-        if (responses.some((response) => !response.ok)) {
-          throw new Error("Canonical Ask records are unavailable.");
-        }
+        if (responses.some((response) => !response.ok)) throw new Error("Canonical Steward records are unavailable.");
         return Promise.all(responses.map((response) => response.json()));
       })
       .then((values) => {
         if (!active) return;
-        const [roadwayValue, caseValue, modelValue, packetValue, handoffValue] = values as [
+        const [projectValue, roadwayValue, caseValue, modelValue, packetValue, handoffValue] = values as [
+          { projects: ProjectChoice[] },
           { roadways: Roadway[] },
           { cases: CaseChoice[] },
           { models: ReceivingModel[] },
           { packets: PacketSummary[] },
           { handoffs: HandoffSummary[] },
         ];
-        const productionModels = modelValue.models
-          .filter((model) => model.production === true);
+        setProjectName(projectValue.projects.find((project) => project.id === projectId)?.name || projectId);
+        const productionModels = modelValue.models.filter((model) => model.production === true);
         setRoadways(roadwayValue.roadways);
         setCases(caseValue.cases);
         setModels(productionModels);
@@ -104,17 +113,16 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
       })
       .catch((caught) => {
         if (!active) return;
-        setError(fullFailure(caught instanceof Error ? caught.message : "Canonical Ask is unavailable."));
+        setError(caught instanceof Error ? caught.message : "Atlas Steward is unavailable.");
         setStatus("unavailable");
       });
     return () => { active = false; };
-    // The route component is keyed by projectId, so project switching remounts
-    // all Ask-local state before this one-time canonical load.
+    // The route is keyed by projectId, so project switches remount all local state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const canWrite = Boolean(session?.writeAuthorization.authorized);
-  const working = status === "working";
+  const working = view === "preparing";
 
   function historyUrl(kind: "packet" | "handoff", id: string) {
     const url = new URL(window.location.href);
@@ -123,167 +131,110 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
     window.history.replaceState({}, "", url);
   }
 
+  function clearHistoryUrl() {
+    const url = new URL(window.location.href);
+    url.search = "";
+    window.history.replaceState({}, "", url);
+  }
+
   async function refreshHistory() {
     const [packetResponse, handoffResponse] = await Promise.all([
       fetch(endpoint(projectId, "packets"), { cache: "no-store" }),
       fetch(endpoint(projectId, "handoffs"), { cache: "no-store" }),
     ]);
-    if (packetResponse.ok) {
-      const value = await packetResponse.json() as { packets: PacketSummary[] };
-      setPackets(value.packets);
-    }
-    if (handoffResponse.ok) {
-      const value = await handoffResponse.json() as { handoffs: HandoffSummary[] };
-      setHandoffs(value.handoffs);
-    }
+    if (packetResponse.ok) setPackets(((await packetResponse.json()) as { packets: PacketSummary[] }).packets);
+    if (handoffResponse.ok) setHandoffs(((await handoffResponse.json()) as { handoffs: HandoffSummary[] }).handoffs);
   }
 
-  async function interpret(override = roadwayOverride) {
-    setStatus("working");
+  async function prepareContext(
+    event?: FormEvent<HTMLFormElement>,
+    override = roadwayOverride,
+    prepareFullTransfer = false,
+  ) {
+    event?.preventDefault();
+    if (!task.trim() || !canWrite) return;
+    const fullTransfer = prepareFullTransfer || fullTransferRequested;
+    if (prepareFullTransfer) setFullTransferRequested(true);
+    clearTask(projectId);
+    setView("preparing");
     setError("");
-    setNotice("");
-    setPreview(null);
-    setResult(null);
+    setRun(null);
+    setPrepared(null);
     setHandoff(null);
     setSelectedPacketId(null);
     setSelectedHandoffId(null);
     if (override !== roadwayOverride) setRoadwayOverride(override);
-    const response = await fetch(endpoint(projectId, "reconstruction/interpret"), {
-      method: "POST",
-      headers: { "content-type": "application/json", ...authorizationHeaders() },
-      body: JSON.stringify({
-        task,
-        requestedDecisionOrOutput: requestedOutput || undefined,
-        caseId: caseId || undefined,
-        roadwayOverride: override || undefined,
-      }),
-    });
-    const value = await response.json().catch(() => ({ error: "Interpretation failed." })) as {
-      error?: string;
-      interpretation?: Interpretation;
-    };
-    if (!response.ok || !value.interpretation) {
-      setError(fullFailure(value.error || "Interpretation failed."));
-      setStatus("ready");
-      return;
+    try {
+      const response = await fetch(endpoint(projectId, "reconstruction/run"), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": `steward:${crypto.randomUUID()}`,
+          ...authorizationHeaders(),
+        },
+        body: JSON.stringify({
+          task,
+          ...(fullTransfer
+            ? { requestedOutput: [requestedOutput.trim(), "Prepare a full room transfer."].filter(Boolean).join(" ") }
+            : requestedOutput.trim() ? { requestedOutput } : {}),
+          ...(caseId ? { caseId } : {}),
+          ...(override ? { roadwayOverride: override } : {}),
+          tokenBudget: budget,
+        }),
+      });
+      const value = await response.json().catch(() => ({ error: "Context preparation failed." })) as (
+        Partial<ReconstructionRunResult> & { error?: string }
+      );
+      if (value.status === "compiled" && value.packet && value.receipt && value.links && value.literalTask) {
+        const complete = value as ReconstructionRunResult;
+        const context: PreparedContext = {
+          projectId,
+          literalTask: complete.literalTask,
+          packet: complete.packet!,
+          receipt: complete.receipt!,
+          links: complete.links!,
+          raw: complete,
+        };
+        setRun(complete);
+        setPrepared(context);
+        setSelectedPacketId(context.packet.id);
+        setView("ready");
+        historyUrl("packet", context.packet.id);
+        await refreshHistory();
+        return;
+      }
+      if (value.status === "clarification_required") {
+        setRun(value as ReconstructionRunResult);
+        setView("clarification");
+        return;
+      }
+      if (value.status === "atlas_not_needed") {
+        setRun(value as ReconstructionRunResult);
+        setView("not_needed");
+        return;
+      }
+      if (value.status === "light_continuity_only") {
+        setRun(value as ReconstructionRunResult);
+        setView("light");
+        return;
+      }
+      setRun(value.status ? value as ReconstructionRunResult : null);
+      setError(value.error || value.need?.explanation || "Atlas could not prepare context safely.");
+      setView("failure");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Atlas could not prepare context safely.");
+      setView("failure");
     }
-    setInterpretation(value.interpretation);
-    setRequestedOutput(value.interpretation.requestedDecisionOrOutput);
-    setNotice(value.interpretation.materialAmbiguity
-      ? "Material ambiguity stopped reconstruction before candidate treatment or packet creation."
-      : "Interpretation is ready for Cody’s acceptance. No packet has been created.");
-    setStage(1);
-    setStatus("ready");
-  }
-
-  async function previewCandidates(nextBudget = budget) {
-    if (!interpretation || interpretation.clarificationRequired) return;
-    setStatus("working");
-    setError("");
-    setNotice("");
-    const response = await fetch(endpoint(projectId, "reconstruction/candidates"), {
-      method: "POST",
-      headers: { "content-type": "application/json", ...authorizationHeaders() },
-      body: JSON.stringify({
-        task,
-        requestedDecisionOrOutput: requestedOutput || undefined,
-        caseId: caseId || undefined,
-        roadwayOverride: roadwayOverride || undefined,
-        tokenBudget: nextBudget,
-      }),
-    });
-    const value = await response.json().catch(() => ({ error: "Candidate treatment failed." })) as (
-      Partial<CandidatePreview> & { error?: string }
-    );
-    if (!response.ok || !value.interpretation || !value.treatmentSummary) {
-      if (value.interpretation) setInterpretation(value.interpretation);
-      setError(fullFailure(value.error || value.interpretation?.ambiguityReason || "Candidate treatment failed."));
-      setStage(1);
-      setStatus("ready");
-      return;
-    }
-    setPreview(value as CandidatePreview);
-    setInterpretation(value.interpretation);
-    setStage(2);
-    setNotice("Server-owned treatment is ready. No packet has been created or saved.");
-    setStatus("ready");
-  }
-
-  async function changeBudget(nextBudget: number) {
-    setBudget(nextBudget);
-    setResult(null);
-    setHandoff(null);
-    setSelectedPacketId(null);
-    setSelectedHandoffId(null);
-    if (preview) await previewCandidates(nextBudget);
-  }
-
-  async function compile() {
-    if (!preview || preview.interpretation.clarificationRequired) return;
-    setStatus("working");
-    setError("");
-    setNotice("");
-    setResult(null);
-    setHandoff(null);
-    const response = await fetch(endpoint(projectId, "packets"), {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "idempotency-key": `packet:${crypto.randomUUID()}`,
-        ...authorizationHeaders(),
-      },
-      body: JSON.stringify({
-        task,
-        requestedDecisionOrOutput: requestedOutput || undefined,
-        caseId: caseId || undefined,
-        roadwayOverride: roadwayOverride || undefined,
-        tokenBudget: budget,
-      }),
-    });
-    const value = await response.json().catch(() => ({ error: "Packet compilation failed." })) as (
-      Partial<PacketResult> & { error?: string; interpretation?: Interpretation }
-    );
-    if (response.status === 409 && value.interpretation) {
-      setInterpretation(value.interpretation);
-      setError(fullFailure(value.interpretation.ambiguityReason || "Roadway clarification is required."));
-      setStage(1);
-      setStatus("ready");
-      return;
-    }
-    if (!value.packet || !value.receipt) {
-      setError(fullFailure(value.error || "Packet compilation failed."));
-      setStatus("ready");
-      return;
-    }
-    const next = value as PacketResult;
-    setResult(next);
-    setInterpretation(next.packet.interpretation);
-    setSelectedPacketId(next.packet.id);
-    setSelectedHandoffId(null);
-    setStage(3);
-    historyUrl("packet", next.packet.id);
-    await refreshHistory();
-    if (!response.ok || next.packet.status !== "compiled" || next.packet.compilationError) {
-      setError(fullFailure(
-        next.packet.compilationError || value.error || "Packet compilation failed.",
-        true,
-      ));
-    } else {
-      setNotice("The exact saved packet and its receipt are immutable. Preview and raw data use the same snapshot.");
-    }
-    setStatus("ready");
   }
 
   async function sendToReceivingModel() {
-    if (!result || result.packet.status !== "compiled" || result.packet.compilationError) return;
+    if (!prepared || prepared.packet.status !== "compiled") return;
     const model = models.find((candidate) => candidate.model === receivingModel);
     if (!model) {
-      setError(fullFailure("No supported production receiving model is selected."));
+      setError("No supported production receiving model is selected.");
       return;
     }
-    setStatus("working");
     setError("");
-    setNotice("");
     const response = await fetch(endpoint(projectId, "handoffs"), {
       method: "POST",
       headers: {
@@ -292,374 +243,256 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
         ...authorizationHeaders(),
       },
       body: JSON.stringify({
-        packetId: result.packet.id,
+        packetId: prepared.packet.id,
         provider: model.provider,
         model: model.model,
         actorId: session?.actor.id || "cody",
       }),
     });
-    const value = await response.json().catch(() => ({ error: "Receiving-model handoff failed." })) as (
+    const value = await response.json().catch(() => ({ error: "Provider handoff failed." })) as (
       Partial<HandoffResult> & { error?: string }
     );
     if (value.handoff) {
       const next = value as HandoffResult;
       setHandoff(next);
       setSelectedHandoffId(next.handoff.id);
-      setSelectedPacketId(next.handoff.packetId);
       historyUrl("handoff", next.handoff.id);
       await refreshHistory();
     }
-    if (!response.ok) {
-      setError(fullFailure(
-        value.handoff?.failureReason || value.error || "Receiving-model handoff failed.",
-        Boolean(value.handoff),
-      ));
-    } else {
-      setNotice("The receiving-model answer and immutable handoff receipt were saved separately from Cody’s request and Atlas’s packet.");
-    }
-    setStatus("ready");
+    if (!response.ok) setError(value.handoff?.failureReason || value.error || "Provider handoff failed.");
   }
 
   async function openPacket(packetId: string, updateUrl = true) {
-    setStatus("working");
     setError("");
-    setNotice("");
-    const response = await fetch(endpoint(projectId, `packets/${encodeURIComponent(packetId)}`), {
-      cache: "no-store",
-    });
+    const response = await fetch(endpoint(projectId, `packets/${encodeURIComponent(packetId)}`), { cache: "no-store" });
     const value = await response.json().catch(() => ({ error: "Packet unavailable." })) as (
       Partial<PacketResult> & { error?: string }
     );
     if (!response.ok || !value.packet || !value.receipt) {
-      setError(fullFailure(value.error || "Packet unavailable or belongs to another project."));
-      setStatus("ready");
+      setError(value.error || "Packet unavailable or belongs to another project.");
+      setView("failure");
       return;
     }
     const next = value as PacketResult;
-    setResult(next);
-    setHandoff(null);
-    setTask(next.packet.task);
+    const context = preparedFromPacket(projectId, next);
+    setPrepared(context);
+    setTask(context.literalTask);
     setRequestedOutput(next.packet.interpretation.requestedDecisionOrOutput);
     setCaseId(next.packet.caseId || "");
     setBudget(next.packet.tokenBudget);
-    setRoadwayOverride(next.packet.interpretation.userSelectedOverride
-      ? next.packet.primaryRoadwayId
-      : "");
-    setInterpretation(next.packet.interpretation);
-    setPreview(null);
+    setHandoff(null);
     setSelectedPacketId(next.packet.id);
     setSelectedHandoffId(null);
-    setStage(3);
+    setView(next.packet.status === "compiled" && !next.packet.compilationError ? "ready" : "failure");
+    if (next.packet.compilationError) setError(next.packet.compilationError);
     if (updateUrl) historyUrl("packet", next.packet.id);
-    setNotice("Historical packet opened without recompilation.");
-    setStatus("ready");
   }
 
   async function openHandoff(handoffId: string, updateUrl = true) {
-    setStatus("working");
     setError("");
-    setNotice("");
-    const response = await fetch(endpoint(projectId, `handoffs/${encodeURIComponent(handoffId)}`), {
-      cache: "no-store",
-    });
+    const response = await fetch(endpoint(projectId, `handoffs/${encodeURIComponent(handoffId)}`), { cache: "no-store" });
     const value = await response.json().catch(() => ({ error: "Handoff unavailable." })) as (
       Partial<HandoffResult> & { error?: string }
     );
     if (!response.ok || !value.handoff || !value.packet || !value.packetReceipt) {
-      setError(fullFailure(value.error || "Handoff unavailable or belongs to another project."));
-      setStatus("ready");
+      setError(value.error || "Handoff unavailable or belongs to another project.");
+      setView("failure");
       return;
     }
     const next = value as HandoffResult;
-    setHandoff(next);
-    setResult({
-      packet: next.packet,
-      items: next.packetItems,
-      receipt: next.packetReceipt,
-    });
+    const packetResult: PacketResult = { packet: next.packet, items: next.packetItems, receipt: next.packetReceipt };
+    setPrepared(preparedFromPacket(projectId, packetResult));
     setTask(next.packet.task);
     setRequestedOutput(next.packet.interpretation.requestedDecisionOrOutput);
     setCaseId(next.packet.caseId || "");
     setBudget(next.packet.tokenBudget);
-    setInterpretation(next.packet.interpretation);
-    setPreview(null);
     setReceivingModel(next.handoff.model);
+    setHandoff(next);
     setSelectedPacketId(next.packet.id);
     setSelectedHandoffId(next.handoff.id);
-    setStage(4);
+    setView("ready");
     if (updateUrl) historyUrl("handoff", next.handoff.id);
-    setNotice("Historical handoff opened without retrying the provider or recompiling its packet.");
-    setStatus("ready");
+  }
+
+  function resetPreparation() {
+    setRun(null);
+    setPrepared(null);
+    setHandoff(null);
+    setError("");
+    setSelectedPacketId(null);
+    setSelectedHandoffId(null);
+    setFullTransferRequested(false);
+    setView("idle");
+    clearHistoryUrl();
   }
 
   if (status === "loading") {
-    return <section className={styles.loading}>Loading canonical roadways, cases, models, and history…</section>;
+    return <section className={styles.loading}>Loading project scope and Steward controls…</section>;
   }
-  if (status === "unavailable" && !roadways.length) {
+  if (status === "unavailable") {
     return (
       <section className={styles.failureState} role="alert">
-        <strong>Canonical state unavailable</strong>
+        <strong>Could not prepare safely</strong>
         <p>{error}</p>
-        <p>No fixture, seeded packet, model answer, or hidden persistence fallback was substituted.</p>
+        <p>No fixture, seeded packet, or hidden fallback was substituted.</p>
       </section>
     );
   }
 
+  const advancedControls = (
+    <details className={styles.advancedControls}>
+      <summary>Advanced controls</summary>
+      <div className={styles.formGrid}>
+        <label className={styles.field}>
+          Requested output
+          <input onChange={(event) => setRequestedOutput(event.target.value)} placeholder="Atlas may infer this." value={requestedOutput} />
+        </label>
+        <label className={styles.field}>
+          Optional case scope
+          <select onChange={(event) => setCaseId(event.target.value)} value={caseId}>
+            <option value="">Project scope only</option>
+            {cases.map((record) => <option key={record.id} value={record.id}>{record.objective}</option>)}
+          </select>
+        </label>
+        <label className={styles.field}>
+          Advanced retrieval path
+          <select onChange={(event) => setRoadwayOverride(event.target.value)} value={roadwayOverride}>
+            <option value="">Let Atlas interpret the task</option>
+            {roadways.map((roadway) => <option key={roadway.id} value={roadway.id}>{roadway.name} v{roadway.version}</option>)}
+          </select>
+        </label>
+        <fieldset className={styles.packetSize}>
+          <legend>Estimated tokens</legend>
+          {budgets.map((value) => (
+            <button aria-pressed={budget === value} key={value} onClick={() => setBudget(value)} type="button">
+              {value}{value === 800 ? " · Default" : ""}
+            </button>
+          ))}
+        </fieldset>
+        <label className={styles.field}>
+          Provider for “Send another way”
+          <select onChange={(event) => setReceivingModel(event.target.value)} value={receivingModel}>
+            {models.map((model) => <option key={`${model.provider}:${model.model}`} value={model.model}>{model.provider} · {model.model}</option>)}
+          </select>
+        </label>
+      </div>
+      <details className={styles.historyDisclosure}>
+        <summary>Packet and handoff history</summary>
+        <AskHistory
+          handoffs={handoffs}
+          onOpenHandoff={(id) => void openHandoff(id)}
+          onOpenPacket={(id) => void openPacket(id)}
+          packets={packets}
+          selectedHandoffId={selectedHandoffId}
+          selectedPacketId={selectedPacketId}
+        />
+      </details>
+    </details>
+  );
+
   return (
     <div className={styles.workspace}>
-      <section className={styles.mainColumn}>
-        <nav className={styles.stageNav} aria-label="Ask with Atlas stages">
-          {stages.map((item) => {
-            const available = item.id === 1
-              || (item.id === 2 && Boolean(preview))
-              || (item.id === 3 && Boolean(preview || result))
-              || (item.id === 4 && result?.packet.status === "compiled");
-            return (
-              <button
-                aria-current={stage === item.id ? "step" : undefined}
-                className={stage === item.id ? styles.activeStage : styles.stageButton}
-                disabled={!available}
-                key={item.id}
-                onClick={() => setStage(item.id)}
-                type="button"
-              >
-                <span>{item.id}</span>
-                <strong>{item.label}</strong>
-                <small>{item.detail}</small>
+      {view === "idle" ? (
+        <form className={styles.stewardForm} onSubmit={(event) => void prepareContext(event)}>
+          <label className={styles.field} htmlFor="steward-task">
+            What are you trying to continue?
+            <textarea
+              id="steward-task"
+              onChange={(event) => setTask(event.target.value)}
+              placeholder="Describe the decision, task, or project state the model needs."
+              value={task}
+            />
+          </label>
+          {advancedControls}
+          {!canWrite ? <p className={styles.readOnly}>Enable canonical writes in the application shell before preparing context.</p> : null}
+          <button className={styles.primaryButton} disabled={!canWrite || !task.trim()} type="submit">Prepare context</button>
+        </form>
+      ) : null}
+
+      {view === "preparing" ? (
+        <section className={styles.preparingState} role="status">
+          <span>Preparing context</span>
+          <h2>Finding and governing the prior work this task needs.</h2>
+          <p>Atlas is checking relevance, authority, scope, freshness, and packet safety.</p>
+          <i aria-hidden="true" />
+        </section>
+      ) : null}
+
+      {view === "clarification" && run ? (
+        <section className={styles.outcomeState}>
+          <span>Needs clarification</span>
+          <h2>One material choice is required.</h2>
+          <blockquote>{run.literalTask}</blockquote>
+          <p>{run.need.explanation}</p>
+          <div className={styles.clarificationChoices}>
+            {(run.roadway.candidates || []).map((candidate) => (
+              <button disabled={working} key={candidate.roadwayId} onClick={() => void prepareContext(undefined, candidate.roadwayId, fullTransferRequested)} type="button">
+                <strong>{candidate.name}</strong><span>{candidate.reason}</span>
               </button>
-            );
-          })}
-        </nav>
+            ))}
+          </div>
+          <button className={styles.textAction} onClick={resetPreparation} type="button">Return to task</button>
+        </section>
+      ) : null}
 
-        {error ? <div className={styles.failureBanner} role="alert">{error}</div> : null}
-        {notice ? <div className={styles.notice} role="status">{notice}</div> : null}
+      {view === "not_needed" && run ? (
+        <section className={styles.outcomeState}>
+          <span>No applicable context</span>
+          <h2>Atlas found no applicable governed context to supply.</h2>
+          <p>{run.need.explanation}</p>
+          <strong>No capsule, packet, or packet receipt was created.</strong>
+          <button className={styles.textAction} onClick={resetPreparation} type="button">Prepare a different task</button>
+        </section>
+      ) : null}
 
-        {stage === 1 ? (
-          <section className={styles.stagePanel} aria-labelledby="interpret-title">
-            <div className={styles.sectionHeading}>
-              <div>
-                <span>Stage 1</span>
-                <h2 id="interpret-title">Interpret Cody’s current task</h2>
-              </div>
-              <p>The literal request remains controlling. Atlas may clarify it, never replace it.</p>
-            </div>
-            <label className={styles.field}>
-              Exact literal request
-              <textarea
-                onChange={(event) => setTask(event.target.value)}
-                placeholder="Enter the legitimate current task. Do not repeat a mechanism merely to force retrieval."
-                value={task}
-              />
-            </label>
-            <div className={styles.formGrid}>
-              <label className={styles.field}>
-                Requested decision or output
-                <input
-                  onChange={(event) => setRequestedOutput(event.target.value)}
-                  placeholder="Atlas may infer this; Cody may correct it."
-                  value={requestedOutput}
-                />
-              </label>
-              <label className={styles.field}>
-                Optional case scope
-                <select onChange={(event) => setCaseId(event.target.value)} value={caseId}>
-                  <option value="">Project scope only</option>
-                  {cases.map((record) => (
-                    <option key={record.id} value={record.id}>{record.objective}</option>
-                  ))}
-                </select>
-              </label>
-              <label className={styles.field}>
-                Temporary roadway override
-                <select onChange={(event) => setRoadwayOverride(event.target.value)} value={roadwayOverride}>
-                  <option value="">Let Atlas interpret intent</option>
-                  {roadways.map((roadway) => (
-                    <option key={roadway.id} value={roadway.id}>{roadway.name} v{roadway.version}</option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {!canWrite ? (
-              <p className={styles.readOnly}>
-                Read-only session. Enable canonical writes once in the application shell before interpretation and compilation.
-              </p>
-            ) : null}
-            <button
-              className={styles.primaryButton}
-              disabled={!canWrite || !task.trim() || working}
-              onClick={() => interpret()}
-              type="button"
-            >
-              {working ? "Interpreting…" : interpretation ? "Re-run interpretation" : "Interpret task"}
-            </button>
-
-            {interpretation ? (
-              <section className={styles.interpretation}>
-                <header>
-                  <div>
-                    <span>{interpretation.materialAmbiguity ? "Clarification required" : "Primary roadway"}</span>
-                    <h3>{interpretation.primaryRoadway?.name || "No roadway selected"}</h3>
-                  </div>
-                  <b>{interpretation.userSelectedOverride ? "Current-run override" : "Intent-selected"}</b>
-                </header>
-                <p>{interpretation.selectionReason}</p>
-                <dl className={styles.metadataGrid}>
-                  <div><dt>Literal request</dt><dd>{interpretation.literalRequest}</dd></div>
-                  <div><dt>Requested output</dt><dd>{interpretation.requestedDecisionOrOutput}</dd></div>
-                  <div><dt>Intent/mechanism</dt><dd>{interpretation.requiredReasoningMechanism}</dd></div>
-                  <div><dt>Project</dt><dd>{interpretation.activeProjectId}</dd></div>
-                  <div><dt>Case</dt><dd>{interpretation.caseId || "Project scope"}</dd></div>
-                  <div><dt>Domain</dt><dd>{interpretation.domain}</dd></div>
-                  <div><dt>Task type</dt><dd>{interpretation.taskOrMarketType}</dd></div>
-                  <div><dt>Time sensitivity</dt><dd>{interpretation.timeSensitivity}</dd></div>
-                  <div><dt>Scope</dt><dd>{interpretation.scope}</dd></div>
-                  <div><dt>Supporting modules</dt><dd>{interpretation.supportingModules.join(", ") || "None"}</dd></div>
-                  <div><dt>Required live state</dt><dd>{interpretation.requiredLiveState.join(", ") || "None"}</dd></div>
-                  <div><dt>Shared meanings</dt><dd>{interpretation.relevantSharedMeanings.join(", ") || "None"}</dd></div>
-                </dl>
-                {interpretation.materialAmbiguity ? (
-                  <div className={styles.ambiguity}>
-                    <strong>{interpretation.ambiguityReason}</strong>
-                    <p>Two candidate interpretations could materially change the packet. Select one before continuing.</p>
-                    {interpretation.candidateInterpretations.map((candidate) => (
-                      <button
-                        className={styles.secondaryButton}
-                        disabled={working}
-                        key={candidate.roadwayId}
-                        onClick={() => interpret(candidate.roadwayId)}
-                        type="button"
-                      >
-                        <strong>Use {candidate.name} for this run</strong>
-                        <span>{candidate.reason}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className={styles.stickyControls}>
-                    <button
-                      className={styles.primaryButton}
-                      disabled={working}
-                      onClick={() => previewCandidates()}
-                      type="button"
-                    >
-                      Accept interpretation and treat candidates
-                    </button>
-                  </div>
-                )}
-              </section>
-            ) : null}
-          </section>
-        ) : null}
-
-        {stage === 2 && preview ? (
-          <CandidateTreatmentPanel
-            onContinue={() => setStage(3)}
-            preview={preview}
-            projectId={projectId}
+      {view === "light" && run?.capsule ? (
+        <>
+          <ContextAidPresentation
+            capsule={run.capsule}
+            onPrepareFullTransfer={() => void prepareContext(undefined, roadwayOverride, true)}
           />
-        ) : null}
+          <button className={styles.textAction} onClick={resetPreparation} type="button">Prepare another task</button>
+        </>
+      ) : null}
 
-        {stage === 3 ? (
-          result ? (
-            <PacketPreview onContinue={() => setStage(4)} result={result} />
-          ) : preview ? (
-            <section className={styles.stagePanel} aria-labelledby="compile-title">
-              <div className={styles.sectionHeading}>
-                <div>
-                  <span>Stage 3</span>
-                  <h2 id="compile-title">Compile bounded packet</h2>
-                </div>
-                <p>No packet exists until the canonical server saves the packet and receipt atomically.</p>
-              </div>
-              <div className={styles.budgetButtons} aria-label="Packet token budget">
-                {budgets.map((value) => (
-                  <button
-                    aria-pressed={budget === value}
-                    className={budget === value ? styles.activeBudget : styles.budgetButton}
-                    disabled={working}
-                    key={value}
-                    onClick={() => void changeBudget(value)}
-                    type="button"
-                  >
-                    <strong>{value.toLocaleString()}</strong>
-                    <span>{value === 800 ? "Default" : "tokens"}</span>
-                  </button>
-                ))}
-              </div>
-              <div className={styles.compilationGrid}>
-                <div><span>State</span><strong>{preview.status.replaceAll("_", " ")}</strong></div>
-                <div><span>Selected budget</span><strong>{preview.tokenBudget}</strong></div>
-                <div><span>Estimated safe minimum</span><strong>{preview.estimatedSafeMinimum ?? "Unknown"}</strong></div>
-                <div><span>Estimated final size</span><strong>{preview.estimatedFinalSize ?? "Unknown"}</strong></div>
-                <div><span>Required checks</span><strong>{preview.requiredChecks.length}</strong></div>
-                <div><span>Protected corrections</span><strong>{preview.protectedCorrections.length}</strong></div>
-                <div><span>Protected conflicts</span><strong>{preview.protectedConflicts.length}</strong></div>
-                <div><span>Strongest challenge</span><strong>{preview.strongestChallenge ? "Retained" : "Not applicable"}</strong></div>
-                <div><span>Live state</span><strong>{preview.freshness.safeToCompile ? "Available" : `Missing ${preview.freshness.missing.join(", ")}`}</strong></div>
-                <div><span>Likely compression</span><strong>{preview.likelyCompression ? "Yes" : "No"}</strong></div>
-              </div>
-              {preview.importantExclusions.length ? (
-                <details className={styles.advanced}>
-                  <summary>Important exclusions before compilation</summary>
-                  {preview.importantExclusions.map((item) => (
-                    <p key={`${item.sourceType}:${item.sourceId}`}>{item.statement} — {item.reason}</p>
-                  ))}
-                </details>
-              ) : null}
-              {preview.status !== "ready" ? (
-                <div className={styles.failureState}>
-                  <strong>
-                    {preview.status === "missing_required_state"
-                      ? "Missing required state"
-                      : "Unsafe under selected budget"}
-                  </strong>
-                  <p>
-                    Compilation may save an honest failed packet and receipt. It will not expose partial unsafe content as success.
-                  </p>
-                </div>
-              ) : null}
-              <div className={styles.stickyControls}>
-                <button
-                  className={styles.primaryButton}
-                  disabled={!canWrite || working}
-                  onClick={compile}
-                  type="button"
-                >
-                  {working
-                    ? "Compiling…"
-                    : preview.status === "ready"
-                      ? "Compile and save immutable packet"
-                      : "Record failed compilation honestly"}
-                </button>
-              </div>
-            </section>
-          ) : (
-            <section className={styles.empty}>Interpret a task before Atlas reconstructs context.</section>
-          )
-        ) : null}
+      {view === "light" && run && !run.capsule ? (
+        <section className={styles.outcomeState} role="alert">
+          <span>Could not prepare safely</span>
+          <h2>Atlas found a bounded continuity signal but could not produce a governed context aid.</h2>
+          <p>{run.need.explanation}</p>
+          <strong>No capsule, packet, or packet receipt was created.</strong>
+          <button className={styles.textAction} onClick={resetPreparation} type="button">Review task and controls</button>
+        </section>
+      ) : null}
 
-        {stage === 4 && result ? (
+      {view === "failure" ? (
+        <section className={styles.outcomeState} role="alert">
+          <span>Could not prepare safely</span>
+          <h2>Atlas did not produce a valid context packet.</h2>
+          <p>{error}</p>
+          {run?.preflight?.freshness.missing?.length ? <p>Missing current state: {run.preflight.freshness.missing.join(", ")}.</p> : null}
+          <button className={styles.textAction} onClick={resetPreparation} type="button">Review task and controls</button>
+        </section>
+      ) : null}
+
+      {view === "ready" && prepared ? (
+        <>
+          {error ? <div className={styles.failureBanner} role="alert">{error}</div> : null}
+          <PacketPreview context={prepared} projectName={projectName} />
           <HandoffPresentation
             busy={working}
             canWrite={canWrite}
+            context={prepared}
             handoff={handoff}
+            key={prepared.packet.id}
             models={models}
             onModelChange={setReceivingModel}
-            onSend={sendToReceivingModel}
-            packet={result}
+            onSend={() => void sendToReceivingModel()}
             selectedModel={receivingModel}
           />
-        ) : null}
-      </section>
-
-      <AskHistory
-        handoffs={handoffs}
-        onOpenHandoff={(id) => void openHandoff(id)}
-        onOpenPacket={(id) => void openPacket(id)}
-        packets={packets}
-        selectedHandoffId={selectedHandoffId}
-        selectedPacketId={selectedPacketId}
-      />
+          <button className={styles.textAction} onClick={resetPreparation} type="button">Prepare another task</button>
+        </>
+      ) : null}
     </div>
   );
 }

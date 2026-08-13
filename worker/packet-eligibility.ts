@@ -23,7 +23,7 @@ export function isPacketEligibleProtectedItem(candidate: unknown) {
   if (!candidate || typeof candidate !== "object") return false;
   const item = candidate as PacketEligibilityCandidate;
   if (!item.protectedRole || item.protectedRole === "required_check") return false;
-  if (item.treatment !== "Use" && item.treatment !== "Consider") return false;
+  if (item.treatment !== "Use") return false;
   if (isLineageOnlyPacketAncestor(item)) return false;
   if (TERMINAL_STATES.has(String(item.status || ""))) return false;
   if (TERMINAL_STATES.has(String(item.authority || ""))) return false;

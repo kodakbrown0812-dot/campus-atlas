@@ -12,18 +12,16 @@ export default async function AskPage({
     <main className={styles.page}>
       <div className={styles.shell}>
         <Link className={styles.back} href={`/projects/${encodeURIComponent(projectId)}/work`}>
-          ← Return to Work
+          ← Return to Home
         </Link>
         <header className={styles.header}>
           <div>
-            <span>Governed reconstruction</span>
-            <h1>Ask with Atlas</h1>
-            <p>
-              Inspect what Atlas understands, how candidates are treated, the exact packet supplied,
-              and the receiving model’s separate answer.
-            </p>
+            <span>Project context steward</span>
+            <h1>Atlas Steward</h1>
+            <p>Restore the project context this work needs.</p>
+            <small>Prepare it once, then use it here or carry it into a new room.</small>
           </div>
-          <b>Canonical V1.7</b>
+          <b>Active project · {projectId}</b>
         </header>
         <ReconstructionWorkspace key={projectId} projectId={projectId} />
       </div>

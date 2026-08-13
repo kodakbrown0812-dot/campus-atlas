@@ -683,10 +683,28 @@ function preserveReferencedChallenges(candidates: RankedCandidate[]) {
         challenge.reason = `Referenced counterevidence remains an explicit exclusion because its canonical state is ${challenge.status === "active" ? challenge.authority : challenge.status}.`;
         continue;
       }
-      if (challenge.treatment === "Exclude") challenge.treatment = "Consider";
+      if (challenge.treatment === "Exclude" && /outside the active case|stale/i.test(challenge.reason)) continue;
+      challenge.treatment = "Use";
       challenge.protectedRole = "challenge";
-      challenge.reason = `Strong counterevidence carried with governing mechanism ${mechanism.sourceId}.`;
+      challenge.reason = `Necessary counterevidence carried with governing mechanism ${mechanism.sourceId}; it is included as Use with explicit uncertainty and provenance, not promoted to governing authority.`;
+      challenge.metadata = {
+        ...challenge.metadata,
+        uncertaintyDisclosure: `Necessary counterevidence; canonical authority remains ${challenge.authority}.`,
+        carriedWithMechanismId: mechanism.sourceId,
+      };
     }
+  }
+}
+
+function preserveNecessaryCorrections(candidates: RankedCandidate[]) {
+  for (const candidate of candidates) {
+    if (candidate.protectedRole !== "correction" || candidate.treatment !== "Consider") continue;
+    candidate.treatment = "Use";
+    candidate.reason = "Necessary correction included as Use with its representation, authority, source provenance, and uncertainty kept explicit.";
+    candidate.metadata = {
+      ...candidate.metadata,
+      uncertaintyDisclosure: `Necessary correction; representation is ${candidate.representation} and canonical authority remains ${candidate.authority}.`,
+    };
   }
 }
 
@@ -707,6 +725,7 @@ export async function discoverAndRankCandidates(
   const candidates = raw.map((candidate) => rankCandidate(candidate, interpretation));
   markRedundancy(candidates);
   collapseGoverningLineage(candidates, nodesByCheckpoint);
+  preserveNecessaryCorrections(candidates);
   preserveReferencedChallenges(candidates);
   preserveConflicts(candidates);
   candidates.sort(rankingOrder);

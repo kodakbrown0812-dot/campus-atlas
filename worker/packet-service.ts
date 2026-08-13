@@ -1,10 +1,7 @@
 import { canonicalId } from "./canonical-records";
 import { discoverAndRankCandidates, RankedCandidate, Treatment } from "./candidate-ranking";
 import { CONTINUITY_TOKEN_BUDGETS } from "./continuity-request-contract";
-import {
-  isLineageOnlyPacketAncestor,
-  isPacketEligibleProtectedItem,
-} from "./packet-eligibility";
+import { isPacketEligibleProtectedItem } from "./packet-eligibility";
 import { interpretTask, InterpretTaskOptions, TaskInterpretation } from "./roadway-service";
 import { sha256 } from "./transcript-import";
 import {
@@ -157,7 +154,10 @@ function renderItem(item: PacketItemSnapshot) {
   const historicalLimitation = item.representation === "Reconstructed"
     ? " — historical raw transcript unavailable; not Exact"
     : "";
-  return `- [${label}] ${statement} [${item.sourceType}:${item.sourceId}; ${item.representation}; ${item.authority}]${reason}${historicalLimitation}`;
+  const uncertainty = typeof item.metadata?.uncertaintyDisclosure === "string"
+    ? ` — ${compact(item.metadata.uncertaintyDisclosure, 110)}`
+    : "";
+  return `- [${label}] ${statement} [${item.sourceType}:${item.sourceId}; ${item.representation}; ${item.authority}]${reason}${historicalLimitation}${uncertainty}`;
 }
 
 function section(title: string, items: PacketItemSnapshot[]) {
@@ -194,8 +194,6 @@ function renderPacket(
 ) {
   const header = renderHeader(interpretation, budget, projectId);
   const useItems = candidates.filter((item) => item.treatment === "Use");
-  const considerItems = candidates.filter((item) => item.treatment === "Consider");
-  const excludedItems = candidates.filter((item) => item.treatment === "Exclude");
   const protectedCandidates = minimumSafeItems(candidates);
   const mandatory = [
     section("Required Blueprint checks", checks),
@@ -237,29 +235,19 @@ function renderPacket(
 
   let content = minimumContent;
   const alreadyIncluded = new Set(protectedCandidates.map((item) => `${item.sourceType}:${item.sourceId}`));
-  const optional = [
-    ...useItems,
-    ...considerItems,
-    ...excludedItems.filter((item) => (
-      !isLineageOnlyPacketAncestor(item)
-      && /rejected|superseded|stale|scope|mechanism/i.test(item.reason)
-    )),
-  ].filter((item) => !alreadyIncluded.has(`${item.sourceType}:${item.sourceId}`));
+  const optional = useItems.filter(
+    (item) => !alreadyIncluded.has(`${item.sourceType}:${item.sourceId}`),
+  );
   const includedOptional: PacketItemSnapshot[] = [];
   for (const item of optional) {
-    const title = item.treatment === "Use" ? "Additional governing context"
-      : item.treatment === "Consider" ? "Consider"
-        : "Consequential exclusions";
-    const candidateSection = section(title, [item]);
+    const candidateSection = section("Additional governing context", [item]);
     if (tokenCount(`${content}${candidateSection}`) <= budget) {
       content += candidateSection;
       includedOptional.push(item);
       continue;
     }
-    if (item.treatment !== "Exclude") {
-      item.treatment = "Exclude";
-      item.reason = `Excluded by the ${budget}-token budget after required checks, corrections, conflicts, and strongest challenge were preserved.`;
-    }
+    item.treatment = "Exclude";
+    item.reason = `Excluded by the ${budget}-token budget after required checks, corrections, conflicts, and strongest challenge were preserved.`;
   }
   return {
     content,

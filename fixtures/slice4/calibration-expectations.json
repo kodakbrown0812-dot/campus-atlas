@@ -17,17 +17,17 @@
       "reason": "Reality contact and evidence strength outrank recency alone."
     },
     "user_correction_vs_repeated_inference": {
-      "expectedTreatment": "Consider",
+      "expectedTreatment": "Use",
       "expectedOrder": "correction_before_inference",
-      "reason": "The correction remains protected even though neither item has governing approval."
+      "reason": "A necessary correction enters the packet as Use with explicit uncertainty and provenance; unrelated inference remains non-governing."
     },
     "approved_local_outside_scope": {
       "expectedTreatment": "Exclude",
       "reason": "Local authority cannot govern outside its supporting case."
     },
     "strong_counterexample": {
-      "expectedTreatment": "Consider",
-      "reason": "The strongest challenge travels with the applicable governing mechanism."
+      "expectedTreatment": "Use",
+      "reason": "The strongest necessary challenge travels with the applicable governing mechanism as Use with explicit uncertainty and provenance."
     },
     "conflicting_approved_mechanisms": {
       "expectedTreatment": "Use",

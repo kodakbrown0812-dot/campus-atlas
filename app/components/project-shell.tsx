@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { WriteSessionProvider, useWriteSession } from "./write-session";
+import { StewardTaskProvider } from "./steward-task";
 import ContextualAdd from "./contextual-add";
 import styles from "./shell.module.css";
 
@@ -24,14 +25,13 @@ type Health = {
 };
 
 const destinations = [
-  { id: "work", label: "Work", mark: "W" },
-  { id: "found", label: "Atlas Found", mark: "F" },
-  { id: "ask", label: "Ask", mark: "A" },
+  { id: "work", label: "Home", mark: "H" },
+  { id: "ask", label: "Steward", mark: "S" },
   { id: "inspect", label: "Inspect", mark: "I" },
 ] as const;
 
 function destinationForPath(pathname: string) {
-  if (pathname.includes("/findings")) return "found";
+  if (pathname.includes("/findings")) return "inspect";
   if (pathname.includes("/ask")) return "ask";
   if (pathname.includes("/inspect")) return "inspect";
   return "work";
@@ -39,7 +39,6 @@ function destinationForPath(pathname: string) {
 
 function destinationHref(projectId: string, destination: typeof destinations[number]["id"]) {
   const encoded = encodeURIComponent(projectId);
-  if (destination === "found") return `/projects/${encoded}/findings`;
   if (destination === "ask") return `/projects/${encoded}/ask`;
   if (destination === "inspect") return `/projects/${encoded}/inspect`;
   return `/projects/${encoded}/work`;
@@ -188,12 +187,17 @@ function ProjectShellInner({
             >
               <span>{destination.mark}</span>
               {destination.label}
-              {destination.id === "found" && activeProject?.pendingFindingCount
+              {destination.id === "inspect" && activeProject?.pendingFindingCount
                 ? <b>{activeProject.pendingFindingCount}</b>
                 : null}
             </Link>
           ))}
         </nav>
+        {activeProject?.pendingFindingCount ? (
+          <Link className={styles.reviewLink} href={`/projects/${encodeURIComponent(projectId)}/findings`}>
+            Needs review <b>{activeProject.pendingFindingCount}</b>
+          </Link>
+        ) : null}
         <button className={styles.contextualAdd} onClick={() => setContextualAddOpen(true)} type="button">
           <span>＋</span> Add
         </button>
@@ -265,6 +269,9 @@ function ProjectShellInner({
           >
             <span>{destination.mark}</span>
             {destination.label}
+            {destination.id === "inspect" && activeProject?.pendingFindingCount
+              ? <em>{activeProject.pendingFindingCount}</em>
+              : null}
           </Link>
         ))}
       </nav>
@@ -305,7 +312,9 @@ export default function ProjectShell({
 }) {
   return (
     <WriteSessionProvider>
-      <ProjectShellInner key={projectId} projectId={projectId}>{children}</ProjectShellInner>
+      <StewardTaskProvider key={projectId}>
+        <ProjectShellInner key={projectId} projectId={projectId}>{children}</ProjectShellInner>
+      </StewardTaskProvider>
     </WriteSessionProvider>
   );
 }

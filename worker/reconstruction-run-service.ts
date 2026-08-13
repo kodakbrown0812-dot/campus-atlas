@@ -33,6 +33,7 @@ function stoppedResult(
     literalTask: preflight.literalTask,
     need: preflight.need,
     roadway: preflight.roadway,
+    capsule: preflight.need.level === "light" ? preflight.compactCapsule : null,
     preflight: {
       status: preflight.status,
       freshness: preflight.freshness,
@@ -103,7 +104,7 @@ function compactProjection(
   const exclude = detail.receipt.treatmentSummary.Exclude;
   const allItems = [...use, ...consider, ...exclude];
   const packetEligible = (item: (typeof allItems)[number]) => (
-    item.packetEligibleProtected === true && item.treatment !== "Exclude"
+    item.packetEligibleProtected === true && item.treatment === "Use"
   );
   const historicalLimitations = allItems
     .filter((item) => typeof item.metadata?.historicalSourceLimitation === "string")
@@ -144,10 +145,12 @@ function compactProjection(
       priorComparablePacketId: detail.packet.priorComparablePacketId,
       createdAt: detail.packet.createdAt,
     },
+    capsule: null,
     summary: {
       governingMechanismsSupplied: use.filter((item) => item.sourceType === "Mechanism").length,
       requiredChecksSupplied: use.filter((item) => item.sourceType === "RoadwayCheck").length,
-      considerItemsSupplied: consider.length,
+      considerItemsSupplied: 0,
+      considerItemsAvailable: consider.length,
       auditOnlyProvenanceRetained: exclude.filter((item) => item.metadata?.lineageOnly === true).length,
       protectedCorrectionsSupplied: allItems.filter((item) => item.protectedRole === "correction" && packetEligible(item)).length,
       protectedConflictsSupplied: allItems.filter((item) => item.protectedRole === "conflict" && packetEligible(item)).length,

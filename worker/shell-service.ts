@@ -24,14 +24,6 @@ function projectView(row: Row) {
   };
 }
 
-async function requireProject(db: D1Database, projectId: string) {
-  const project = await first<Row>(db.prepare(
-    "SELECT * FROM projects WHERE id = ? LIMIT 1",
-  ).bind(projectId));
-  if (!project) throw new Error("Canonical project not found.");
-  return project;
-}
-
 async function listProjects(db: D1Database) {
   const rows = await all<Row>(db.prepare(
     `SELECT p.*,
@@ -53,7 +45,14 @@ async function listProjects(db: D1Database) {
 }
 
 async function workOverview(db: D1Database, projectId: string) {
-  const project = await requireProject(db, projectId);
+  const project = await first<Row>(db.prepare(
+    `SELECT p.*,
+      (SELECT COUNT(*) FROM findings f
+       WHERE f.project_id = p.id AND f.status IN ('proposed', 'under_review', 'deferred', 'challenged')
+      ) AS pending_finding_count
+     FROM projects p WHERE p.id = ? LIMIT 1`,
+  ).bind(projectId));
+  if (!project) throw new Error("Canonical project not found.");
   const conversations = await all<Row>(db.prepare(
     `SELECT c.*, ca.objective AS active_case_objective, ca.status AS active_case_status,
             ca.outcome_state AS active_case_outcome_state, ca.updated_at AS active_case_updated_at

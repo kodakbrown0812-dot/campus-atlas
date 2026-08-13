@@ -90,7 +90,10 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
     <main className={styles.page}>
       <header className={styles.header}>
         <div><span>Canonical inspection · {projectId}</span><h1>Readable lineage</h1></div>
-        <p>Inspect source, versions, authority, challenges, governance, and downstream use without editing history.</p>
+        <div>
+          <p>Inspect source, versions, authority, challenges, governance, and downstream use without editing history.</p>
+          <Link href={`/projects/${encodeURIComponent(projectId)}/findings`}>Open needs review</Link>
+        </div>
       </header>
       <nav className={styles.tabs} aria-label="Inspect records">
         {tabs.map((item) => <button aria-current={tab === item ? "page" : undefined} key={item} onClick={() => setTab(item)} type="button">{item}</button>)}
