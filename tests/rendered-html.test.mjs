@@ -1459,7 +1459,8 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   for (const expected of [
     "Atlas Steward",
     "Keep this project coherent",
-    "finds the prior work this task needs",
+    "finds the relevant prior work available to this project",
+    "prepares reviewable context for the work ahead",
     "What are you trying to continue",
     "Prepare context",
     "Recent context packets",
@@ -5394,6 +5395,15 @@ test("V1.7.1 continuity/check keeps none/light/full read-only, isolated, and ser
   assert.equal(none.value.diagnostics.exactSourcesOpened, 0);
   assert.equal(none.value.next.action, "proceed_without_atlas");
 
+  const unmatchedCase = await continuityRequest(worker, DB, "sports", {
+    task: "Convert four inches to centimeters.",
+    caseId: boundedCase.caseId,
+  });
+  assert.equal(unmatchedCase.response.status, 200);
+  assert.equal(unmatchedCase.value.need.level, "none");
+  assert.equal(unmatchedCase.value.compactCapsule, null);
+  assert.ok(unmatchedCase.value.need.reasonCodes.includes("bounded_case_did_not_match_task"));
+
   const injected = await continuityRequest(worker, DB, "sports", {
     task: "Compare soccer live-entry options.",
     caseId: boundedCase.caseId,
@@ -5413,6 +5423,34 @@ test("V1.7.1 continuity/check keeps none/light/full read-only, isolated, and ser
   assert.deepEqual(canonicalMutationCounts(DB), before);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM handoffs").get().count, 0);
+});
+
+test("V1.7.1 Light escalates to full treatment when linked counterevidence could not fit a safe capsule", async () => {
+  const worker = await builtWorker("v171-light-protected-context");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "workflow", "Workflow Engine");
+  await initializeRoadways(worker, DB, "workflow");
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:mobile-transfer-challenge",
+    projectId: "workflow",
+    statement: "A copied mobile transfer can lose essential qualification when presentation constraints are applied without review.",
+    authority: "proposed",
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:mobile-transfer-governing",
+    projectId: "workflow",
+    statement: "When Cody requests a Codex-ready transfer from mobile, use concise plain text while preserving governing qualification.",
+    counterevidenceIds: ["mechanism:mobile-transfer-challenge"],
+  });
+  const before = canonicalMutationCounts(DB);
+  const result = await continuityRequest(worker, DB, "workflow", {
+    task: "Prepare a Codex-ready transfer from mobile.",
+  });
+  assert.equal(result.response.status, 200, JSON.stringify(result.value));
+  assert.equal(result.value.need.level, "full");
+  assert.equal(result.value.compactCapsule, null);
+  assert.ok(result.value.need.reasonCodes.includes("linked_counterevidence_requires_full_governance"));
+  assert.deepEqual(canonicalMutationCounts(DB), before);
 });
 
 test("V1.7.1 continuity/check never initializes missing canonical roadways during a read", async () => {

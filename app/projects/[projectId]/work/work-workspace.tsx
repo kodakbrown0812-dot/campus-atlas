@@ -292,7 +292,7 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
           <span className={styles.eyebrow}>Atlas Steward</span>
           <h2>Keep this project coherent.</h2>
           <p>
-            Atlas finds the prior work this task needs, reconstructs the current project state, and prepares a reviewable context packet.
+            Atlas finds the relevant prior work available to this project, reconstructs the current project state, and prepares reviewable context for the work ahead.
           </p>
         </div>
         <label htmlFor="home-steward-task">What are you trying to continue?</label>

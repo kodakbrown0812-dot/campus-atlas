@@ -22,6 +22,7 @@ type CompactMechanism = {
   authority: string;
   scope: string;
   caseIds: string[];
+  counterevidenceIds: string[];
 };
 
 type CompactContext = {
@@ -102,7 +103,7 @@ async function compactContext(
 
   const mechanismRows = await all<Row>(db.prepare(
     `SELECT m.id, m.current_governing_version_id, v.statement,
-            v.authority_state, v.supporting_case_ids
+            v.authority_state, v.supporting_case_ids, v.counterevidence_ids
      FROM mechanisms m
      JOIN mechanism_versions v
        ON v.id = m.current_governing_version_id
@@ -124,6 +125,7 @@ async function compactContext(
       authority,
       scope: authority === "approved_local" ? "local" : "project_wide",
       caseIds,
+      counterevidenceIds: stringList(row.counterevidence_ids),
     };
   });
 
@@ -177,11 +179,29 @@ function needDecision(
     };
   }
   const presentation = PRESENTATION_PATTERN.test(task);
-  if (presentation && context.matchingMechanisms.length) {
+  const compactPresentationIsSafe = presentation
+    && context.matchingMechanisms.length === 1
+    && context.correctionOrConflictIndicators === 0
+    && context.matchingMechanisms[0].counterevidenceIds.length === 0;
+  if (compactPresentationIsSafe) {
     return {
       level: "light" as const,
       reasonCodes: ["conditional_presentation_context", "compact_governed_signal"],
       explanation: "A bounded governed presentation preference applies, but full reconstruction is not justified.",
+    };
+  }
+  if (presentation && context.matchingMechanisms.length) {
+    return {
+      level: "full" as const,
+      reasonCodes: [
+        "conditional_presentation_context",
+        ...(context.matchingMechanisms.length > 1 ? ["multiple_governing_matches"] : []),
+        ...(context.matchingMechanisms.some((mechanism) => mechanism.counterevidenceIds.length)
+          ? ["linked_counterevidence_requires_full_governance"]
+          : []),
+        ...(context.correctionOrConflictIndicators ? ["correction_or_conflict_requires_full_governance"] : []),
+      ],
+      explanation: "Applicable context requires full treatment so corrections, counterevidence, or multiple governing matches are not silently omitted.",
     };
   }
   const caseObjectiveMatch = Boolean(
@@ -198,20 +218,14 @@ function needDecision(
       explanation: "Governed continuity can materially affect the reasoning, scope, constraints, or requested output.",
     };
   }
-  if (caseId || context.correctionOrConflictIndicators > 0) {
-    return {
-      level: "light" as const,
-      reasonCodes: [
-        ...(caseId ? ["bounded_case_metadata"] : []),
-        ...(context.correctionOrConflictIndicators ? ["correction_or_conflict_indicator"] : []),
-      ],
-      explanation: "Bounded metadata or a correction/conflict warning may matter, but full reconstruction is not yet justified.",
-    };
-  }
   return {
     level: "none" as const,
-    reasonCodes: ["no_material_continuity_dependency"],
-    explanation: "No governed continuity dependency was found that is likely to materially change this task.",
+    reasonCodes: [
+      "no_applicable_governed_use",
+      ...(caseId ? ["bounded_case_did_not_match_task"] : []),
+      ...(context.correctionOrConflictIndicators ? ["non_applicable_correction_or_conflict_only"] : []),
+    ],
+    explanation: "No applicable governed Use material was found for this task.",
   };
 }
 
