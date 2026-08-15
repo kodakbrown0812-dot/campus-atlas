@@ -3,6 +3,7 @@ import { Row, all, first, parseJson } from "./slice3-support";
 
 type ShellOptions = {
   actionKey?: string;
+  ownerUserId?: string;
   publicDemo?: boolean;
 };
 
@@ -119,17 +120,23 @@ function optionalFullName(request: Request) {
 }
 
 function sessionView(request: Request, options: ShellOptions) {
+  const authenticatedUserId = request.headers.get("oai-authenticated-user-id");
   const email = request.headers.get("oai-authenticated-user-email");
   const fullName = optionalFullName(request);
   const supplied = request.headers.get("authorization");
   const writeConfigured = Boolean(options.actionKey);
-  const writeAuthorized = Boolean(options.actionKey && supplied === `Bearer ${options.actionKey}`);
+  const ownerAuthorized = Boolean(
+    options.actionKey
+      && options.ownerUserId?.trim()
+      && authenticatedUserId === options.ownerUserId.trim(),
+  );
+  const writeAuthorized = ownerAuthorized || Boolean(options.actionKey && supplied === `Bearer ${options.actionKey}`);
   return {
     actor: {
-      id: email || "cody",
+      id: authenticatedUserId || email || "cody",
       displayName: fullName || email || "Cody",
       email,
-      authenticatedByPlatform: Boolean(email),
+      authenticatedByPlatform: Boolean(authenticatedUserId || email),
     },
     mode: options.publicDemo ? "public_demo" : "private_workspace",
     fixtureMode: false,
@@ -137,7 +144,7 @@ function sessionView(request: Request, options: ShellOptions) {
       required: true,
       configured: writeConfigured,
       authorized: writeAuthorized,
-      storage: "memory_only",
+      storage: ownerAuthorized ? "platform_identity" : "memory_only",
     },
     readOnly: !writeAuthorized,
   };

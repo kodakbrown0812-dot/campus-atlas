@@ -476,6 +476,33 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
   assert.equal(authorized.session.writeAuthorization.authorized, true);
   assert.doesNotMatch(JSON.stringify(authorized), /slice-2-test-key/);
 
+  const ownerEnv = { ...env, CAMPUS_ATLAS_OWNER_USER_ID: "owner-user-id" };
+  const ownerHeaders = {
+    "oai-authenticated-user-id": "owner-user-id",
+    "oai-authenticated-user-email": "owner@example.com",
+  };
+  const ownerSession = await (await worker.fetch(new Request("http://localhost/api/v1/session", {
+    headers: ownerHeaders,
+  }), ownerEnv, ctx)).json();
+  assert.equal(ownerSession.session.readOnly, false);
+  assert.equal(ownerSession.session.actor.authenticatedByPlatform, true);
+  assert.equal(ownerSession.session.writeAuthorization.authorized, true);
+  assert.equal(ownerSession.session.writeAuthorization.storage, "platform_identity");
+  assert.doesNotMatch(JSON.stringify(ownerSession), /slice-2-test-key/);
+  const ownerSecurity = await (await worker.fetch(
+    new Request("http://localhost/api/security", { headers: ownerHeaders }),
+    ownerEnv,
+    ctx,
+  )).json();
+  assert.equal(ownerSecurity.externalWrites, "verified_owner_identity_or_bearer_required");
+  assert.doesNotMatch(JSON.stringify(ownerSecurity), /slice-2-test-key|owner-user-id/);
+
+  const nonOwnerSession = await (await worker.fetch(new Request("http://localhost/api/v1/session", {
+    headers: { "oai-authenticated-user-id": "other-user-id" },
+  }), ownerEnv, ctx)).json();
+  assert.equal(nonOwnerSession.session.readOnly, true);
+  assert.equal(nonOwnerSession.session.writeAuthorization.authorized, false);
+
   const workResponse = await worker.fetch(new Request("http://localhost/api/v1/projects/sports/work"), env, ctx);
   assert.equal(workResponse.status, 200);
   const work = await workResponse.json();
@@ -496,6 +523,20 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
     body: JSON.stringify({ title: "Must not persist" }),
   }), env, ctx);
   assert.equal(unauthorizedWrite.status, 401);
+
+  const nonOwnerWrite = await worker.fetch(new Request("http://localhost/api/v1/projects/hockey/conversations", {
+    method: "POST",
+    headers: { "content-type": "application/json", "oai-authenticated-user-id": "other-user-id" },
+    body: JSON.stringify({ title: "Must still not persist" }),
+  }), ownerEnv, ctx);
+  assert.equal(nonOwnerWrite.status, 401);
+
+  const ownerWrite = await worker.fetch(new Request("http://localhost/api/v1/projects/hockey/conversations", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...ownerHeaders },
+    body: JSON.stringify({ title: "Owner-only mock conversation" }),
+  }), ownerEnv, ctx);
+  assert.equal(ownerWrite.status, 201);
 
   const unavailable = await worker.fetch(new Request("http://localhost/api/v1/health"), {
     DB: { prepare() { throw new Error("D1 unavailable"); } },

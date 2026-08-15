@@ -18,6 +18,7 @@ interface Env {
   DB: D1Database;
   OPENAI_API_KEY?: string;
   CAMPUS_ATLAS_ACTION_KEY?: string;
+  CAMPUS_ATLAS_OWNER_USER_ID?: string;
   CAMPUS_ATLAS_PUBLIC_DEMO?: string;
   ATLAS_TEST_RECEIVING_MODEL_ADAPTER?: TestReceivingModelAdapter;
   IMAGES: {
@@ -34,6 +35,17 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
+function authorizeOwnerRequest(request: Request, env: Env) {
+  const ownerUserId = env.CAMPUS_ATLAS_OWNER_USER_ID?.trim();
+  const authenticatedUserId = request.headers.get("oai-authenticated-user-id");
+  if (!env.CAMPUS_ATLAS_ACTION_KEY || !ownerUserId || authenticatedUserId !== ownerUserId) {
+    return request;
+  }
+  const headers = new Headers(request.headers);
+  headers.set("authorization", `Bearer ${env.CAMPUS_ATLAS_ACTION_KEY}`);
+  return new Request(request, { headers });
+}
+
 // Image security config. SVG sources with .svg extension auto-skip the
 // optimization endpoint on the client side (served directly, no proxy).
 // To route SVGs through the optimizer (with security headers), set
@@ -43,6 +55,7 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const authorizedRequest = authorizeOwnerRequest(request, env);
 
     if (url.pathname === "/api/state") {
       return handleAtlasState(request, env.DB, env.CAMPUS_ATLAS_PUBLIC_DEMO === "true");
@@ -56,30 +69,31 @@ const worker = {
       ["/api/v1/health", "/api/v1/session", "/api/v1/projects"].includes(url.pathname)
       || /^\/api\/v1\/projects\/[^/]+\/work$/.test(url.pathname)
     ) {
-      return handleShellService(request, env.DB, {
+      return handleShellService(authorizedRequest, env.DB, {
         actionKey: env.CAMPUS_ATLAS_ACTION_KEY,
+        ownerUserId: env.CAMPUS_ATLAS_OWNER_USER_ID,
         publicDemo: env.CAMPUS_ATLAS_PUBLIC_DEMO === "true",
       });
     }
 
     if (/^\/api\/v1\/projects\/[^/]+\/conversations\/[^/]+\/structure$/.test(url.pathname)) {
-      return handleSlice6B(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+      return handleSlice6B(authorizedRequest, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (/^\/api\/v1\/projects\/[^/]+\/(?:conversations|cases|events|case-boundaries)(?:\/|$)/.test(url.pathname)) {
-      return handleConversationCases(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+      return handleConversationCases(authorizedRequest, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (/^\/api\/v1\/projects\/[^/]+\/(?:checkpoints|findings|governance-events|mechanisms\/eligible)(?:\/|$)/.test(url.pathname)) {
-      return handleSlice3(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+      return handleSlice3(authorizedRequest, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (/^\/api\/v1\/projects\/[^/]+\/(?:continuity|roadways|reconstruction|packets|live-state)(?:\/|$)/.test(url.pathname)) {
-      return handleSlice4(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+      return handleSlice4(authorizedRequest, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (/^\/api\/v1\/projects\/[^/]+\/handoffs(?:\/|$)/.test(url.pathname)) {
-      return handleSlice5(request, env.DB, {
+      return handleSlice5(authorizedRequest, env.DB, {
         actionKey: env.CAMPUS_ATLAS_ACTION_KEY,
         openAiApiKey: env.OPENAI_API_KEY,
         testAdapter: env.ATLAS_TEST_RECEIVING_MODEL_ADAPTER,
@@ -87,15 +101,20 @@ const worker = {
     }
 
     if (/^\/api\/v1\/projects\/[^/]+\/(?:inspect|contextual-add|reasoning-nodes)(?:\/|$)/.test(url.pathname)) {
-      return handleSlice6B(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+      return handleSlice6B(authorizedRequest, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (url.pathname.startsWith("/api/v1/projects/") && url.pathname.includes("/records/")) {
-      return handleCanonicalRecords(request, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+      return handleCanonicalRecords(authorizedRequest, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
     }
 
     if (["/mcp", "/openapi.json", "/.well-known/openapi.json", "/privacy", "/api/context", "/api/blueprint", "/api/precedents", "/api/candidates", "/api/outcomes", "/api/events", "/api/receipts", "/api/security"].includes(url.pathname)) {
-      return handleAtlasActions(request, { DB: env.DB, CAMPUS_ATLAS_ACTION_KEY: env.CAMPUS_ATLAS_ACTION_KEY, CAMPUS_ATLAS_PUBLIC_DEMO: env.CAMPUS_ATLAS_PUBLIC_DEMO });
+      return handleAtlasActions(authorizedRequest, {
+        DB: env.DB,
+        CAMPUS_ATLAS_ACTION_KEY: env.CAMPUS_ATLAS_ACTION_KEY,
+        CAMPUS_ATLAS_OWNER_USER_ID: env.CAMPUS_ATLAS_OWNER_USER_ID,
+        CAMPUS_ATLAS_PUBLIC_DEMO: env.CAMPUS_ATLAS_PUBLIC_DEMO,
+      });
     }
 
     if (url.pathname === "/_vinext/image") {

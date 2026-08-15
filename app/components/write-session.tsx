@@ -22,7 +22,7 @@ type SessionRecord = {
     required: true;
     configured: boolean;
     authorized: boolean;
-    storage: "memory_only";
+    storage: "memory_only" | "platform_identity";
   };
   readOnly: boolean;
 };

@@ -63,14 +63,16 @@ function AuthorizationPanel() {
       </div>
       <small>
         {authorized
-          ? `${session?.actor.displayName || "Cody"} · key held in memory only`
+          ? session?.writeAuthorization.storage === "platform_identity"
+            ? `${session?.actor.displayName || "Cody"} · verified owner identity`
+            : `${session?.actor.displayName || "Cody"} · key held in memory only`
           : "Reads remain available. Consequential writes fail closed."}
       </small>
-      {authorized ? (
+      {authorized && session?.writeAuthorization.storage === "memory_only" ? (
         <button className={styles.textButton} onClick={clearWriteAccess} type="button">
           Return to read-only
         </button>
-      ) : (
+      ) : !authorized ? (
         <>
           <label className={styles.srOnly} htmlFor="canonical-write-key">Canonical write key</label>
           <input
@@ -90,7 +92,7 @@ function AuthorizationPanel() {
             {status === "verifying" ? "Verifying…" : "Verify access"}
           </button>
         </>
-      )}
+      ) : null}
       {error && <p className={styles.inlineError}>{error}</p>}
     </section>
   );

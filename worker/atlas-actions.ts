@@ -46,6 +46,7 @@ type ActionReceipt = {
 type ActionEnv = {
   DB: D1Database;
   CAMPUS_ATLAS_ACTION_KEY?: string;
+  CAMPUS_ATLAS_OWNER_USER_ID?: string;
   CAMPUS_ATLAS_PUBLIC_DEMO?: string;
 };
 
@@ -446,7 +447,11 @@ function isAuthorized(request: Request, env: ActionEnv) {
 function securityStatus(env: ActionEnv) {
   const publicDemo = env.CAMPUS_ATLAS_PUBLIC_DEMO === "true";
   return {
-    externalWrites: env.CAMPUS_ATLAS_ACTION_KEY ? "bearer_required" : "disabled",
+    externalWrites: env.CAMPUS_ATLAS_ACTION_KEY
+      ? env.CAMPUS_ATLAS_OWNER_USER_ID
+        ? "verified_owner_identity_or_bearer_required"
+        : "bearer_required"
+      : "disabled",
     writeSecretConfigured: Boolean(env.CAMPUS_ATLAS_ACTION_KEY),
     protectedRoutes: ["/api/candidates", "/api/outcomes", "/api/events", "atlas_capture_candidate", "atlas_record_outcome", "atlas_submit_case_event"],
     promotionPolicy: "Human approval inside Campus Atlas only",

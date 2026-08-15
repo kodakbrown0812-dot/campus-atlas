@@ -97,7 +97,7 @@ The MCP server implements initialize, tool discovery, and tool calls. It exposes
 - `atlas_capture_candidate` — write; creates a proposed case or knowledge object only.
 - `atlas_record_outcome` — write; creates a reality evidence event only.
 
-Every tool declares read/write, open-world, and destructive annotations. Writes require idempotency keys and never promote knowledge. External writes fail closed when `CAMPUS_ATLAS_ACTION_KEY` is absent and require that bearer token when it is configured. `GET /api/security` reports the protection mode without returning the secret.
+Every tool declares read/write, open-world, and destructive annotations. Writes require idempotency keys and never promote knowledge. External writes fail closed when `CAMPUS_ATLAS_ACTION_KEY` is absent. When configured, writes require either that bearer token or a Sites-authenticated user whose stable ID exactly matches `CAMPUS_ATLAS_OWNER_USER_ID`. `GET /api/security` reports the protection mode without returning either value.
 
 An OpenAPI 3.1 fallback is available at `/openapi.json` for GPT Actions or other compatible clients. The privacy disclosure lives at `/privacy`.
 
@@ -223,6 +223,9 @@ Runtime variables:
   record with no answer.
 - `CAMPUS_ATLAS_ACTION_KEY` — required to enable external write routes and MCP
   write tools. When absent, external writes fail closed.
+- `CAMPUS_ATLAS_OWNER_USER_ID` — optional stable Sites user ID that automatically
+  receives canonical write authorization while signed in; all other visitors
+  remain read-only.
 - `CAMPUS_ATLAS_PUBLIC_DEMO=true` — optional; isolates each browser in an
   opaque, session-scoped D1 demo workspace.
 
