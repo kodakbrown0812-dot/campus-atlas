@@ -444,11 +444,18 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
     },
   });
 
-  const env = { DB, ASSETS: assets, CAMPUS_ATLAS_ACTION_KEY: "slice-2-test-key" };
+  const env = {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "slice-2-test-key",
+    CAMPUS_ATLAS_DEPLOYMENT_VERSION: "18",
+    CAMPUS_ATLAS_SOURCE_COMMIT: "0123456789abcdef0123456789abcdef01234567",
+  };
   const health = await worker.fetch(new Request("http://localhost/api/v1/health"), env, ctx);
   assert.equal(health.status, 200);
+  const healthBody = await health.json();
   assert.deepEqual(
-    Object.fromEntries(Object.entries(await health.json()).filter(([key]) =>
+    Object.fromEntries(Object.entries(healthBody).filter(([key]) =>
       ["canonicalState", "persistence", "fixtureMode", "seededFallback"].includes(key),
     )),
     {
@@ -458,6 +465,10 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
       seededFallback: false,
     },
   );
+  assert.deepEqual(healthBody.buildIdentity, {
+    deploymentVersion: "18",
+    sourceCommit: "0123456789abcdef0123456789abcdef01234567",
+  });
 
   const projectsResponse = await worker.fetch(new Request("http://localhost/api/v1/projects"), env, ctx);
   assert.equal(projectsResponse.status, 200);

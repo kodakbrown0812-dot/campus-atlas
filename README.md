@@ -223,11 +223,15 @@ Runtime variables:
   record with no answer.
 - `CAMPUS_ATLAS_ACTION_KEY` — required to enable external write routes and MCP
   write tools. When absent, external writes fail closed.
+- `CAMPUS_ATLAS_DEPLOYMENT_VERSION` — optional public Sites version displayed
+  in the shell and returned by `/api/v1/health` for deployment provenance.
 - `CAMPUS_ATLAS_OWNER_USER_ID` — optional stable Sites user ID that automatically
   receives canonical write authorization while signed in; all other visitors
   remain read-only.
 - `CAMPUS_ATLAS_PUBLIC_DEMO=true` — optional; isolates each browser in an
   opaque, session-scoped D1 demo workspace.
+- `CAMPUS_ATLAS_SOURCE_COMMIT` — optional full public Git commit SHA displayed
+  in the shell and returned by `/api/v1/health` for source provenance.
 
 Wrangler log and Miniflare paths are configured automatically by the local
 scripts. Never commit runtime secrets or local D1 data.

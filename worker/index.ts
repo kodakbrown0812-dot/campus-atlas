@@ -18,8 +18,10 @@ interface Env {
   DB: D1Database;
   OPENAI_API_KEY?: string;
   CAMPUS_ATLAS_ACTION_KEY?: string;
+  CAMPUS_ATLAS_DEPLOYMENT_VERSION?: string;
   CAMPUS_ATLAS_OWNER_USER_ID?: string;
   CAMPUS_ATLAS_PUBLIC_DEMO?: string;
+  CAMPUS_ATLAS_SOURCE_COMMIT?: string;
   ATLAS_TEST_RECEIVING_MODEL_ADAPTER?: TestReceivingModelAdapter;
   IMAGES: {
     input(stream: ReadableStream): {
@@ -71,8 +73,10 @@ const worker = {
     ) {
       return handleShellService(authorizedRequest, env.DB, {
         actionKey: env.CAMPUS_ATLAS_ACTION_KEY,
+        deploymentVersion: env.CAMPUS_ATLAS_DEPLOYMENT_VERSION,
         ownerUserId: env.CAMPUS_ATLAS_OWNER_USER_ID,
         publicDemo: env.CAMPUS_ATLAS_PUBLIC_DEMO === "true",
+        sourceCommit: env.CAMPUS_ATLAS_SOURCE_COMMIT,
       });
     }
 

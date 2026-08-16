@@ -3,8 +3,10 @@ import { Row, all, first, parseJson } from "./slice3-support";
 
 type ShellOptions = {
   actionKey?: string;
+  deploymentVersion?: string;
   ownerUserId?: string;
   publicDemo?: boolean;
+  sourceCommit?: string;
 };
 
 function projectView(row: Row) {
@@ -183,6 +185,10 @@ export async function handleShellService(
         fixtureMode: false,
         seededFallback: false,
         publicDemo: Boolean(options.publicDemo),
+        buildIdentity: {
+          deploymentVersion: options.deploymentVersion?.trim() || null,
+          sourceCommit: options.sourceCommit?.trim() || null,
+        },
         checkedAt: new Date().toISOString(),
       }, { headers: { "cache-control": "no-store" } });
     }

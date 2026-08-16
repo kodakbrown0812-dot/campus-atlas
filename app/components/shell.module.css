@@ -171,11 +171,32 @@
 }
 
 .canonicalStatus,
+.buildIdentity,
 .authorization {
   padding: 11px;
   border: 1px solid rgba(137, 160, 197, .14);
   border-radius: 11px;
   background: rgba(255, 255, 255, .02);
+}
+
+.buildIdentity strong,
+.buildIdentity code {
+  display: block;
+}
+
+.buildIdentity strong {
+  color: #a9bad3;
+  font-size: 9px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.buildIdentity code {
+  margin-top: 5px;
+  color: #6f86a5;
+  font-size: 8px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .canonicalStatus {
@@ -509,6 +530,11 @@
   }
 
   .mobileSheet .authorization {
+    padding: 14px;
+  }
+
+  .mobileSheet .buildIdentity {
+    margin-bottom: 12px;
     padding: 14px;
   }
 }

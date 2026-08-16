@@ -22,6 +22,10 @@ type Health = {
   fixtureMode: false;
   seededFallback: false;
   publicDemo: boolean;
+  buildIdentity: {
+    deploymentVersion: string | null;
+    sourceCommit: string | null;
+  };
 };
 
 const destinations = [
@@ -42,6 +46,17 @@ function destinationHref(projectId: string, destination: typeof destinations[num
   if (destination === "ask") return `/projects/${encoded}/ask`;
   if (destination === "inspect") return `/projects/${encoded}/inspect`;
   return `/projects/${encoded}/work`;
+}
+
+function BuildIdentity({ health }: { health: Health | null }) {
+  const identity = health?.buildIdentity;
+  if (!identity?.deploymentVersion || !identity.sourceCommit) return null;
+  return (
+    <div className={styles.buildIdentity} aria-label="Production build identity">
+      <strong>Deployment {identity.deploymentVersion}</strong>
+      <code>{identity.sourceCommit}</code>
+    </div>
+  );
 }
 
 function AuthorizationPanel() {
@@ -216,6 +231,7 @@ function ProjectShellInner({
               <small>{health?.fixtureMode ? "Explicit fixture mode" : "No fixture fallback"}</small>
             </div>
           </div>
+          <BuildIdentity health={health} />
           <AuthorizationPanel />
         </div>
       </aside>
@@ -291,6 +307,7 @@ function ProjectShellInner({
               </div>
               <button aria-label="Close authorization" onClick={() => setMobileAuthorizationOpen(false)} type="button">×</button>
             </header>
+            <BuildIdentity health={health} />
             <AuthorizationPanel />
           </section>
         </div>
