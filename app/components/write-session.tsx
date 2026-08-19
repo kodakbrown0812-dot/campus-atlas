@@ -3,7 +3,6 @@
 import {
   ReactNode,
   createContext,
-  useCallback,
   useContext,
   useEffect,
   useState,
@@ -22,6 +21,7 @@ type SessionRecord = {
     required: true;
     configured: boolean;
     authorized: boolean;
+    ownerIdentityConfigured: boolean;
     storage: "memory_only" | "platform_identity";
   };
   readOnly: boolean;
@@ -29,12 +29,8 @@ type SessionRecord = {
 
 type SessionState = {
   session: SessionRecord | null;
-  status: "loading" | "ready" | "verifying" | "unavailable";
-  writeKey: string;
+  status: "loading" | "ready" | "unavailable";
   error: string;
-  setWriteKey(value: string): void;
-  verifyWriteAccess(): Promise<boolean>;
-  clearWriteAccess(): void;
   authorizationHeaders(): Record<string, string>;
 };
 
@@ -43,19 +39,7 @@ const WriteSessionContext = createContext<SessionState | null>(null);
 export function WriteSessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<SessionRecord | null>(null);
   const [status, setStatus] = useState<SessionState["status"]>("loading");
-  const [writeKey, setWriteKey] = useState("");
   const [error, setError] = useState("");
-
-  const loadSession = useCallback(async (key = "") => {
-    const response = await fetch("/api/v1/session", {
-      headers: key ? { authorization: `Bearer ${key}` } : undefined,
-      cache: "no-store",
-    });
-    if (!response.ok) throw new Error("Canonical session state is unavailable.");
-    const value = await response.json() as { session: SessionRecord };
-    setSession(value.session);
-    return value.session;
-  }, []);
 
   useEffect(() => {
     let active = true;
@@ -75,50 +59,13 @@ export function WriteSessionProvider({ children }: { children: ReactNode }) {
         setStatus("unavailable");
       });
     return () => { active = false; };
-  }, [loadSession]);
-
-  async function verifyWriteAccess() {
-    setStatus("verifying");
-    setError("");
-    try {
-      const next = await loadSession(writeKey);
-      setStatus("ready");
-      if (!next.writeAuthorization.authorized) {
-        setError(next.writeAuthorization.configured
-          ? "Write authorization was not accepted. Read-only access remains available."
-          : "Canonical writes are not configured in this environment.");
-      }
-      return next.writeAuthorization.authorized;
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Write authorization could not be verified.");
-      setStatus("unavailable");
-      return false;
-    }
-  }
-
-  function clearWriteAccess() {
-    setWriteKey("");
-    setError("");
-    setSession((current) => current ? {
-      ...current,
-      readOnly: true,
-      writeAuthorization: { ...current.writeAuthorization, authorized: false },
-    } : current);
-  }
+  }, []);
 
   const value: SessionState = {
     session,
     status,
-    writeKey,
     error,
-    setWriteKey,
-    verifyWriteAccess,
-    clearWriteAccess,
-    authorizationHeaders: () => {
-      const headers: Record<string, string> = {};
-      if (writeKey) headers.authorization = `Bearer ${writeKey}`;
-      return headers;
-    },
+    authorizationHeaders: () => ({}),
   };
 
   return <WriteSessionContext.Provider value={value}>{children}</WriteSessionContext.Provider>;

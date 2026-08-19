@@ -228,6 +228,10 @@ Runtime variables:
 - `CAMPUS_ATLAS_OWNER_USER_ID` — optional stable Sites user ID that automatically
   receives canonical write authorization while signed in; all other visitors
   remain read-only.
+- `CAMPUS_ATLAS_OWNER_EMAIL` — optional exact email allowlist for the Sites
+  authenticated owner. Atlas accepts it only alongside a host-provided stable
+  user ID, which bridges Sites account and Sign in with ChatGPT ID namespaces
+  without exposing the action key to the browser.
 - `CAMPUS_ATLAS_PUBLIC_DEMO=true` — optional; isolates each browser in an
   opaque, session-scoped D1 demo workspace.
 - `CAMPUS_ATLAS_SOURCE_COMMIT` — optional full public Git commit SHA displayed

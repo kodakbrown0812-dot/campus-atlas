@@ -1,10 +1,12 @@
 import { reasoningHealthForConversation } from "./reasoning-health";
 import { Row, all, first, parseJson } from "./slice3-support";
+import { isVerifiedOwnerRequest, ownerIdentityConfigured } from "./owner-identity";
 
 type ShellOptions = {
   actionKey?: string;
   deploymentVersion?: string;
   ownerUserId?: string;
+  ownerEmail?: string;
   publicDemo?: boolean;
   sourceCommit?: string;
 };
@@ -127,11 +129,7 @@ function sessionView(request: Request, options: ShellOptions) {
   const fullName = optionalFullName(request);
   const supplied = request.headers.get("authorization");
   const writeConfigured = Boolean(options.actionKey);
-  const ownerAuthorized = Boolean(
-    options.actionKey
-      && options.ownerUserId?.trim()
-      && authenticatedUserId === options.ownerUserId.trim(),
-  );
+  const ownerAuthorized = Boolean(options.actionKey && isVerifiedOwnerRequest(request, options));
   const writeAuthorized = ownerAuthorized || Boolean(options.actionKey && supplied === `Bearer ${options.actionKey}`);
   return {
     actor: {
@@ -146,6 +144,7 @@ function sessionView(request: Request, options: ShellOptions) {
       required: true,
       configured: writeConfigured,
       authorized: writeAuthorized,
+      ownerIdentityConfigured: ownerIdentityConfigured(options),
       storage: ownerAuthorized ? "platform_identity" : "memory_only",
     },
     readOnly: !writeAuthorized,

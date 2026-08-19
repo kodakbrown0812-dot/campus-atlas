@@ -12,6 +12,7 @@ import { handleSlice5 } from "./slice5-api";
 import { TestReceivingModelAdapter } from "./receiving-model";
 import { handleShellService } from "./shell-service";
 import { handleSlice6B } from "./slice6b-api";
+import { isVerifiedOwnerRequest } from "./owner-identity";
 
 interface Env {
   ASSETS: Fetcher;
@@ -20,6 +21,7 @@ interface Env {
   CAMPUS_ATLAS_ACTION_KEY?: string;
   CAMPUS_ATLAS_DEPLOYMENT_VERSION?: string;
   CAMPUS_ATLAS_OWNER_USER_ID?: string;
+  CAMPUS_ATLAS_OWNER_EMAIL?: string;
   CAMPUS_ATLAS_PUBLIC_DEMO?: string;
   CAMPUS_ATLAS_SOURCE_COMMIT?: string;
   ATLAS_TEST_RECEIVING_MODEL_ADAPTER?: TestReceivingModelAdapter;
@@ -38,9 +40,10 @@ interface ExecutionContext {
 }
 
 function authorizeOwnerRequest(request: Request, env: Env) {
-  const ownerUserId = env.CAMPUS_ATLAS_OWNER_USER_ID?.trim();
-  const authenticatedUserId = request.headers.get("oai-authenticated-user-id");
-  if (!env.CAMPUS_ATLAS_ACTION_KEY || !ownerUserId || authenticatedUserId !== ownerUserId) {
+  if (!env.CAMPUS_ATLAS_ACTION_KEY || !isVerifiedOwnerRequest(request, {
+    ownerEmail: env.CAMPUS_ATLAS_OWNER_EMAIL,
+    ownerUserId: env.CAMPUS_ATLAS_OWNER_USER_ID,
+  })) {
     return request;
   }
   const headers = new Headers(request.headers);
@@ -75,6 +78,7 @@ const worker = {
         actionKey: env.CAMPUS_ATLAS_ACTION_KEY,
         deploymentVersion: env.CAMPUS_ATLAS_DEPLOYMENT_VERSION,
         ownerUserId: env.CAMPUS_ATLAS_OWNER_USER_ID,
+        ownerEmail: env.CAMPUS_ATLAS_OWNER_EMAIL,
         publicDemo: env.CAMPUS_ATLAS_PUBLIC_DEMO === "true",
         sourceCommit: env.CAMPUS_ATLAS_SOURCE_COMMIT,
       });
@@ -117,6 +121,7 @@ const worker = {
         DB: env.DB,
         CAMPUS_ATLAS_ACTION_KEY: env.CAMPUS_ATLAS_ACTION_KEY,
         CAMPUS_ATLAS_OWNER_USER_ID: env.CAMPUS_ATLAS_OWNER_USER_ID,
+        CAMPUS_ATLAS_OWNER_EMAIL: env.CAMPUS_ATLAS_OWNER_EMAIL,
         CAMPUS_ATLAS_PUBLIC_DEMO: env.CAMPUS_ATLAS_PUBLIC_DEMO,
       });
     }

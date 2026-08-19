@@ -499,6 +499,7 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
   assert.equal(ownerSession.session.actor.authenticatedByPlatform, true);
   assert.equal(ownerSession.session.writeAuthorization.authorized, true);
   assert.equal(ownerSession.session.writeAuthorization.storage, "platform_identity");
+  assert.equal(ownerSession.session.writeAuthorization.ownerIdentityConfigured, true);
   assert.doesNotMatch(JSON.stringify(ownerSession), /slice-2-test-key/);
   const ownerSecurity = await (await worker.fetch(
     new Request("http://localhost/api/security", { headers: ownerHeaders }),
@@ -513,6 +514,29 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
   }), ownerEnv, ctx)).json();
   assert.equal(nonOwnerSession.session.readOnly, true);
   assert.equal(nonOwnerSession.session.writeAuthorization.authorized, false);
+
+  const siwcOwnerEnv = {
+    ...env,
+    CAMPUS_ATLAS_OWNER_USER_ID: "sites-account-owner-id",
+    CAMPUS_ATLAS_OWNER_EMAIL: "owner@example.com",
+  };
+  const siwcOwnerHeaders = {
+    "oai-authenticated-user-id": "siwc-user-id",
+    "oai-authenticated-user-email": "OWNER@example.com",
+  };
+  const siwcOwnerSession = await (await worker.fetch(new Request("http://localhost/api/v1/session", {
+    headers: siwcOwnerHeaders,
+  }), siwcOwnerEnv, ctx)).json();
+  assert.equal(siwcOwnerSession.session.readOnly, false);
+  assert.equal(siwcOwnerSession.session.writeAuthorization.authorized, true);
+  assert.equal(siwcOwnerSession.session.writeAuthorization.storage, "platform_identity");
+  assert.doesNotMatch(JSON.stringify(siwcOwnerSession), /slice-2-test-key/);
+
+  const emailWithoutHostIdentity = await (await worker.fetch(new Request("http://localhost/api/v1/session", {
+    headers: { "oai-authenticated-user-email": "owner@example.com" },
+  }), siwcOwnerEnv, ctx)).json();
+  assert.equal(emailWithoutHostIdentity.session.readOnly, true);
+  assert.equal(emailWithoutHostIdentity.session.writeAuthorization.authorized, false);
 
   const workResponse = await worker.fetch(new Request("http://localhost/api/v1/projects/sports/work"), env, ctx);
   assert.equal(workResponse.status, 200);
@@ -541,6 +565,20 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
     body: JSON.stringify({ title: "Must still not persist" }),
   }), ownerEnv, ctx);
   assert.equal(nonOwnerWrite.status, 401);
+
+  const expiredOrRevokedOwnerWrite = await worker.fetch(new Request("http://localhost/api/v1/projects/hockey/conversations", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: "Expired owner session must fail closed" }),
+  }), siwcOwnerEnv, ctx);
+  assert.equal(expiredOrRevokedOwnerWrite.status, 401);
+
+  const siwcOwnerWrite = await worker.fetch(new Request("http://localhost/api/v1/projects/hockey/conversations", {
+    method: "POST",
+    headers: { "content-type": "application/json", ...siwcOwnerHeaders },
+    body: JSON.stringify({ title: "SIWC owner-only mock conversation" }),
+  }), siwcOwnerEnv, ctx);
+  assert.equal(siwcOwnerWrite.status, 201);
 
   const ownerWrite = await worker.fetch(new Request("http://localhost/api/v1/projects/hockey/conversations", {
     method: "POST",
@@ -1501,6 +1539,7 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   const work = await readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8");
   const conversation = await readFile(new URL("../app/projects/[projectId]/conversations/[conversationId]/workspace.tsx", import.meta.url), "utf8");
   const session = await readFile(new URL("../app/components/write-session.tsx", import.meta.url), "utf8");
+  const shell = await readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8");
   for (const expected of [
     "/conversations",
     "/conversations/import",
@@ -1528,6 +1567,12 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   assert.doesNotMatch(`${work}\n${conversation}`, /\/api\/state|makeSeedState|AtlasState/);
   assert.match(session, /storage: "memory_only"/);
   assert.doesNotMatch(session, /localStorage|sessionStorage/);
+  assert.match(shell, /Sign in as owner/);
+  assert.match(shell, /signin-with-chatgpt/);
+  assert.match(shell, /signout-with-chatgpt/);
+  assert.match(shell, /not the configured Atlas owner/);
+  assert.doesNotMatch(`${shell}\n${session}`, /canonical-write-key|type="password"|writeKey|Verify access/);
+  assert.doesNotMatch(session, /authorization:\s*`Bearer/);
 });
 
 test("Home carries the exact literal task to Steward through project-scoped memory, not the URL", async () => {

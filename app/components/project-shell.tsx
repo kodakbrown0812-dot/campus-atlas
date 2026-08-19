@@ -60,16 +60,12 @@ function BuildIdentity({ health }: { health: Health | null }) {
 }
 
 function AuthorizationPanel() {
-  const {
-    session,
-    status,
-    writeKey,
-    error,
-    setWriteKey,
-    verifyWriteAccess,
-    clearWriteAccess,
-  } = useWriteSession();
+  const { session, error } = useWriteSession();
+  const pathname = usePathname();
   const authorized = Boolean(session?.writeAuthorization.authorized);
+  const returnTo = encodeURIComponent(pathname || "/");
+  const signInHref = `/signin-with-chatgpt?return_to=${returnTo}`;
+  const signOutHref = `/signout-with-chatgpt?return_to=${returnTo}`;
   return (
     <section className={styles.authorization} aria-label="Canonical write authorization">
       <div className={styles.healthLine}>
@@ -83,31 +79,18 @@ function AuthorizationPanel() {
             : `${session?.actor.displayName || "Cody"} · key held in memory only`
           : "Reads remain available. Consequential writes fail closed."}
       </small>
-      {authorized && session?.writeAuthorization.storage === "memory_only" ? (
-        <button className={styles.textButton} onClick={clearWriteAccess} type="button">
-          Return to read-only
-        </button>
-      ) : !authorized ? (
+      {authorized ? (
+        <a className={styles.textButton} href={signOutHref}>Sign out</a>
+      ) : session?.actor.authenticatedByPlatform ? (
         <>
-          <label className={styles.srOnly} htmlFor="canonical-write-key">Canonical write key</label>
-          <input
-            autoComplete="off"
-            id="canonical-write-key"
-            onChange={(event) => setWriteKey(event.target.value)}
-            placeholder="Enable writes"
-            type="password"
-            value={writeKey}
-          />
-          <button
-            className={styles.smallButton}
-            disabled={!writeKey || status === "verifying"}
-            onClick={verifyWriteAccess}
-            type="button"
-          >
-            {status === "verifying" ? "Verifying…" : "Verify access"}
-          </button>
+          <p className={styles.inlineError}>This signed-in account is not the configured Atlas owner.</p>
+          <a className={styles.textButton} href={signOutHref}>Use a different ChatGPT account</a>
         </>
-      ) : null}
+      ) : session?.writeAuthorization.ownerIdentityConfigured ? (
+        <a className={styles.smallButton} href={signInHref}>Sign in as owner</a>
+      ) : (
+        <p className={styles.inlineError}>Owner sign-in is not configured in this environment.</p>
+      )}
       {error && <p className={styles.inlineError}>{error}</p>}
     </section>
   );
