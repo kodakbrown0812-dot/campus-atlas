@@ -1,7 +1,9 @@
 # Campus Atlas verified-owner authorization contract
 
-**Status:** Long-term production contract  
-**Introduced:** Sites deployment 19 / source `42ad0138e2caf2ef455d5a409764f49b2297ab88`  
+**Status:** Long-term production contract
+
+**Introduced:** Sites deployment 19 / source `42ad0138e2caf2ef455d5a409764f49b2297ab88`
+
 **Scope:** Canonical browser writes on the existing Campus Atlas production origin
 
 This contract is a security and durability boundary. Source reconciliation,
