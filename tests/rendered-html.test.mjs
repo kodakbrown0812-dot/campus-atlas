@@ -515,6 +515,12 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
   assert.equal(nonOwnerSession.session.readOnly, true);
   assert.equal(nonOwnerSession.session.writeAuthorization.authorized, false);
 
+  const repeatedOwnerSession = await (await worker.fetch(new Request("http://localhost/api/v1/session", {
+    headers: ownerHeaders,
+  }), ownerEnv, ctx)).json();
+  assert.equal(repeatedOwnerSession.session.readOnly, false);
+  assert.equal(repeatedOwnerSession.session.writeAuthorization.authorized, true);
+
   const siwcOwnerEnv = {
     ...env,
     CAMPUS_ATLAS_OWNER_USER_ID: "sites-account-owner-id",
@@ -537,6 +543,24 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
   }), siwcOwnerEnv, ctx)).json();
   assert.equal(emailWithoutHostIdentity.session.readOnly, true);
   assert.equal(emailWithoutHostIdentity.session.writeAuthorization.authorized, false);
+
+  const mismatchedEmail = await (await worker.fetch(new Request("http://localhost/api/v1/session", {
+    headers: {
+      "oai-authenticated-user-id": "siwc-user-id",
+      "oai-authenticated-user-email": "not-owner@example.com",
+    },
+  }), siwcOwnerEnv, ctx)).json();
+  assert.equal(mismatchedEmail.session.readOnly, true);
+  assert.equal(mismatchedEmail.session.writeAuthorization.authorized, false);
+
+  const ownerWithoutServerKey = await (await worker.fetch(new Request("http://localhost/api/v1/session", {
+    headers: siwcOwnerHeaders,
+  }), {
+    ...siwcOwnerEnv,
+    CAMPUS_ATLAS_ACTION_KEY: undefined,
+  }, ctx)).json();
+  assert.equal(ownerWithoutServerKey.session.readOnly, true);
+  assert.equal(ownerWithoutServerKey.session.writeAuthorization.authorized, false);
 
   const workResponse = await worker.fetch(new Request("http://localhost/api/v1/projects/sports/work"), env, ctx);
   assert.equal(workResponse.status, 200);
@@ -1514,6 +1538,43 @@ test("V1.8 blueprint defers the broader program to Atlas Steward route authority
   assert.match(blueprint, /`\/ask` → \*\*Steward\*\*/);
   assert.match(blueprint, /`\/inspect` → \*\*Inspect\*\*/);
   assert.match(blueprint, /no pre-preparation destination selector/);
+});
+
+test("verified-owner authorization is an explicit durable deployment contract", async () => {
+  const [contract, ownerIdentity, workerIndex, session, shell] = await Promise.all([
+    readFile(new URL("../docs/OWNER_AUTHORIZATION_CONTRACT.md", import.meta.url), "utf8"),
+    readFile(new URL("../worker/owner-identity.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/write-session.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8"),
+  ]);
+
+  for (const invariant of [
+    "Sites authenticates",
+    "Atlas authorizes",
+    "The server decides",
+    "The UI reports",
+    "CAMPUS_ATLAS_OWNER_USER_ID",
+    "CAMPUS_ATLAS_OWNER_EMAIL",
+    "CAMPUS_ATLAS_ACTION_KEY",
+    "Reload on the same origin",
+    "Home / Steward / Inspect navigation",
+    "Owner signs out",
+    "Missing or mismatched identity",
+    "Deployment durability gate",
+  ]) assert.match(contract, new RegExp(invariant.replaceAll("/", "\\/")));
+
+  assert.match(ownerIdentity, /authenticatedUserId/);
+  assert.match(ownerIdentity, /authenticatedEmail/);
+  assert.match(ownerIdentity, /authenticatedEmail === configuredEmail/);
+  assert.match(workerIndex, /isVerifiedOwnerRequest/);
+  assert.match(workerIndex, /headers\.set\("authorization", `Bearer \$\{env\.CAMPUS_ATLAS_ACTION_KEY\}`\)/);
+  assert.match(shell, /const authorized = Boolean\(session\?\.writeAuthorization\.authorized\)/);
+  assert.match(shell, /authorized \? "Canonical writes enabled" : "Read-only session"/);
+  assert.match(shell, /signin-with-chatgpt/);
+  assert.match(shell, /signout-with-chatgpt/);
+  assert.deepEqual((session.match(/localStorage|sessionStorage|writeKey|canonical-write-key/g) || []), []);
+  assert.doesNotMatch(session, /authorization:\s*`Bearer/);
 });
 
 test("Atlas Steward shell has exactly three primary destinations and mobile parity", async () => {

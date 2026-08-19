@@ -3,6 +3,12 @@ export type OwnerIdentityOptions = {
   ownerUserId?: string;
 };
 
+// Long-term authorization contract: these headers are trusted only because
+// Sites dispatch owns and sanitizes them. The configured user ID is an exact
+// per-Site SIWC allowlist. The email bridge is accepted only when dispatch also
+// supplies a non-empty authenticated user ID; it must never become a standalone
+// browser claim or replace server-side authorization.
+
 function normalizedEmail(value?: string | null) {
   return value?.trim().toLocaleLowerCase("en-US") || null;
 }

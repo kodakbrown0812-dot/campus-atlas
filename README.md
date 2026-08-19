@@ -97,7 +97,7 @@ The MCP server implements initialize, tool discovery, and tool calls. It exposes
 - `atlas_capture_candidate` — write; creates a proposed case or knowledge object only.
 - `atlas_record_outcome` — write; creates a reality evidence event only.
 
-Every tool declares read/write, open-world, and destructive annotations. Writes require idempotency keys and never promote knowledge. External writes fail closed when `CAMPUS_ATLAS_ACTION_KEY` is absent. When configured, writes require either that bearer token or a Sites-authenticated user whose stable ID exactly matches `CAMPUS_ATLAS_OWNER_USER_ID`. `GET /api/security` reports the protection mode without returning either value.
+Every tool declares read/write, open-world, and destructive annotations. Writes require idempotency keys and never promote knowledge. External writes fail closed when `CAMPUS_ATLAS_ACTION_KEY` is absent. Browser writes require a Sites-authenticated identity that matches the explicit owner allowlist; the server injects its private action key only after that match. The browser never receives or stores the key. `GET /api/security` reports the protection mode without returning any allowlist or secret value. The durable boundary and deployment invariants are defined in [`docs/OWNER_AUTHORIZATION_CONTRACT.md`](docs/OWNER_AUTHORIZATION_CONTRACT.md).
 
 An OpenAPI 3.1 fallback is available at `/openapi.json` for GPT Actions or other compatible clients. The privacy disclosure lives at `/privacy`.
 
@@ -225,9 +225,9 @@ Runtime variables:
   write tools. When absent, external writes fail closed.
 - `CAMPUS_ATLAS_DEPLOYMENT_VERSION` — optional public Sites version displayed
   in the shell and returned by `/api/v1/health` for deployment provenance.
-- `CAMPUS_ATLAS_OWNER_USER_ID` — optional stable Sites user ID that automatically
-  receives canonical write authorization while signed in; all other visitors
-  remain read-only.
+- `CAMPUS_ATLAS_OWNER_USER_ID` — optional exact allowlist for the stable,
+  per-Site user ID forwarded by Sign in with ChatGPT. A Sites management account
+  ID from another namespace must not be silently substituted.
 - `CAMPUS_ATLAS_OWNER_EMAIL` — optional exact email allowlist for the Sites
   authenticated owner. Atlas accepts it only alongside a host-provided stable
   user ID, which bridges Sites account and Sign in with ChatGPT ID namespaces
