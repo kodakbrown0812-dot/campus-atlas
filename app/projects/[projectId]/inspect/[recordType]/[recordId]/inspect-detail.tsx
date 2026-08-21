@@ -22,6 +22,7 @@ function titleFor(recordType: string, detail: Detail) {
   if (recordType === "reasoning") return String(detail.versions?.at(-1)?.statement || "Reasoning node");
   if (recordType === "mechanisms") return String((detail.versions as Array<Record<string, unknown>> | undefined)?.at(-1)?.statement || "Mechanism");
   if (recordType === "packets") return String((detail.packet as Record<string, unknown> | undefined)?.task || "Packet");
+  if (recordType === "transfers") return String((detail.transfer as Record<string, unknown> | undefined)?.conversationTitle || "Room transfer");
   return "Canonical record";
 }
 
@@ -135,6 +136,9 @@ export default function InspectDetail({
     ? packetReceipt.treatmentSummary as Record<string, unknown>
     : {};
   const treatmentCount = (name: string) => Array.isArray(treatments[name]) ? treatments[name].length : 0;
+  const transfer = recordType === "transfers" && detail.transfer && typeof detail.transfer === "object"
+    ? detail.transfer as Record<string, unknown>
+    : null;
 
   return (
     <main className={styles.page}>
@@ -171,13 +175,47 @@ export default function InspectDetail({
           </details>
         </>
       ) : null}
+      {transfer ? (
+        <>
+          <section className={styles.record}>
+            <header><strong>Transfer outcome</strong><span>{readableValue(transfer.stage)}</span></header>
+            <dl>
+              <DetailRow label="Status" value={transfer.status} />
+              <DetailRow label="Exact conversation" value={transfer.conversationId} />
+              <DetailRow label="Expected counts" value={transfer.expectedCounts} />
+              <DetailRow label="Actual counts" value={transfer.actualCounts} />
+              <DetailRow label="Attempts" value={transfer.attemptCount} />
+              <DetailRow label="Blocked / failed reason" value={transfer.blockedReason || transfer.failureReason} />
+            </dl>
+          </section>
+          {[
+            ["Exact conversation", detail.exactConversation],
+            ["Immutable messages", detail.immutableMessages],
+            ["Canonical source events", detail.canonicalSourceEvents],
+            ["Analysis checkpoint", detail.checkpoint],
+            ["Reconciliation result", detail.reconciliation],
+            ["Governance history", detail.governance],
+            ["Governed project state", detail.governedProjectState],
+            ["Steward context artifacts", detail.stewardArtifacts],
+          ].map(([label, item]) => (
+            <section className={styles.record} key={String(label)}>
+              <header><strong>{String(label)}</strong><span>canonical lineage</span></header>
+              <pre>{JSON.stringify(item, null, 2)}</pre>
+            </section>
+          ))}
+          <details className={styles.record}>
+            <summary>Raw canonical transfer record</summary>
+            <pre>{JSON.stringify(detail, null, 2)}</pre>
+          </details>
+        </>
+      ) : null}
       {result && (
         <section className={styles.panel} role="status">
           <strong>Canonical correction confirmed</strong>
           <pre>{JSON.stringify(result, null, 2)}</pre>
         </section>
       )}
-      {!packet ? <section className={styles.stack}>
+      {!packet && !transfer ? <section className={styles.stack}>
         {Object.entries(detail).map(([key, item]) => (
           <article className={styles.record} key={key}>
             <header><strong>{key}</strong><span>canonical</span></header>

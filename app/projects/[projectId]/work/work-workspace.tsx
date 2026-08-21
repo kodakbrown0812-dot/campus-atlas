@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useWriteSession } from "../../../components/write-session";
 import { useStewardTask } from "../../../components/steward-task";
+import TransferRoom from "./transfer-room";
 import styles from "./work.module.css";
 
 type ReasoningHealth = {
@@ -116,7 +117,7 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
   const { carryTask } = useStewardTask();
   const [overview, setOverview] = useState<WorkOverview | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "unavailable">("loading");
-  const [mode, setMode] = useState<"none" | "native" | "import">("none");
+  const [mode, setMode] = useState<"none" | "native" | "transfer">("none");
   const [error, setError] = useState("");
   const [stewardTask, setStewardTask] = useState("");
 
@@ -202,55 +203,6 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     }
   }
 
-  async function importTranscript(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const title = String(form.get("title") || "").trim();
-    const transcript = String(form.get("transcript") || "");
-    const format = String(form.get("format") || "text");
-    const representationType = String(form.get("representationType") || "Exact");
-    if (!title || !transcript) return;
-    setStatus("saving");
-    setError("");
-    try {
-      const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/conversations/import`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": `work-import:${crypto.randomUUID()}`,
-          ...authorizationHeaders(),
-        },
-        body: JSON.stringify({
-          title,
-          sourceName: title,
-          sourceType: "explicit_transcript_import",
-          representationType,
-          authorityState: "observed",
-          format,
-          transcript,
-          provenance: { importedFrom: "slice6a_work" },
-        }),
-      });
-      const value = await response.json().catch(() => ({ error: "Transcript import failed." })) as {
-        conversation?: { id: string };
-        error?: string;
-      };
-      if (!response.ok || !value.conversation) {
-        setError(response.status === 401
-          ? "Write authorization is required. No import was saved."
-          : value.error || "Transcript import failed. Nothing was saved.");
-        setStatus("ready");
-        return;
-      }
-      router.push(`/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(value.conversation.id)}`);
-    } catch (caught) {
-      setError(caught instanceof Error
-        ? `${caught.message} Nothing was saved.`
-        : "Transcript import failed. Nothing was saved.");
-      setStatus("ready");
-    }
-  }
-
   if (status === "loading") {
     return (
       <div className={styles.page}>
@@ -310,8 +262,8 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         <button onClick={() => setMode(mode === "native" ? "none" : "native")} type="button">
           Start Atlas conversation
         </button>
-        <button onClick={() => setMode(mode === "import" ? "none" : "import")} type="button">
-          Import conversation
+        <button onClick={() => setMode(mode === "transfer" ? "none" : "transfer")} type="button">
+          Transfer a room into Atlas
         </button>
       </div>
 
@@ -339,41 +291,12 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         </form>
       )}
 
-      {mode === "import" && (
-        <form className={styles.entryForm} onSubmit={importTranscript}>
-          <div>
-            <span className={styles.eyebrow}>Preserved source import</span>
-            <h2>Add existing work to Atlas</h2>
-            <p>Exact bytes, provenance, representation, hash, and duplicate handling remain backend-owned.</p>
-          </div>
-          <label>
-            Source title
-            <input name="title" placeholder="Imported conversation" required />
-          </label>
-          <div className={styles.formRow}>
-            <label>
-              Format
-              <select name="format" defaultValue="text">
-                <option value="text">Text transcript</option>
-                <option value="json">JSON or ChatGPT export</option>
-              </select>
-            </label>
-            <label>
-              Representation
-              <select name="representationType" defaultValue="Exact">
-                <option value="Exact">Exact</option>
-                <option value="Reconstructed">Reconstructed</option>
-              </select>
-            </label>
-          </div>
-          <label>
-            Source content
-            <textarea name="transcript" placeholder="Paste the unchanged transcript or source artifact." required />
-          </label>
-          <button disabled={!canWrite || status === "saving"} type="submit">
-            {status === "saving" ? "Preserving import…" : "Import canonical source"}
-          </button>
-        </form>
+      {mode === "transfer" && (
+        <TransferRoom
+          conversations={overview.conversations}
+          onCanonicalChange={() => load().then(setOverview).catch(() => undefined)}
+          projectId={projectId}
+        />
       )}
 
       {error && <p className={styles.error} role="alert">{error}</p>}

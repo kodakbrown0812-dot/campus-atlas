@@ -317,7 +317,7 @@ async function createConversation(db: D1Database, projectId: string, body: Row) 
   return conversationView((await requireConversation(db, projectId, id)));
 }
 
-async function importConversation(db: D1Database, projectId: string, body: Row, idempotencyKey: string) {
+export async function importConversation(db: D1Database, projectId: string, body: Row, idempotencyKey: string) {
   await requireProject(db, projectId);
   requiredString(idempotencyKey, "Idempotency key");
   const format = requiredString(body.format, "Import format").toLowerCase();
@@ -543,7 +543,7 @@ async function appendMessage(
   };
 }
 
-async function createCase(db: D1Database, projectId: string, body: Row) {
+export async function createCase(db: D1Database, projectId: string, body: Row) {
   await requireProject(db, projectId);
   const id = body.id ? assertId(body.id, "case ID") : canonicalId("case");
   const createdAt = now();

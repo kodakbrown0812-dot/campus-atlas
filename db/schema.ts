@@ -261,6 +261,46 @@ export const checkpointReasoningNodes = sqliteTable("checkpoint_reasoning_nodes"
   uniqueIndex("checkpoint_reasoning_nodes_node").on(table.checkpointId, table.reasoningNodeId),
 ]);
 
+export const transferRuns = sqliteTable("transfer_runs", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  conversationId: text("conversation_id").notNull().references(() => conversations.id),
+  sourceImportId: text("source_import_id").references(() => conversationImports.id),
+  sourceFingerprint: text("source_fingerprint").notNull(),
+  caseId: text("case_id").references(() => cases.id),
+  checkpointId: text("checkpoint_id").references(() => checkpoints.id),
+  status: text("status").notNull().default("active"),
+  stage: text("stage").notNull().default("received"),
+  stageTimestamps: text("stage_timestamps").notNull().default("{}"),
+  expectedCounts: text("expected_counts").notNull().default("{}"),
+  actualCounts: text("actual_counts").notNull().default("{}"),
+  generatedRecordIds: text("generated_record_ids").notNull().default("{}"),
+  reconciliation: text("reconciliation").notNull().default("[]"),
+  blockedReason: text("blocked_reason"),
+  failureReason: text("failure_reason"),
+  attemptCount: integer("attempt_count").notNull().default(1),
+  originDeploymentVersion: text("origin_deployment_version"),
+  originSourceCommit: text("origin_source_commit"),
+  completedAt: text("completed_at"),
+  ...timestamps,
+}, (table) => [
+  uniqueIndex("transfer_runs_project_fingerprint").on(table.projectId, table.sourceFingerprint),
+]);
+
+export const transferRunEvents = sqliteTable("transfer_run_events", {
+  id: text("id").primaryKey(),
+  projectId: text("project_id").notNull().references(() => projects.id),
+  transferRunId: text("transfer_run_id").notNull().references(() => transferRuns.id),
+  attemptNumber: integer("attempt_number").notNull(),
+  stage: text("stage").notNull(),
+  outcome: text("outcome").notNull(),
+  details: text("details").notNull().default("{}"),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("transfer_run_events_stage_outcome")
+    .on(table.transferRunId, table.attemptNumber, table.stage, table.outcome),
+]);
+
 export const findings = sqliteTable("findings", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull().references(() => projects.id),

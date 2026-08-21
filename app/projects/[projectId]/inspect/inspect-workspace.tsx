@@ -14,6 +14,7 @@ type Overview = {
   blueprint: Record<string, unknown> & { proposedRevisions: Array<Record<string, unknown>> };
   packets: Array<Record<string, unknown> & { id: string; task: string }>;
   advanced: {
+    transfers: Array<Record<string, unknown> & { id: string; conversationTitle?: string; stage?: string }>;
     governance: Array<Record<string, unknown> & { id: string }>;
     roadways: Array<Record<string, unknown> & { id: string; name: string }>;
     liveState: Array<Record<string, unknown> & { id: string }>;
@@ -35,7 +36,7 @@ function value(value: unknown) {
 export default function InspectWorkspace({ projectId }: { projectId: string }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [tab, setTab] = useState<typeof tabs[number]>("Cases");
-  const [advancedTab, setAdvancedTab] = useState("Governance");
+  const [advancedTab, setAdvancedTab] = useState("Transfers");
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
 
@@ -74,8 +75,10 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
     );
   }
 
-  const advanced = overview.advanced[advancedTab === "Governance"
-    ? "governance"
+  const advanced = overview.advanced[advancedTab === "Transfers"
+    ? "transfers"
+    : advancedTab === "Governance"
+      ? "governance"
     : advancedTab === "Roadways"
       ? "roadways"
       : advancedTab === "Live state"
@@ -193,13 +196,27 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
       {tab === "Advanced" && (
         <>
           <nav className={styles.subtabs}>
-            {["Governance", "Roadways", "Live state", "Evaluations", "Relationships", "Handoffs"].map((item) => (
+            {["Transfers", "Governance", "Roadways", "Live state", "Evaluations", "Relationships", "Handoffs"].map((item) => (
               <button aria-current={advancedTab === item ? "page" : undefined} key={item} onClick={() => setAdvancedTab(item)} type="button">{item}</button>
             ))}
           </nav>
           <section className={styles.stack}>
             {!advanced.length && <Empty text={`No canonical ${advancedTab.toLowerCase()} records exist.`} />}
-            {advanced.map((record) => <pre className={styles.rawRecord} key={String(record.id || JSON.stringify(record))}>{JSON.stringify(record, null, 2)}</pre>)}
+            {advanced.map((record) => advancedTab === "Transfers" ? (
+              <Link
+                className={styles.record}
+                href={detailHref(projectId, "transfers", String(record.id))}
+                key={String(record.id)}
+              >
+                <header><strong>{String(record.conversationTitle || "Transferred room")}</strong><span>{String(record.stage || "received")}</span></header>
+                <dl>
+                  <Row label="Status" value={record.status} />
+                  <Row label="Expected / actual" value={`${value(record.expectedCounts)} / ${value(record.actualCounts)}`} />
+                  <Row label="Review state" value={record.reconciliation} />
+                  <Row label="Last changed" value={record.updatedAt} />
+                </dl>
+              </Link>
+            ) : <pre className={styles.rawRecord} key={String(record.id || JSON.stringify(record))}>{JSON.stringify(record, null, 2)}</pre>)}
           </section>
         </>
       )}

@@ -417,6 +417,286 @@
   font-size: 10px;
 }
 
+.transferRoom {
+  display: grid;
+  gap: 18px;
+  margin: 0 0 24px;
+  padding: clamp(20px, 3vw, 30px);
+  border: 1px solid rgba(77, 124, 254, .3);
+  border-radius: 17px;
+  background: linear-gradient(150deg, rgba(13, 34, 66, .95), rgba(7, 21, 42, .96));
+}
+
+.transferRoom h2,
+.transferResult h3 {
+  margin: 6px 0 8px;
+  font-family: "Manrope", sans-serif;
+  letter-spacing: -.025em;
+}
+
+.transferRoom header > p,
+.transferResultHeader p {
+  max-width: 720px;
+  margin: 0;
+  color: #91a5c4;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.transferForm {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 13px;
+}
+
+.transferForm label,
+.transferReview article > span {
+  display: grid;
+  gap: 7px;
+  color: #a8b8cf;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.transferForm input,
+.transferForm select,
+.transferForm textarea,
+.transferReview textarea {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid rgba(137, 160, 197, .25);
+  border-radius: 9px;
+  color: #e7edf7;
+  background: rgba(4, 16, 32, .82);
+  font: inherit;
+}
+
+.transferTranscript {
+  grid-column: 1 / -1;
+}
+
+.transferForm textarea {
+  min-height: 170px;
+  resize: vertical;
+}
+
+.transferForm button,
+.reviewActions button,
+.transferFailure button {
+  justify-self: start;
+  min-height: 41px;
+  padding: 9px 14px;
+  border: 1px solid rgba(91, 124, 235, .5);
+  border-radius: 9px;
+  color: #edf2ff;
+  background: linear-gradient(145deg, #5075dd, #3454ad);
+  cursor: pointer;
+}
+
+.transferForm button:disabled,
+.reviewActions button:disabled,
+.preservedRooms button:disabled {
+  cursor: not-allowed;
+  opacity: .48;
+}
+
+.preservedRooms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.preservedRooms > span {
+  margin-right: 4px;
+  color: #7186a6;
+  font-size: 9px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.preservedRooms button {
+  display: grid;
+  gap: 2px;
+  padding: 9px 11px;
+  border: 1px solid rgba(137, 160, 197, .18);
+  border-radius: 9px;
+  color: #c8d4e7;
+  text-align: left;
+  background: rgba(255, 255, 255, .025);
+  cursor: pointer;
+}
+
+.preservedRooms small {
+  color: #7f92af;
+}
+
+.transferResult {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid rgba(39, 212, 199, .24);
+  border-radius: 13px;
+  background: rgba(7, 26, 43, .78);
+}
+
+.transferResultHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.transferResultHeader > a,
+.transferReady a {
+  align-self: start;
+  padding: 8px 11px;
+  border: 1px solid rgba(77, 124, 254, .3);
+  border-radius: 8px;
+  color: #aebff2;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.transferProgress {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.transferProgress li {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid rgba(137, 160, 197, .13);
+  border-radius: 9px;
+  color: #7387a4;
+  font-size: 9px;
+}
+
+.transferProgress li[data-complete="true"] {
+  border-color: rgba(39, 212, 199, .22);
+  color: #b5d9d4;
+  background: rgba(39, 212, 199, .045);
+}
+
+.transferProgress li span {
+  color: #4fd1c5;
+  font-size: 14px;
+}
+
+.transferReview {
+  border-top: 1px solid rgba(137, 160, 197, .14);
+  padding-top: 14px;
+}
+
+.transferReview > summary {
+  color: #d9e4f5;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.transferReview > article {
+  display: grid;
+  gap: 12px;
+  margin-top: 13px;
+  padding: 16px;
+  border: 1px solid rgba(137, 160, 197, .15);
+  border-radius: 11px;
+  background: rgba(3, 14, 29, .46);
+}
+
+.transferReview textarea {
+  min-height: 105px;
+  resize: vertical;
+}
+
+.transferReview p,
+.transferFailure p {
+  margin: 0;
+  color: #95a8c4;
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.transferReview dl {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.transferReview dl > div {
+  padding: 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.transferReview dt {
+  color: #7186a6;
+  font-size: 8px;
+  text-transform: uppercase;
+}
+
+.transferReview dd {
+  margin: 4px 0 0;
+  color: #c8d3e5;
+  font-size: 10px;
+}
+
+.transferReview pre {
+  white-space: pre-wrap;
+  color: #b9c8dc;
+  font-size: 10px;
+}
+
+.reviewActions,
+.transferReady,
+.transferFailure {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+.reviewActions button:nth-child(2),
+.reviewActions button:nth-child(3),
+.transferFailure button {
+  border-color: rgba(137, 160, 197, .25);
+  color: #bdc9da;
+  background: rgba(255, 255, 255, .035);
+}
+
+.transferReady,
+.transferFailure {
+  justify-content: space-between;
+  padding: 13px;
+  border-radius: 10px;
+  color: #bfe7dd;
+  background: rgba(39, 212, 199, .06);
+}
+
+.transferFailure {
+  color: #efb7c5;
+  background: rgba(245, 138, 168, .06);
+}
+
+@media (max-width: 760px) {
+  .transferForm,
+  .transferReview dl {
+    grid-template-columns: 1fr;
+  }
+
+  .transferProgress {
+    grid-template-columns: 1fr;
+  }
+
+  .transferResultHeader {
+    flex-direction: column;
+  }
+}
+
 .emptyState,
 .loadingState,
 .failureState {

@@ -71,6 +71,13 @@
       "when": 1786599460000,
       "tag": "0009_canonical_sports_project",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1787297755302,
+      "tag": "0010_misty_wasp",
+      "breakpoints": true
     }
   ]
 }

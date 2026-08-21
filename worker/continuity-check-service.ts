@@ -4,7 +4,7 @@ import {
   ContinuityRequestInput,
   validateContinuityRequest,
 } from "./continuity-request-contract";
-import { interpretTask } from "./roadway-service";
+import { interpretTask, TaskInterpretation } from "./roadway-service";
 import {
   all,
   assertId,
@@ -23,6 +23,8 @@ type CompactMechanism = {
   scope: string;
   caseIds: string[];
   counterevidenceIds: string[];
+  scopeConditions: string[];
+  exclusions: string[];
 };
 
 type CompactContext = {
@@ -79,6 +81,14 @@ function stringList(value: unknown) {
   }
 }
 
+function hasProtectedSensitivity(mechanism: CompactMechanism) {
+  return /\b(password|passcode|secret|credential|api key|access token|social security|medical|diagnosis|bank account|credit card|sensitive|confidential|private)\b/i.test([
+    mechanism.statement,
+    ...mechanism.scopeConditions,
+    ...mechanism.exclusions,
+  ].join(" "));
+}
+
 async function compactContext(
   db: D1Database,
   projectId: string,
@@ -103,7 +113,8 @@ async function compactContext(
 
   const mechanismRows = await all<Row>(db.prepare(
     `SELECT m.id, m.current_governing_version_id, v.statement,
-            v.authority_state, v.supporting_case_ids, v.counterevidence_ids
+            v.authority_state, v.supporting_case_ids, v.counterevidence_ids,
+            v.scope_conditions, v.exclusions
      FROM mechanisms m
      JOIN mechanism_versions v
        ON v.id = m.current_governing_version_id
@@ -126,6 +137,8 @@ async function compactContext(
       scope: authority === "approved_local" ? "local" : "project_wide",
       caseIds,
       counterevidenceIds: stringList(row.counterevidence_ids),
+      scopeConditions: stringList(row.scope_conditions),
+      exclusions: stringList(row.exclusions),
     };
   });
 
@@ -147,6 +160,87 @@ async function compactContext(
     matchingMechanisms: mechanisms.filter((mechanism) => mechanismMatchesTask(task, mechanism, caseId)),
     correctionOrConflictIndicators: Number(indicator?.count || 0),
     recordsScanned: 1 + (caseRecord ? 1 : 0) + mechanisms.length + Number(indicator?.count || 0),
+  };
+}
+
+type RoadwayConvergence = {
+  converged: boolean;
+  rawInterpretiveAmbiguity: boolean;
+  plausibleRoadwayIds: string[];
+  mechanismIds: string[];
+  reason: string;
+};
+
+function stableList(values: string[]) {
+  return [...new Set(values)].sort();
+}
+
+async function assessRoadwayConvergence(
+  db: D1Database,
+  projectId: string,
+  request: ReturnType<typeof validateContinuityRequest>,
+  context: CompactContext,
+  interpretation: TaskInterpretation,
+): Promise<RoadwayConvergence> {
+  const plausibleRoadwayIds = stableList(
+    interpretation.candidateInterpretations.map((candidate) => candidate.roadwayId),
+  );
+  const mechanism = context.matchingMechanisms[0];
+  const unsafeReason = context.matchingMechanisms.length !== 1
+    ? "Outcome equivalence requires exactly one applicable governed mechanism."
+    : context.correctionOrConflictIndicators > 0
+      ? "A correction or conflict requires full governed treatment."
+      : mechanism.counterevidenceIds.length > 0
+        ? "Linked counterevidence requires full governed treatment."
+        : hasProtectedSensitivity(mechanism)
+          ? "Protected sensitivity requirements prevent compact delivery."
+          : plausibleRoadwayIds.length < 2
+            ? "There are not multiple plausible roadway interpretations to collapse."
+            : null;
+  if (unsafeReason) {
+    return {
+      converged: false,
+      rawInterpretiveAmbiguity: interpretation.materialAmbiguity,
+      plausibleRoadwayIds,
+      mechanismIds: context.matchingMechanisms.map((item) => item.id),
+      reason: unsafeReason,
+    };
+  }
+
+  const normalizedInput = canonicalContinuityInput(request);
+  const outcomes = await Promise.all(plausibleRoadwayIds.map(async (roadwayId) => {
+    const plausible = interpretation.candidateInterpretations.find(
+      (candidate) => candidate.roadwayId === roadwayId,
+    );
+    const candidate = await interpretTask(db, projectId, {
+      ...normalizedInput,
+      roadwayOverride: roadwayId,
+    }, { registryMode: "read_only" });
+    const taskActivatedRoadwayRequirements = plausible?.reason.startsWith("Matched task signals:") === true;
+    return JSON.stringify({
+      mechanismId: mechanism.id,
+      mechanismVersionId: mechanism.versionId,
+      authority: mechanism.authority,
+      scope: mechanism.scope,
+      scopeConditions: stableList(mechanism.scopeConditions),
+      exclusions: stableList(mechanism.exclusions),
+      treatment: "Use",
+      counterevidenceIds: stableList(mechanism.counterevidenceIds),
+      requiredLiveState: taskActivatedRoadwayRequirements
+        ? stableList(candidate.requiredLiveState)
+        : [],
+      compiledContent: compactMechanismView(mechanism, request.literalTask)?.compiledContent,
+    });
+  }));
+  const converged = outcomes.every((outcome) => outcome === outcomes[0]);
+  return {
+    converged,
+    rawInterpretiveAmbiguity: interpretation.materialAmbiguity,
+    plausibleRoadwayIds,
+    mechanismIds: [mechanism.id],
+    reason: converged
+      ? "Every safe plausible roadway produces the same single governed Use mechanism and equivalent compact delivery."
+      : "Plausible roadways materially change governed constraints or compact delivery.",
   };
 }
 
@@ -374,6 +468,86 @@ export async function checkContinuity(
     registryMode: "read_only",
   });
   const interpretationLatency = Date.now() - interpretationStarted;
+  const convergence = interpretation.materialAmbiguity
+    && !need.reasonCodes.includes("explicit_full_room_transfer")
+    ? await assessRoadwayConvergence(db, projectId, request, context, interpretation)
+    : null;
+  if (convergence?.converged) {
+    const collapsedNeed = {
+      level: "light" as const,
+      reasonCodes: ["single_governed_mechanism", "roadway_outcomes_equivalent"],
+      explanation: "Every safe task interpretation converges on one governed mechanism, so a compact context aid is sufficient.",
+    };
+    const status = "light_context_available";
+    return {
+      ...common,
+      need: collapsedNeed,
+      status,
+      interpretation: {
+        ...interpretation,
+        rawInterpretiveAmbiguity: true,
+        materialAmbiguity: false,
+        clarificationRequired: false,
+        ambiguityReason: null,
+        outcomeEquivalence: convergence,
+      },
+      roadway: {
+        primary: null,
+        candidates: interpretation.candidateInterpretations,
+        interpretiveAmbiguity: true,
+        materialAmbiguity: false,
+        outcomeEquivalent: true,
+        convergedMechanismIds: convergence.mechanismIds,
+        convergenceReason: convergence.reason,
+      },
+      compactCapsule: compactMechanismView(context.matchingMechanisms[0], literalTask),
+      continuity: {
+        governingMechanisms: 1,
+        requiredChecks: 0,
+        considerItems: 0,
+        auditOnlyProvenance: 0,
+        correctionOrConflictIndicators: 0,
+        protectedCorrections: 0,
+        protectedConflicts: 0,
+        strongestChallengePreserved: false,
+      },
+      freshness: {
+        required: [],
+        missing: [],
+        safe: true,
+      },
+      budget: {
+        selected: budget,
+        estimatedMinimumSafe: null,
+        estimatedFinal: null,
+        safe: true,
+      },
+      diagnostics: {
+        recordsScanned: context.recordsScanned,
+        recordsSurvivingEachGate: {
+          projectBoundary: context.recordsScanned,
+          caseBoundary: context.caseRecord ? 1 : 0,
+          compactApprovedMatch: 1,
+          candidateRanking: 0,
+          exactSourceExpansion: 0,
+        },
+        exactSourcesOpened: 0,
+        latencyMs: {
+          preflight: preflightLatency,
+          interpretation: interpretationLatency,
+          candidatePreview: 0,
+        },
+        stoppingReason: "light_capsule_sufficient_after_roadway_convergence",
+        wideningCount: 0,
+        candidatePreviewInvoked: false,
+        roadwayOutcomesEvaluated: convergence.plausibleRoadwayIds.length,
+      },
+      next: {
+        action: nextAction(status, collapsedNeed.level),
+        reconstructionRunAvailable: false,
+      },
+    };
+  }
   const previewStarted = Date.now();
   const preview = await previewPacketCandidates(db, projectId, normalizedInput, {
     interpretation,
@@ -416,7 +590,11 @@ export async function checkContinuity(
         }
         : null,
       candidates: interpretation.candidateInterpretations,
+      interpretiveAmbiguity: interpretation.materialAmbiguity,
       materialAmbiguity: interpretation.materialAmbiguity,
+      outcomeEquivalent: convergence?.converged ?? false,
+      convergedMechanismIds: convergence?.mechanismIds ?? [],
+      convergenceReason: convergence?.reason ?? null,
     },
     compactCapsule: null,
     continuity: {

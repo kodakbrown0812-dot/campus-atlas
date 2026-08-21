@@ -1,6 +1,7 @@
 import { all, first, parseJson, requireCase, requireConversation, Row } from "./slice3-support";
 import { reasoningHealthForConversation } from "./reasoning-health";
 import { messageAnchorHref } from "../shared/message-anchors";
+import { getTransfer, listTransfers } from "./transfer-room-service";
 
 function messageHref(projectId: string, conversationId: unknown, messageId: string) {
   return messageAnchorHref(projectId, String(conversationId), messageId);
@@ -236,6 +237,7 @@ export async function inspectOverview(db: D1Database, projectId: string) {
     };
   }));
 
+  const transfers = await listTransfers(db, projectId);
   return {
     projectId,
     cases: caseViews,
@@ -283,6 +285,7 @@ export async function inspectOverview(db: D1Database, projectId: string) {
       answerReference: row.final_answer_reference,
     })),
     advanced: {
+      transfers,
       governance: governance.map(governanceView),
       roadways: roadways.map((row) => ({
         id: row.id,
@@ -323,6 +326,72 @@ export async function inspectOverview(db: D1Database, projectId: string) {
         createdAt: row.handoff_at,
       })),
     },
+  };
+}
+
+export async function inspectTransfer(db: D1Database, projectId: string, transferId: string) {
+  const transfer = await getTransfer(db, projectId, transferId);
+  const generated = transfer.generatedRecordIds as Record<string, unknown>;
+  const findingIds = Array.isArray(generated.findingIds) ? generated.findingIds : [];
+  const mechanismIds = Array.isArray(generated.mechanismIds) ? generated.mechanismIds : [];
+  const [conversation, messages, events, checkpoint, findings, governance, mechanisms, packets] = await Promise.all([
+    first<Row>(db.prepare(
+      "SELECT * FROM conversations WHERE id = ? AND project_id = ? LIMIT 1",
+    ).bind(transfer.conversationId, projectId)),
+    all<Row>(db.prepare(
+      "SELECT * FROM messages WHERE project_id = ? AND conversation_id = ? ORDER BY sequence_number ASC",
+    ).bind(projectId, transfer.conversationId)),
+    all<Row>(db.prepare(
+      "SELECT * FROM events WHERE project_id = ? AND conversation_id = ? ORDER BY ingested_at ASC",
+    ).bind(projectId, transfer.conversationId)),
+    generated.checkpointId
+      ? first<Row>(db.prepare("SELECT * FROM checkpoints WHERE id = ? AND project_id = ? LIMIT 1").bind(generated.checkpointId, projectId))
+      : Promise.resolve(null),
+    findingIds.length
+      ? all<Row>(db.prepare(
+        `SELECT f.*, v.proposal_statement, v.proposed_scope, v.uncertainty
+         FROM findings f JOIN finding_versions v
+           ON v.id = f.current_version_id AND v.project_id = f.project_id
+         WHERE f.project_id = ? AND f.id IN (${findingIds.map(() => "?").join(",")})`,
+      ).bind(projectId, ...findingIds))
+      : Promise.resolve([]),
+    findingIds.length
+      ? all<Row>(db.prepare(
+        `SELECT * FROM governance_events
+         WHERE project_id = ? AND target_type = 'finding'
+           AND target_id IN (${findingIds.map(() => "?").join(",")})
+         ORDER BY created_at ASC`,
+      ).bind(projectId, ...findingIds))
+      : Promise.resolve([]),
+    mechanismIds.length
+      ? all<Row>(db.prepare(
+        `SELECT m.*, v.statement, v.authority_state
+         FROM mechanisms m JOIN mechanism_versions v
+           ON v.id = m.current_governing_version_id AND v.project_id = m.project_id
+         WHERE m.project_id = ? AND m.id IN (${mechanismIds.map(() => "?").join(",")})`,
+      ).bind(projectId, ...mechanismIds))
+      : Promise.resolve([]),
+    mechanismIds.length
+      ? all<Row>(db.prepare(
+        `SELECT p.id, p.task, p.status, p.compiled_content
+         FROM packet_items pi JOIN packets p
+           ON p.id = pi.packet_id AND p.project_id = pi.project_id
+         WHERE pi.project_id = ? AND pi.source_id IN (${mechanismIds.map(() => "?").join(",")})`,
+      ).bind(projectId, ...mechanismIds))
+      : Promise.resolve([]),
+  ]);
+  return {
+    projectId,
+    transfer,
+    exactConversation: conversation,
+    immutableMessages: messages,
+    canonicalSourceEvents: events.map((row) => eventView(projectId, row)),
+    checkpoint: checkpoint ? { ...checkpoint, metadata: parseJson(checkpoint.metadata, {}) } : null,
+    reconciliation: transfer.reconciliation,
+    findings,
+    governance: governance.map(governanceView),
+    governedProjectState: mechanisms,
+    stewardArtifacts: packets,
   };
 }
 

@@ -65,6 +65,7 @@ async function sqliteD1() {
     "0006_opposite_roland_deschain.sql",
     "0007_harsh_makkari.sql",
     "0008_complete_timeslip.sql",
+    "0010_misty_wasp.sql",
   ]) {
     const migration = await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8");
     for (const statement of migration.split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) {
@@ -230,6 +231,8 @@ function seedSlice4Mechanism(DB, {
   supportingCaseIds = [],
   supportingNodeIds = [],
   counterevidenceIds = [],
+  scopeConditions = [],
+  exclusions = [],
   realityContact = null,
   createdAt = "2026-07-01T12:00:00.000Z",
 }) {
@@ -246,13 +249,15 @@ function seedSlice4Mechanism(DB, {
       supporting_case_ids, supporting_node_ids, counterevidence_ids,
       reality_contact, authority_state, intended_retrieval_effect,
       created_by, created_at, supersedes_version_id
-    ) VALUES (?, ?, ?, ?, '[]', '[]', ?, ?, ?, ?, ?,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
               'eligible_when_roadway_scope_and_freshness_match', 'fixture', ?, NULL)`,
   ).run(
     versionId,
     projectId,
     id,
     statement,
+    JSON.stringify(scopeConditions),
+    JSON.stringify(exclusions),
     JSON.stringify(supportingCaseIds),
     JSON.stringify(supportingNodeIds),
     JSON.stringify(counterevidenceIds),
@@ -1080,6 +1085,381 @@ test("Analyze records an honest blocked checkpoint when an eligible Exact source
   assert.match(workspace, /Analysis stopped before candidate selection\. No authority changed\./);
 });
 
+test("Transfer Room performs one exact import through review into one governed Light capsule without duplicate records", async () => {
+  const worker = await builtWorker("transfer-room-v01-loop");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Development");
+  await initializeRoadways(worker, DB, "sports");
+  const ownerEnv = {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "server-only-transfer-key",
+    CAMPUS_ATLAS_OWNER_USER_ID: "verified-transfer-owner",
+    CAMPUS_ATLAS_DEPLOYMENT_VERSION: "21",
+    CAMPUS_ATLAS_SOURCE_COMMIT: "f949fd0c457daa31cb8217040abcbe36f505fd56",
+  };
+  const transcript = "The internal project update will be delivered every Friday afternoon.\n\nMonday and Wednesday were considered, but Friday was selected because weekly operating results are finalized Thursday evening.";
+  async function ownerRequest(path, { method = "GET", body, key } = {}) {
+    const response = await worker.fetch(new Request(`http://localhost${path}`, {
+      method,
+      headers: {
+        "oai-authenticated-user-id": "verified-transfer-owner",
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...(key ? { "idempotency-key": key } : {}),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }), ownerEnv, ctx);
+    return { response, value: await response.json() };
+  }
+
+  const anonymous = await worker.fetch(new Request("http://localhost/api/v1/projects/sports/transfers", {
+    method: "POST",
+    headers: { "content-type": "application/json", "idempotency-key": "anonymous-transfer" },
+    body: JSON.stringify({ title: "Anonymous", format: "text", transcript }),
+  }), ownerEnv, ctx);
+  assert.equal(anonymous.status, 401);
+
+  const started = await ownerRequest("/api/v1/projects/sports/transfers", {
+    method: "POST",
+    key: "transfer-room-one-submit",
+    body: { title: "Slice 2 Light Proof", format: "text", transcript },
+  });
+  assert.equal(started.response.status, 201, JSON.stringify(started.value));
+  assert.equal(started.value.stage, "awaiting_review");
+  assert.equal(started.value.status, "awaiting_review");
+  assert.equal(started.value.expectedCounts.messages, 1);
+  assert.equal(started.value.actualCounts.messages, 1);
+  assert.equal(started.value.actualCounts.sourceEvents, 1);
+  assert.equal(started.value.actualCounts.considered, 1);
+  assert.equal(started.value.actualCounts.selected, 1);
+  assert.equal(started.value.actualCounts.durableCandidates, 1);
+  assert.equal(started.value.actualCounts.reviewItems, 1);
+  assert.equal(started.value.reconciliation.length, 1);
+  const review = started.value.reconciliation[0];
+  assert.equal(review.statement, transcript);
+  assert.equal(review.relationship, "new_candidate");
+  assert.equal(review.proposedTreatment, "Use");
+  assert.equal(review.reviewRequired, true);
+  assert.equal(review.exactSources[0].exactContent, transcript);
+  assert.equal(review.status, "proposed");
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM conversations").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM messages").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM events").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM cases").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM checkpoints").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM findings").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
+
+  const exactMessage = DB.database.prepare("SELECT exact_content FROM messages").get().exact_content;
+  const exactEvent = DB.database.prepare("SELECT exact_source_span FROM events").get().exact_source_span;
+  assert.equal(Buffer.from(exactMessage).equals(Buffer.from(exactEvent)), true);
+
+  const replay = await ownerRequest("/api/v1/projects/sports/transfers", {
+    method: "POST",
+    key: "transfer-room-repeated-submit",
+    body: { title: "Same exact source", format: "text", transcript },
+  });
+  assert.equal(replay.response.status, 201, JSON.stringify(replay.value));
+  assert.equal(replay.value.id, started.value.id);
+  for (const table of ["conversations", "messages", "events", "cases", "checkpoints", "findings", "transfer_runs"]) {
+    assert.equal(DB.database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 1, table);
+  }
+
+  const restored = await worker.fetch(new Request(
+    `http://localhost/api/v1/projects/sports/transfers/${encodeURIComponent(started.value.id)}`,
+  ), ownerEnv, ctx);
+  assert.equal(restored.status, 200);
+  assert.equal((await restored.json()).stage, "awaiting_review");
+
+  const governed = await ownerRequest(
+    `/api/v1/projects/sports/findings/${encodeURIComponent(review.findingId)}/governance`,
+    {
+      method: "POST",
+      key: `transfer-review:${started.value.id}:${review.findingId}:Use`,
+      body: {
+        action: "approve",
+        actorId: "verified-transfer-owner",
+        sourceVersionId: review.findingVersionId,
+        reviewedStatement: transcript,
+        scope: "project_wide",
+        reason: "Owner accepted the reviewed Friday timing and rationale for future continuity.",
+      },
+    },
+  );
+  assert.equal(governed.response.status, 201, JSON.stringify(governed.value));
+  assert.equal(governed.value.newAuthority, "approved_project_wide");
+
+  const resumed = await ownerRequest(
+    `/api/v1/projects/sports/transfers/${encodeURIComponent(started.value.id)}/resume`,
+    { method: "POST", key: "transfer-room-after-review" },
+  );
+  assert.equal(resumed.response.status, 200, JSON.stringify(resumed.value));
+  assert.equal(resumed.value.stage, "ready_for_steward");
+  assert.equal(resumed.value.status, "complete");
+  assert.equal(resumed.value.reconciliation[0].status, "approved");
+  assert.ok(resumed.value.reconciliation[0].mechanismId);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 1);
+
+  const inspection = await worker.fetch(new Request(
+    `http://localhost/api/v1/projects/sports/inspect/transfers/${encodeURIComponent(started.value.id)}`,
+  ), ownerEnv, ctx);
+  assert.equal(inspection.status, 200);
+  const inspectValue = await inspection.json();
+  assert.equal(inspectValue.immutableMessages.length, 1);
+  assert.equal(inspectValue.canonicalSourceEvents.length, 1);
+  assert.equal(inspectValue.findings.length, 1);
+  assert.equal(inspectValue.governance.length, 1);
+  assert.equal(inspectValue.governedProjectState.length, 1);
+  assert.equal(inspectValue.stewardArtifacts.length, 0);
+
+  const crossProject = await worker.fetch(new Request(
+    `http://localhost/api/v1/projects/hockey/transfers/${encodeURIComponent(started.value.id)}`,
+  ), ownerEnv, ctx);
+  assert.equal(crossProject.status, 404);
+
+  const light = await reconstructionRunRequest(worker, DB, "sports", {
+    task: "Prepare the context needed to identify when the internal project update should be delivered and why.",
+  }, "transfer-room-light-proof");
+  assert.equal(light.response.status, 422, JSON.stringify(light.value));
+  assert.equal(light.value.status, "light_continuity_only");
+  assert.equal(light.value.need.level, "light");
+  assert.equal(light.value.literalTask, "Prepare the context needed to identify when the internal project update should be delivered and why.");
+  assert.equal(light.value.roadway.interpretiveAmbiguity, true);
+  assert.equal(light.value.roadway.materialAmbiguity, false);
+  assert.equal(light.value.roadway.outcomeEquivalent, true);
+  assert.deepEqual(light.value.roadway.convergedMechanismIds, [resumed.value.reconciliation[0].mechanismId]);
+  assert.match(light.value.capsule.compiledContent, /Friday afternoon/);
+  assert.match(light.value.capsule.compiledContent, /Monday and Wednesday were considered/);
+  assert.match(light.value.capsule.compiledContent, /Thursday evening/);
+  assert.equal(light.value.packet, null);
+  assert.equal(light.value.receipt, null);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
+});
+
+test("Transfer Room resumes after a controlled stage failure and treats sensitive proposed state as non-authoritative", async () => {
+  const worker = await builtWorker("transfer-room-v01-recovery");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const env = { DB, ASSETS: assets, CAMPUS_ATLAS_ACTION_KEY: "transfer-test-key" };
+  let injected = false;
+  const failingDB = {
+    database: DB.database,
+    batch: DB.batch.bind(DB),
+    prepare(sql) {
+      if (!injected && /SELECT \* FROM checkpoints[\s\S]*conversation_id/i.test(sql)) {
+        injected = true;
+        throw new Error("Controlled transfer-stage failure before analysis.");
+      }
+      return DB.prepare(sql);
+    },
+  };
+  const failed = await slice2Request(worker, failingDB, "/api/v1/projects/sports/transfers", {
+    method: "POST",
+    idempotencyKey: "transfer-recovery-start",
+    body: {
+      format: "text",
+      title: "Transfer recovery proof",
+      transcript: "The secret access token will be used for the Friday update.",
+    },
+  });
+  assert.equal(failed.response.status, 201, JSON.stringify(failed.value));
+  assert.equal(failed.value.stage, "failed");
+  assert.match(failed.value.failureReason, /Controlled transfer-stage failure before analysis/i);
+  assert.equal(failed.value.retrySafe, true);
+  assert.equal(injected, true);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM checkpoints").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM conversations").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM conversation_imports").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM messages").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM events").get().count, 1);
+
+  const resumed = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/transfers/${encodeURIComponent(failed.value.id)}/resume`,
+    { method: "POST", idempotencyKey: "transfer-recovery-resume", body: {} },
+  );
+  assert.equal(resumed.response.status, 200, JSON.stringify(resumed.value));
+  assert.equal(resumed.value.attemptCount, 2);
+  assert.equal(resumed.value.stage, "awaiting_review");
+  assert.equal(resumed.value.reconciliation[0].sensitivity, "potentially_sensitive");
+  assert.equal(resumed.value.reconciliation[0].proposedTreatment, "Consider");
+  assert.equal(resumed.value.reconciliation[0].status, "proposed");
+  assert.ok(resumed.value.history.some((event) => event.outcome === "failed"));
+  assert.ok(resumed.value.history.some((event) => event.outcome === "resumed"));
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM events").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM findings").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
+
+  const publicRead = await worker.fetch(new Request(
+    `http://localhost/api/v1/projects/sports/transfers/${encodeURIComponent(failed.value.id)}`,
+  ), env, ctx);
+  assert.equal(publicRead.status, 200);
+  assert.equal((await publicRead.json()).attemptCount, 2);
+});
+
+test("Roadway outcome equivalence collapses only one safe governed mechanism", async () => {
+  const worker = await builtWorker("part-2a-roadway-outcome-equivalence");
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:equivalent-approved",
+      statement: "The project update timing is Friday afternoon because operating results finalize Thursday evening.",
+    });
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:equivalent-proposed",
+      statement: "The project update timing might be Wednesday morning.",
+      authority: "proposed",
+    });
+    const task = "Prepare the project update timing and rationale.";
+    const result = await reconstructionRunRequest(worker, DB, "sports", { task }, "part-2a-equivalent");
+    assert.equal(result.response.status, 422, JSON.stringify(result.value));
+    assert.equal(result.value.need.level, "light");
+    assert.equal(result.value.literalTask, task);
+    assert.equal(result.value.roadway.interpretiveAmbiguity, true);
+    assert.equal(result.value.roadway.materialAmbiguity, false);
+    assert.equal(result.value.roadway.outcomeEquivalent, true);
+    assert.match(result.value.capsule.compiledContent, /Friday afternoon/);
+    assert.match(result.value.capsule.compiledContent, /Thursday evening/);
+    assert.doesNotMatch(result.value.capsule.compiledContent, /Wednesday morning/);
+    assert.equal(result.value.packet, null);
+    assert.equal(result.value.receipt, null);
+    assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
+    assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 0);
+    assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
+
+    const explicitFull = await reconstructionRunRequest(worker, DB, "sports", {
+      task,
+      requestedOutput: "full room transfer",
+    }, "part-2a-explicit-full");
+    assert.equal(explicitFull.value.need.level, "full");
+    assert.equal(explicitFull.value.capsule, null);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:multiple-timing",
+      statement: "The project update timing is Friday afternoon.",
+    });
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:multiple-rationale",
+      statement: "The project update timing rationale is the Thursday operating close.",
+    });
+    const multiple = await reconstructionRunRequest(worker, DB, "sports", {
+      task: "Prepare the project update timing and rationale.",
+    }, "part-2a-multiple");
+    assert.equal(multiple.value.need.level, "full");
+    assert.equal(multiple.value.roadway.materialAmbiguity, true);
+    assert.equal(multiple.value.roadway.outcomeEquivalent, false);
+    assert.equal(multiple.value.capsule, null);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    const bounded = await createContinuityCase(
+      worker,
+      DB,
+      "sports",
+      "part-2a-scope",
+      "Prepare the project update timing context.",
+    );
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:project-wide-timing",
+      statement: "The project update timing is Friday afternoon.",
+    });
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:local-timing",
+      statement: "The project update timing is Thursday afternoon for this case.",
+      authority: "approved_local",
+      supportingCaseIds: [bounded.caseId],
+    });
+    const scoped = await reconstructionRunRequest(worker, DB, "sports", {
+      task: "Prepare the project update timing context.",
+      caseId: bounded.caseId,
+    }, "part-2a-scope-difference");
+    assert.equal(scoped.value.need.level, "full");
+    assert.equal(scoped.value.roadway.materialAmbiguity, true);
+    assert.match(scoped.value.roadway.convergenceReason, /exactly one applicable governed mechanism/i);
+    assert.equal(scoped.value.capsule, null);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:sensitive-timing",
+      statement: "The access token timing is Friday afternoon.",
+      scopeConditions: ["Confidential owner-only handling is required."],
+    });
+    const sensitive = await reconstructionRunRequest(worker, DB, "sports", {
+      task: "Prepare the access token timing context.",
+    }, "part-2a-sensitive");
+    assert.equal(sensitive.value.need.level, "full");
+    assert.equal(sensitive.value.roadway.materialAmbiguity, true);
+    assert.match(sensitive.value.roadway.convergenceReason, /sensitivity/i);
+    assert.equal(sensitive.value.capsule, null);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+    await initializeRoadways(worker, DB, "sports");
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:proposed-only",
+      statement: "The project update timing might be Friday afternoon.",
+      authority: "proposed",
+    });
+    const none = await reconstructionRunRequest(worker, DB, "sports", {
+      task: "Prepare the project update timing context.",
+    }, "part-2a-no-governing-use");
+    assert.equal(none.value.need.level, "none");
+    assert.equal(none.value.capsule, null);
+  }
+});
+
+test("Transfer Room links confirming evidence to unchanged governed state without a new governance event", async () => {
+  const worker = await builtWorker("transfer-room-v01-confirmation");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const transcript = "The internal project update will be delivered every Friday afternoon.";
+  const existing = seedSlice4Mechanism(DB, {
+    id: "mechanism:existing-friday-update",
+    statement: transcript,
+  });
+  const transferred = await slice2Request(worker, DB, "/api/v1/projects/sports/transfers", {
+    method: "POST",
+    idempotencyKey: "transfer-confirming-evidence",
+    body: { title: "Confirm Friday", format: "text", transcript },
+  });
+  assert.equal(transferred.response.status, 201, JSON.stringify(transferred.value));
+  assert.equal(transferred.value.stage, "ready_for_steward");
+  assert.equal(transferred.value.reconciliation[0].relationship, "supporting_evidence");
+  assert.equal(transferred.value.reconciliation[0].relatedMechanismId, existing.id);
+  assert.equal(transferred.value.reconciliation[0].reviewRequired, false);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanism_versions").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 0);
+});
+
 test("Slice 2 preserves the Brewers reconstruction as one honest, project-scoped source artifact", async () => {
   const worker = await builtWorker("slice2-brewers-reconstruction");
   const DB = await sqliteD1();
@@ -1888,16 +2268,26 @@ test("Atlas Steward shell has exactly three primary destinations and mobile pari
 
 test("Slice 6A Work and conversation actions use canonical services only", async () => {
   const work = await readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8");
+  const transfer = await readFile(new URL("../app/projects/[projectId]/work/transfer-room.tsx", import.meta.url), "utf8");
   const conversation = await readFile(new URL("../app/projects/[projectId]/conversations/[conversationId]/workspace.tsx", import.meta.url), "utf8");
   const session = await readFile(new URL("../app/components/write-session.tsx", import.meta.url), "utf8");
   const shell = await readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8");
   for (const expected of [
     "/conversations",
-    "/conversations/import",
     "Start Atlas conversation",
-    "Import conversation",
+    "Transfer a room into Atlas",
     "No fixture, decorative project card, or simulated activity was inserted",
   ]) assert.match(work, new RegExp(expected.replaceAll("/", "\\/")));
+  for (const expected of [
+    "/transfers",
+    "Transfer this room into Atlas",
+    "Bring in a conversation once",
+    "Review",
+    "Open in Inspect",
+    "Use",
+    "Consider",
+    "Exclude",
+  ]) assert.match(transfer, new RegExp(expected.replaceAll("/", "\\/")));
   for (const expected of [
     "Atlas Steward",
     "Keep this project coherent",
@@ -1915,7 +2305,7 @@ test("Slice 6A Work and conversation actions use canonical services only", async
     "Atlas found no consequence that should change future retrieval",
     "Server confirmed the preserved message",
   ]) assert.match(conversation, new RegExp(expected.replaceAll("/", "\\/")));
-  assert.doesNotMatch(`${work}\n${conversation}`, /\/api\/state|makeSeedState|AtlasState/);
+  assert.doesNotMatch(`${work}\n${transfer}\n${conversation}`, /\/api\/state|makeSeedState|AtlasState/);
   assert.match(session, /storage: "memory_only"/);
   assert.doesNotMatch(session, /localStorage|sessionStorage/);
   assert.match(shell, /Sign in as owner/);

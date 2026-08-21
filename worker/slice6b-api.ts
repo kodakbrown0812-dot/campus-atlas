@@ -4,6 +4,7 @@ import {
   inspectMechanism,
   inspectOverview,
   inspectReasoningNode,
+  inspectTransfer,
 } from "./inspect-service";
 import {
   assertId,
@@ -46,6 +47,11 @@ export async function handleSlice6B(
       }
       if (parts[1] === "mechanisms") {
         return Response.json(await inspectMechanism(db, projectId, recordId), {
+          headers: { "cache-control": "no-store" },
+        });
+      }
+      if (parts[1] === "transfers") {
+        return Response.json(await inspectTransfer(db, projectId, recordId), {
           headers: { "cache-control": "no-store" },
         });
       }

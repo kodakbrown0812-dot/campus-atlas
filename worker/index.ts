@@ -13,6 +13,7 @@ import { TestReceivingModelAdapter } from "./receiving-model";
 import { handleShellService } from "./shell-service";
 import { handleSlice6B } from "./slice6b-api";
 import { isVerifiedOwnerRequest } from "./owner-identity";
+import { handleTransferRoom } from "./transfer-room-api";
 
 interface Env {
   ASSETS: Fetcher;
@@ -94,6 +95,14 @@ const worker = {
 
     if (/^\/api\/v1\/projects\/[^/]+\/(?:checkpoints|findings|governance-events|mechanisms\/eligible)(?:\/|$)/.test(url.pathname)) {
       return handleSlice3(authorizedRequest, env.DB, env.CAMPUS_ATLAS_ACTION_KEY);
+    }
+
+    if (/^\/api\/v1\/projects\/[^/]+\/transfers(?:\/|$)/.test(url.pathname)) {
+      return handleTransferRoom(authorizedRequest, env.DB, {
+        actionKey: env.CAMPUS_ATLAS_ACTION_KEY,
+        deploymentVersion: env.CAMPUS_ATLAS_DEPLOYMENT_VERSION,
+        sourceCommit: env.CAMPUS_ATLAS_SOURCE_COMMIT,
+      });
     }
 
     if (/^\/api\/v1\/projects\/[^/]+\/(?:continuity|roadways|reconstruction|packets|live-state)(?:\/|$)/.test(url.pathname)) {
