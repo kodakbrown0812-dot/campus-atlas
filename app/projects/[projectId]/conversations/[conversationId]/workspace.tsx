@@ -103,6 +103,18 @@ type CheckpointResult = {
     healthAfter: string;
     missingState: string[];
     ambiguity: string | null;
+    error: string | null;
+    metadata: {
+      sourceEventPreparation?: {
+        eligible: boolean;
+        status: "not_eligible" | "prepared" | "already_prepared" | "blocked" | "failed";
+        expectedMessageCount: number;
+        materializedEventCount: number;
+        createdEventCount: number;
+        attachedEventCount: number;
+        requirement: string | null;
+      };
+    };
   };
   selectedNodes: Array<{
     id: string;
@@ -129,6 +141,27 @@ const analysisStages = [
   "Checking missing state and conflict",
   "Creating findings",
 ] as const;
+
+type AnalysisStatus = "idle" | "running" | "complete" | "blocked" | "failed";
+
+function checkpointAnalysisStatus(checkpoint: CheckpointResult): AnalysisStatus {
+  if (checkpoint.checkpoint.status === "blocked") return "blocked";
+  if (checkpoint.checkpoint.status === "failed") return "failed";
+  return "complete";
+}
+
+function sourcePreparationLabel(checkpoint: CheckpointResult | null) {
+  const preparation = checkpoint?.checkpoint.metadata.sourceEventPreparation;
+  if (!preparation || preparation.status === "not_eligible") return "Source-event preparation not required";
+  if (preparation.status === "prepared") {
+    return `Prepared ${preparation.materializedEventCount} canonical source event${preparation.materializedEventCount === 1 ? "" : "s"}`;
+  }
+  if (preparation.status === "already_prepared") {
+    return `${preparation.materializedEventCount} canonical source event${preparation.materializedEventCount === 1 ? " was" : "s were"} already prepared`;
+  }
+  if (preparation.status === "blocked") return `Source-event preparation blocked: ${preparation.requirement}`;
+  return `Source-event preparation failed: ${preparation.requirement || "Retry Analyze."}`;
+}
 
 function readableTime(value: string | null) {
   if (!value) return "Exact timestamp unavailable";
@@ -157,7 +190,7 @@ export default function ConversationWorkspace({
   const [selectedCase, setSelectedCase] = useState("");
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "unavailable">("loading");
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "failed">("idle");
-  const [analysisStatus, setAnalysisStatus] = useState<"idle" | "running" | "complete" | "failed">("idle");
+  const [analysisStatus, setAnalysisStatus] = useState<AnalysisStatus>("idle");
   const [checkpoint, setCheckpoint] = useState<CheckpointResult | null>(null);
   const [checkpointOrigin, setCheckpointOrigin] = useState<"new" | "restored" | null>(null);
   const [error, setError] = useState("");
@@ -211,7 +244,11 @@ export default function ConversationWorkspace({
           if (latest) {
             setCheckpoint(latest);
             setCheckpointOrigin("restored");
-            setAnalysisStatus("complete");
+            const restoredStatus = checkpointAnalysisStatus(latest);
+            setAnalysisStatus(restoredStatus);
+            if (restoredStatus === "blocked" || restoredStatus === "failed") {
+              setError(latest.checkpoint.error || "Analysis stopped before candidate selection.");
+            }
           }
         } catch (caught) {
           if (!active) return;
@@ -390,7 +427,11 @@ export default function ConversationWorkspace({
       setCheckpoint(result);
       setCheckpointOrigin("new");
       await refresh();
-      setAnalysisStatus("complete");
+      const nextStatus = checkpointAnalysisStatus(result);
+      setAnalysisStatus(nextStatus);
+      if (nextStatus === "blocked" || nextStatus === "failed") {
+        setError(result.checkpoint.error || "Analysis stopped before candidate selection.");
+      }
       window.requestAnimationFrame(() => {
         document.getElementById("checkpoint-result")?.scrollIntoView({ block: "start", behavior: "smooth" });
       });
@@ -607,7 +648,7 @@ export default function ConversationWorkspace({
       </div>
 
       {analysisStatus !== "idle" && (
-        <section className={`${styles.analysisPanel} ${analysisStatus === "failed" ? styles.analysisFailed : ""}`} id="checkpoint-result">
+        <section className={`${styles.analysisPanel} ${analysisStatus === "failed" || analysisStatus === "blocked" ? styles.analysisFailed : ""}`} id="checkpoint-result">
           <header>
             <div>
               <span className={styles.eyebrow}>{checkpointOrigin === "restored" ? "Existing canonical checkpoint" : "Checkpoint action"}</span>
@@ -615,7 +656,7 @@ export default function ConversationWorkspace({
                 ? "Analyze now is running"
                 : analysisStatus === "complete"
                   ? checkpointOrigin === "restored" ? "Saved Analyze result" : "Analyze now complete"
-                  : "Analyze now failed"}</h2>
+                  : analysisStatus === "blocked" ? "Analyze now blocked" : "Analyze now failed"}</h2>
             </div>
             <span className={styles.status}>{checkpoint?.checkpoint.id || "No checkpoint saved yet"}</span>
           </header>
@@ -625,11 +666,11 @@ export default function ConversationWorkspace({
                 <i>
                   {analysisStatus === "complete"
                     ? "✓"
-                    : analysisStatus === "failed"
+                    : analysisStatus === "failed" || analysisStatus === "blocked"
                       ? index === 0 ? "!" : "—"
                       : index === 0 ? "…" : "·"}
                 </i>
-                <span>{stage}</span>
+                <span>{index === 0 && checkpoint ? sourcePreparationLabel(checkpoint) : stage}</span>
               </li>
             ))}
           </ol>
@@ -645,22 +686,25 @@ export default function ConversationWorkspace({
                 <div><dt>Missing state</dt><dd>{checkpoint.checkpoint.missingState.join(", ") || "None recorded"}</dd></div>
                 <div><dt>Ambiguity</dt><dd>{checkpoint.checkpoint.ambiguity || "None recorded"}</dd></div>
                 <div><dt>Findings created</dt><dd>{checkpoint.findings.length}</dd></div>
+                <div><dt>Source events</dt><dd>{sourcePreparationLabel(checkpoint)}</dd></div>
                 <div><dt>Retrieval effect</dt><dd>{checkpoint.retrievalEffect === "no_change_until_governed"
                   ? "No authority changed; findings remain proposals until governed."
                   : "No retrieval eligibility changed."}</dd></div>
               </dl>
-              <div>
-                <h3>Selected nodes</h3>
-                {checkpoint.selectedNodes.length
-                  ? checkpoint.selectedNodes.map((node) => <p key={node.id}>{node.type}: {node.statement}</p>)
-                  : <p>No consequential node was selected.</p>}
-              </div>
-              <strong>
-                {checkpoint.noDurableFindingProposed
-                  ? "Atlas found no consequence that should change future retrieval."
-                  : `${checkpoint.findings.length} atomic finding${checkpoint.findings.length === 1 ? "" : "s"} awaits governance.`}
-              </strong>
-              {checkpoint.findings.length > 0 && (
+              {checkpoint.checkpoint.status === "complete" ? <>
+                <div>
+                  <h3>Selected nodes</h3>
+                  {checkpoint.selectedNodes.length
+                    ? checkpoint.selectedNodes.map((node) => <p key={node.id}>{node.type}: {node.statement}</p>)
+                    : <p>No consequential node was selected.</p>}
+                </div>
+                <strong>
+                  {checkpoint.noDurableFindingProposed
+                    ? "Atlas found no consequence that should change future retrieval."
+                    : `${checkpoint.findings.length} atomic finding${checkpoint.findings.length === 1 ? "" : "s"} awaits governance.`}
+                </strong>
+              </> : <strong>Analysis stopped before candidate selection. No authority changed.</strong>}
+              {checkpoint.checkpoint.status === "complete" && checkpoint.findings.length > 0 && (
                 <div>
                   <h3>Atlas Found proposals</h3>
                   {checkpoint.findings.map((finding) => (
@@ -674,13 +718,13 @@ export default function ConversationWorkspace({
               )}
             </div>
           )}
-          {analysisStatus === "failed" && (
+          {(analysisStatus === "failed" || analysisStatus === "blocked") && (
             <p className={styles.error}>{error} Existing transcript and case records remain valid.</p>
           )}
         </section>
       )}
 
-      {error && analysisStatus !== "failed" && <p className={styles.error} role="alert">{error}</p>}
+      {error && analysisStatus !== "failed" && analysisStatus !== "blocked" && <p className={styles.error} role="alert">{error}</p>}
     </div>
   );
 }

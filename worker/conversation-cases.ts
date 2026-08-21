@@ -3,6 +3,7 @@ import { applyBoundaryProposal, createBoundaryProposal, reverseBoundaryOperation
 import { normalizeActor, parseImport, sha256, timestampValue } from "./transcript-import";
 import { reasoningHealthForConversation } from "./reasoning-health";
 import { messageAnchorFragment } from "../shared/message-anchors";
+import { ensureExactImportSourceEvents } from "./source-event-materialization";
 
 type Row = Record<string, unknown>;
 
@@ -328,6 +329,11 @@ async function importConversation(db: D1Database, projectId: string, body: Row, 
      ORDER BY imported_at ASC LIMIT 1`,
   ).bind(projectId, idempotencyKey, contentHash));
   if (existing) {
+    const sourceEventPreparation = await ensureExactImportSourceEvents(
+      db,
+      projectId,
+      String(existing.conversation_id),
+    );
     return {
       conversation: conversationView(await requireConversation(db, projectId, String(existing.conversation_id))),
       import: {
@@ -345,6 +351,7 @@ async function importConversation(db: D1Database, projectId: string, body: Row, 
       idempotentReplay: true,
       duplicateDetected: true,
       duplicateReason: existing.idempotency_key === idempotencyKey ? "idempotency_key" : "exact_source_hash",
+      sourceEventPreparation,
     };
   }
 
@@ -461,6 +468,7 @@ async function importConversation(db: D1Database, projectId: string, body: Row, 
     createdAt,
   ));
   await db.batch(statements);
+  const sourceEventPreparation = await ensureExactImportSourceEvents(db, projectId, conversationId);
 
   return {
     conversation: conversationView(await requireConversation(db, projectId, conversationId)),
@@ -478,6 +486,7 @@ async function importConversation(db: D1Database, projectId: string, body: Row, 
     },
     idempotentReplay: false,
     duplicateDetected: false,
+    sourceEventPreparation,
   };
 }
 

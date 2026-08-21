@@ -3,6 +3,10 @@ import { sha256 } from "./transcript-import";
 import { messageAnchorHref } from "../shared/message-anchors";
 import { hasUnresolvedConflict } from "./reasoning-semantics";
 import {
+  ensureExactImportSourceEvents,
+  SourceEventPreparation,
+} from "./source-event-materialization";
+import {
   all,
   assertId,
   first,
@@ -286,7 +290,7 @@ function normalizedTerms(value: string) {
 }
 
 function mechanismLanguage(value: string) {
-  return /\b(?:require|requires|required|should|must|when|whenever|if|pass|avoid|rerank|check)\b/i.test(value);
+  return /\b(?:require|requires|required|should|must|when|whenever|if|pass|avoid|rerank|check|selected|will)\b/i.test(value);
 }
 
 function atomicEnough(value: string) {
@@ -306,7 +310,7 @@ async function serverFindingCandidates(selectedEvents: Row[]): Promise<FindingCa
   const primary = selectedEvents.find((event) => {
     const type = String(event.event_type).toLowerCase();
     const statement = eventStatement(event);
-    return ["correction", "mechanism_candidate", "principle_candidate", "constraint_change"].includes(type)
+    return ["correction", "mechanism_candidate", "principle_candidate", "constraint_change", "source_message"].includes(type)
       && mechanismLanguage(statement)
       && atomicEnough(statement);
   });
@@ -339,6 +343,62 @@ async function serverFindingCandidates(selectedEvents: Row[]): Promise<FindingCa
     ...candidate,
     proposalHash: await sha256(JSON.stringify(candidate)),
   }];
+}
+
+async function preparationStoppedCheckpoint(
+  db: D1Database,
+  projectId: string,
+  conversationId: string,
+  caseId: string,
+  trigger: string,
+  source: string,
+  idempotencyKey: string,
+  status: "blocked" | "failed",
+  preparation: SourceEventPreparation,
+) {
+  const checkpointId = canonicalId("checkpoint");
+  const startedAt = now();
+  const completedAt = now();
+  const error = preparation.requirement
+    || (status === "failed"
+      ? "Source-event preparation failed. Retry Analyze; existing source records remain unchanged."
+      : "Source-event preparation is blocked by missing eligible source state.");
+  await db.prepare(
+    `INSERT INTO checkpoints (
+      id, project_id, case_id, conversation_id, trigger, source, started_at,
+      completed_at, status, extraction_version, candidate_count, selected_count,
+      omitted_count, health_before, health_after, missing_state, ambiguity,
+      error, idempotency_key, metadata
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 'forming', 'forming', ?, NULL, ?, ?, ?)`,
+  ).bind(
+    checkpointId,
+    projectId,
+    caseId,
+    conversationId,
+    trigger,
+    source,
+    startedAt,
+    completedAt,
+    status,
+    EXTRACTION_VERSION,
+    json(["source_events"]),
+    error,
+    idempotencyKey,
+    json({
+      sourceEventPreparation: preparation,
+      findingCandidatesReceived: 0,
+      findingCandidatesGenerated: 0,
+      findingCandidateOrigin: source === SERVER_FINDING_SOURCE ? "server" : "explicit_analyzer",
+      findingCount: 0,
+      suppressedFindingCount: 0,
+      selectedNodeIds: [],
+      authorityCreated: false,
+    }),
+  ).run();
+  return {
+    ...(await checkpointDetail(db, projectId, checkpointId)),
+    idempotentReplay: false,
+  };
 }
 
 async function validateFindingCandidate(value: unknown, allowedEventIds: Set<string>): Promise<FindingCandidate> {
@@ -395,15 +455,85 @@ async function analyzeCheckpoint(
   const trigger = optionalString(body.trigger) || "analyze_now";
   if (!CHECKPOINT_TRIGGERS.has(trigger)) throw new Error("Unsupported checkpoint trigger.");
   const source = optionalString(body.source) || SERVER_FINDING_SOURCE;
-  const requestedEventIds = stringArray(body.candidateEventIds, "Candidate event IDs").map((id) => assertId(id, "event ID"));
-  const events = await caseEvents(db, projectId, conversationId, caseId, requestedEventIds);
-  const allowedEventIds = new Set(events.map((event) => String(event.id)));
   if (source === SERVER_FINDING_SOURCE && body.findingCandidates !== undefined) {
     throw new Error("Native finding candidates are server-owned; client-supplied finding wording cannot be accepted.");
   }
   if (source !== SERVER_FINDING_SOURCE && !ANALYZER_CANDIDATE_SOURCES.has(source)) {
     throw new Error("Unsupported checkpoint source.");
   }
+  let sourceEventPreparation: SourceEventPreparation;
+  try {
+    sourceEventPreparation = await ensureExactImportSourceEvents(db, projectId, conversationId, caseId);
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : "Unknown source-event preparation error.";
+    sourceEventPreparation = {
+      eligible: true,
+      status: "failed",
+      expectedMessageCount: 0,
+      materializedEventCount: 0,
+      createdEventCount: 0,
+      attachedEventCount: 0,
+      eventIds: [],
+      missingMessageIds: [],
+      requirement: `Source-event preparation failed: ${message}`,
+    };
+    return preparationStoppedCheckpoint(
+      db,
+      projectId,
+      conversationId,
+      caseId,
+      trigger,
+      source,
+      idempotencyKey,
+      "failed",
+      sourceEventPreparation,
+    );
+  }
+  if (sourceEventPreparation.status === "blocked") {
+    return preparationStoppedCheckpoint(
+      db,
+      projectId,
+      conversationId,
+      caseId,
+      trigger,
+      source,
+      idempotencyKey,
+      "blocked",
+      sourceEventPreparation,
+    );
+  }
+  const requestedEventIds = stringArray(body.candidateEventIds, "Candidate event IDs").map((id) => assertId(id, "event ID"));
+  const availableEvents = await caseEvents(db, projectId, conversationId, caseId, []);
+  if (sourceEventPreparation.eligible) {
+    const availableEventIds = new Set(availableEvents.map((event) => String(event.id)));
+    const missingEventIds = sourceEventPreparation.eventIds.filter((eventId) => !availableEventIds.has(eventId));
+    if (missingEventIds.length) {
+      return preparationStoppedCheckpoint(
+        db,
+        projectId,
+        conversationId,
+        caseId,
+        trigger,
+        source,
+        idempotencyKey,
+        "blocked",
+        {
+          ...sourceEventPreparation,
+          status: "blocked",
+          requirement: `Prepared source events are not eligible for the active case: ${missingEventIds.join(", ")}.`,
+        },
+      );
+    }
+  }
+  let events = availableEvents;
+  if (requestedEventIds.length > 0) {
+    const requested = new Set(requestedEventIds);
+    events = availableEvents.filter((event) => requested.has(String(event.id)));
+    if (events.length !== requested.size) {
+      throw new Error("A candidate event is outside the active conversation and case.");
+    }
+  }
+  const allowedEventIds = new Set(events.map((event) => String(event.id)));
   const startedAt = now();
   const checkpointId = canonicalId("checkpoint");
   const selectedEvents = events.slice(0, MAX_SELECTED_NODES);
@@ -586,6 +716,7 @@ async function analyzeCheckpoint(
       suppressedFindingCount,
       selectedNodeIds,
       authorityCreated: false,
+      sourceEventPreparation,
     }),
   ));
   await db.batch(statements);

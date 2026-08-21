@@ -790,6 +790,296 @@ test("Slice 2 text imports preserve the raw envelope and diagnose their parser",
   assert.equal(source.value.imports[0].rawSource, raw);
 });
 
+test("Exact imports deterministically materialize literal message events with role, order, lineage, and project isolation", async () => {
+  const worker = await builtWorker("exact-import-source-events");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  await seedCanonicalProject(worker, DB, "hockey", "Hockey Development");
+  const transcript = JSON.stringify({
+    messages: [
+      {
+        id: "source-1",
+        role: "user",
+        content: "Keep  the first line exactly.\nAnd preserve this second line.",
+        timestamp: "2026-08-01T09:00:00-05:00",
+      },
+      {
+        id: "source-2",
+        role: "assistant",
+        content: "The weekly update will be delivered Friday afternoon.",
+        timestamp: "2026-08-01T09:01:00-05:00",
+      },
+    ],
+  }, null, 2);
+  const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "exact-source-events-sports",
+    body: {
+      format: "json",
+      title: "Exact source event proof",
+      sourceName: "exact-proof.json",
+      transcript,
+      provenance: { proof: "source-event-materialization" },
+    },
+  });
+  assert.equal(imported.response.status, 201, JSON.stringify(imported.value));
+  assert.equal(imported.value.sourceEventPreparation.status, "prepared");
+  assert.equal(imported.value.sourceEventPreparation.expectedMessageCount, 2);
+  assert.equal(imported.value.sourceEventPreparation.materializedEventCount, 2);
+  assert.equal(imported.value.sourceEventPreparation.createdEventCount, 2);
+  assert.equal(imported.value.sourceEventPreparation.attachedEventCount, 0);
+
+  const conversationId = imported.value.conversation.id;
+  const messages = DB.database.prepare(
+    "SELECT * FROM messages WHERE project_id = 'sports' AND conversation_id = ? ORDER BY sequence_number",
+  ).all(conversationId);
+  const events = DB.database.prepare(
+    "SELECT * FROM events WHERE project_id = 'sports' AND conversation_id = ? ORDER BY id",
+  ).all(conversationId);
+  assert.equal(messages.length, 2);
+  assert.equal(events.length, 2);
+  assert.deepEqual(events.map((event) => event.exact_source_span), messages.map((message) => message.exact_content));
+  assert.deepEqual(events.map((event) => JSON.parse(event.source_message_ids)), messages.map((message) => [message.id]));
+  for (let index = 0; index < events.length; index += 1) {
+    const metadata = JSON.parse(events[index].metadata);
+    assert.equal(events[index].event_type, "source_message");
+    assert.equal(events[index].compressed_representation, null);
+    assert.equal(events[index].authority_state, "observed");
+    assert.equal(events[index].assignment_state, "unassigned");
+    assert.equal(events[index].extraction_method, "exact_import_materialization");
+    assert.equal(events[index].extraction_version, "slice2-exact-message-v1");
+    assert.equal(metadata.representationType, "Exact");
+    assert.equal(metadata.sourceMessage.id, messages[index].id);
+    assert.equal(metadata.sourceMessage.sequence, index + 1);
+    assert.equal(metadata.sourceMessage.actorType, messages[index].actor_type);
+    assert.equal(metadata.sourceMessage.actorId, messages[index].actor_id);
+    assert.equal(metadata.sourceMessage.originalTimestamp, messages[index].original_timestamp);
+    assert.equal(metadata.sourceSpans[0].messageId, messages[index].id);
+    assert.equal(metadata.sourceSpans[0].start, 0);
+    assert.equal(metadata.sourceSpans[0].end, messages[index].exact_content.length);
+    assert.equal(metadata.import.provenance.proof, "source-event-materialization");
+    assert.equal(
+      Buffer.from(events[index].exact_source_span, "utf8").equals(Buffer.from(messages[index].exact_content, "utf8")),
+      true,
+    );
+  }
+
+  const replay = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "exact-source-events-sports-replay",
+    body: { format: "json", title: "Duplicate exact source", transcript },
+  });
+  assert.equal(replay.response.status, 200);
+  assert.equal(replay.value.idempotentReplay, true);
+  assert.equal(replay.value.sourceEventPreparation.status, "already_prepared");
+  assert.equal(DB.database.prepare(
+    "SELECT COUNT(*) AS count FROM events WHERE project_id = 'sports' AND conversation_id = ?",
+  ).get(conversationId).count, 2);
+
+  const isolated = await slice2Request(worker, DB, "/api/v1/projects/hockey/conversations/import", {
+    method: "POST",
+    idempotencyKey: "exact-source-events-hockey",
+    body: { format: "json", title: "Same source, different project", transcript },
+  });
+  assert.equal(isolated.response.status, 201);
+  assert.equal(isolated.value.sourceEventPreparation.status, "prepared");
+  assert.ok(isolated.value.sourceEventPreparation.eventIds.every(
+    (eventId) => !imported.value.sourceEventPreparation.eventIds.includes(eventId),
+  ));
+
+  const native = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Native compatibility proof" },
+  });
+  const nativeMessage = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(native.value.conversation.id)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "native-compatibility-message",
+      body: { actorType: "user", content: "Native messages still require explicit source-event capture." },
+    },
+  );
+  assert.equal(nativeMessage.response.status, 201);
+  const nativeCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Preserve native behavior", conversationId: native.value.conversation.id, makeActive: true },
+  });
+  const nativeAnalysis = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "native-source-preparation-not-required",
+    body: { conversationId: native.value.conversation.id, caseId: nativeCase.value.case.id },
+  });
+  assert.equal(nativeAnalysis.response.status, 201);
+  assert.equal(nativeAnalysis.value.checkpoint.status, "complete");
+  assert.equal(nativeAnalysis.value.checkpoint.metadata.sourceEventPreparation.status, "not_eligible");
+  assert.deepEqual(nativeAnalysis.value.checkpoint.missingState, ["source_events"]);
+});
+
+test("Analyze backfills a legacy Exact import into a proposed finding without governing or creating a deliverable", async () => {
+  const worker = await builtWorker("legacy-exact-import-backfill");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const transcript = "The internal project update will be delivered every Friday afternoon.\n\nMonday and Wednesday were considered, but Friday was selected because weekly operating results are finalized Thursday evening.";
+  const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "legacy-light-import",
+    body: { format: "text", title: "Slice 2 Light Proof", transcript },
+  });
+  assert.equal(imported.response.status, 201);
+  const conversationId = imported.value.conversation.id;
+  const originalEventId = imported.value.sourceEventPreparation.eventIds[0];
+  DB.database.prepare("DELETE FROM events WHERE id = ?").run(originalEventId);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM events WHERE conversation_id = ?").get(conversationId).count, 0);
+
+  const createdCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: "Determine the governed timing for the weekly internal project update and preserve its rationale.",
+      conversationId,
+      makeActive: true,
+    },
+  });
+  const caseId = createdCase.value.case.id;
+  const failedCheckpointId = "checkpoint:legacy-zero-source-events";
+  DB.database.prepare(
+    `INSERT INTO checkpoints (
+      id, project_id, case_id, conversation_id, trigger, source, started_at,
+      completed_at, status, extraction_version, candidate_count, selected_count,
+      omitted_count, health_before, health_after, missing_state, idempotency_key, metadata
+    ) VALUES (?, 'sports', ?, ?, 'analyze_now', 'canonical_case_events', ?, ?, 'complete',
+      'slice3-sparse-v1', 0, 0, 0, 'forming', 'forming', '["source_events"]', ?, ?)`
+  ).run(
+    failedCheckpointId,
+    caseId,
+    conversationId,
+    "2026-08-19T01:26:14.674Z",
+    "2026-08-19T01:26:14.694Z",
+    "legacy-zero-source-events",
+    JSON.stringify({ findingCount: 0, authorityCreated: false }),
+  );
+
+  const analyzed = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "legacy-light-retry",
+    body: {
+      conversationId,
+      caseId,
+      trigger: "analyze_now",
+      source: "canonical_case_events",
+    },
+  });
+  assert.equal(analyzed.response.status, 201, JSON.stringify(analyzed.value));
+  assert.notEqual(analyzed.value.checkpoint.id, failedCheckpointId);
+  assert.equal(analyzed.value.checkpoint.status, "complete");
+  assert.equal(analyzed.value.checkpoint.candidateCount, 1);
+  assert.equal(analyzed.value.checkpoint.selectedCount, 1);
+  assert.equal(analyzed.value.checkpoint.metadata.sourceEventPreparation.status, "prepared");
+  assert.equal(analyzed.value.checkpoint.metadata.sourceEventPreparation.materializedEventCount, 1);
+  assert.equal(analyzed.value.findings.length, 1);
+  assert.equal(analyzed.value.findings[0].proposal, transcript);
+  assert.equal(analyzed.value.findings[0].status, "proposed");
+  assert.equal(analyzed.value.findings[0].authority, "proposed");
+  assert.equal(analyzed.value.retrievalEffect, "no_change_until_governed");
+
+  const message = DB.database.prepare("SELECT * FROM messages WHERE conversation_id = ?").get(conversationId);
+  const event = DB.database.prepare("SELECT * FROM events WHERE conversation_id = ?").get(conversationId);
+  const eventMetadata = JSON.parse(event.metadata);
+  assert.equal(event.id, originalEventId);
+  assert.equal(event.exact_source_span, message.exact_content);
+  assert.deepEqual(JSON.parse(event.source_message_ids), [message.id]);
+  assert.equal(eventMetadata.sourceMessage.id, message.id);
+  assert.equal(eventMetadata.sourceMessage.sequence, message.sequence_number);
+  assert.equal(eventMetadata.sourceSpans[0].messageId, message.id);
+  assert.equal(DB.database.prepare(
+    "SELECT COUNT(*) AS count FROM case_event_attachments WHERE project_id = 'sports' AND case_id = ? AND event_id = ?",
+  ).get(caseId, event.id).count, 1);
+  assert.equal(
+    Buffer.from(event.exact_source_span, "utf8").equals(Buffer.from(message.exact_content, "utf8")),
+    true,
+  );
+
+  const prior = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/checkpoints/${encodeURIComponent(failedCheckpointId)}`,
+  );
+  assert.equal(prior.response.status, 200);
+  assert.deepEqual(prior.value.checkpoint.missingState, ["source_events"]);
+  const retry = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "legacy-light-second-analysis",
+    body: { conversationId, caseId, source: "canonical_case_events" },
+  });
+  assert.equal(retry.response.status, 201);
+  assert.equal(retry.value.checkpoint.metadata.sourceEventPreparation.status, "already_prepared");
+  assert.equal(retry.value.suppressedFindingCount, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM events WHERE conversation_id = ?").get(conversationId).count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM findings WHERE case_id = ?").get(caseId).count, 1);
+  for (const table of ["mechanisms", "governance_events", "packets", "receipts"]) {
+    assert.equal(DB.database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0, table);
+  }
+});
+
+test("Analyze records an honest blocked checkpoint when an eligible Exact source event cannot be verified", async () => {
+  const worker = await builtWorker("exact-import-source-event-blocked");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+  const imported = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations/import", {
+    method: "POST",
+    idempotencyKey: "blocked-exact-import",
+    body: {
+      format: "text",
+      title: "Blocked Exact source proof",
+      transcript: "The governed update will be sent Friday.",
+    },
+  });
+  const conversationId = imported.value.conversation.id;
+  const eventId = imported.value.sourceEventPreparation.eventIds[0];
+  const message = DB.database.prepare("SELECT * FROM messages WHERE conversation_id = ?").get(conversationId);
+  DB.database.prepare("DELETE FROM events WHERE id = ?").run(eventId);
+  DB.database.prepare(
+    `INSERT INTO events (
+      id, project_id, conversation_id, event_type, exact_source_span,
+      source_message_ids, ingested_at, extraction_method, extraction_version,
+      authority_state, assignment_state, version, metadata
+    ) VALUES (?, 'sports', ?, 'source_message', 'mismatched content', ?, ?,
+      'exact_import_materialization', 'slice2-exact-message-v1', 'observed', 'unassigned', 1, '{}')`,
+  ).run(eventId, conversationId, JSON.stringify([message.id]), new Date().toISOString());
+  const createdCase = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: { objective: "Truthful source preparation", conversationId, makeActive: true },
+  });
+  const analyzed = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "blocked-source-event-analysis",
+    body: { conversationId, caseId: createdCase.value.case.id, source: "canonical_case_events" },
+  });
+  assert.equal(analyzed.response.status, 201);
+  assert.equal(analyzed.value.checkpoint.status, "blocked");
+  assert.deepEqual(analyzed.value.checkpoint.missingState, ["source_events"]);
+  assert.match(analyzed.value.checkpoint.error, /could not be verified/i);
+  assert.equal(analyzed.value.checkpoint.metadata.sourceEventPreparation.status, "blocked");
+  assert.deepEqual(analyzed.value.checkpoint.metadata.sourceEventPreparation.missingMessageIds, [message.id]);
+  assert.equal(analyzed.value.checkpoint.candidateCount, 0);
+  assert.equal(analyzed.value.selectedNodes.length, 0);
+  assert.equal(analyzed.value.findings.length, 0);
+  for (const table of ["reasoning_nodes", "findings", "mechanisms", "governance_events", "packets", "receipts"]) {
+    assert.equal(DB.database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get().count, 0, table);
+  }
+
+  const workspace = await readFile(
+    new URL("../app/projects/[projectId]/conversations/[conversationId]/workspace.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(workspace, /Prepared.*canonical source event/);
+  assert.match(workspace, /already prepared/);
+  assert.match(workspace, /Source-event preparation blocked/);
+  assert.match(workspace, /Source-event preparation failed/);
+  assert.match(workspace, /Analysis stopped before candidate selection\. No authority changed\./);
+});
+
 test("Slice 2 preserves the Brewers reconstruction as one honest, project-scoped source artifact", async () => {
   const worker = await builtWorker("slice2-brewers-reconstruction");
   const DB = await sqliteD1();
