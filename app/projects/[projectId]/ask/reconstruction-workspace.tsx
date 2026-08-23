@@ -58,7 +58,9 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
     pendingTask?.projectId === projectId ? pendingTask.literalTask : ""
   ));
   const [requestedOutput, setRequestedOutput] = useState("");
-  const [caseId, setCaseId] = useState("");
+  const [caseId, setCaseId] = useState(() => (
+    pendingTask?.projectId === projectId ? pendingTask.caseId || "" : ""
+  ));
   const [budget, setBudget] = useState<number>(800);
   const [roadwayOverride, setRoadwayOverride] = useState("");
   const [receivingModel, setReceivingModel] = useState("");
