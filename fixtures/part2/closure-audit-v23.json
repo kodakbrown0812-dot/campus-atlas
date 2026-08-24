@@ -1,0 +1,55 @@
+{
+  "auditVersion": "part2-closure-v1",
+  "closedAt": "2026-08-24T00:56:22Z",
+  "productionUrl": "https://rebar-decision-memory.codythomas871.chatgpt.site/projects/sports/work",
+  "deployment": {
+    "version": 23,
+    "sourceCommit": "11e0ccf2c361efbaa0ecb172d542a060bc6f37d8",
+    "artifactHash": "sha256:290ffa2559b8255649c738b9439e90538cf222f5d93bc85b780990b75d46fcd5",
+    "canonicalD1": true,
+    "fixtureFallback": false,
+    "ownerAuthorization": "server_confirmed"
+  },
+  "canonicalCountsAfterFinalLightProof": {
+    "projects": 1,
+    "conversations": 1,
+    "messages": 1,
+    "events": 1,
+    "findings": 1,
+    "mechanisms": 1,
+    "mechanismVersions": 1,
+    "governanceEvents": 1,
+    "transferRuns": 1,
+    "packets": 0,
+    "packetItems": 0,
+    "receipts": 0
+  },
+  "inspect": {
+    "transferRunId": "transfer-room:2a86d1579936aaae9789866be1364ef5",
+    "status": "complete",
+    "stage": "ready_for_steward",
+    "attempts": 1,
+    "conversationId": "conversation:1feaa4d6-752d-458e-9512-af664393bd45",
+    "caseId": "case:5ba7788e-512f-4ea7-91e7-8e2c1555b5d4",
+    "sourceEventId": "event:exact-message:00000001:ae1ff73ef90e8b66c7ad840b",
+    "checkpointId": "checkpoint:10d5f524-2cfc-49f7-bd47-bf828792ab66",
+    "findingId": "finding:f0a405bd-a036-46ea-8c70-a363fe4ea79b",
+    "mechanismId": "mechanism:e1543ae4836ffc55e99b67fbd983c1d2",
+    "authority": "approved_local",
+    "stewardArtifacts": 0
+  },
+  "finalLightProof": {
+    "literalTask": "Prepare the context needed to identify when the internal project update should be delivered and why.",
+    "need": "light",
+    "casePreserved": true,
+    "includedItems": 1,
+    "fridayAfternoonPreserved": true,
+    "thursdayEveningRationalePreserved": true,
+    "mondayWednesdayPresentedAsCurrent": false,
+    "copyForThisRoom": true,
+    "newRoomAction": false,
+    "packetCreated": false,
+    "receiptCreated": false
+  },
+  "status": "accepted_and_closed"
+}

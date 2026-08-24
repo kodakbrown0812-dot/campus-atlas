@@ -1,0 +1,129 @@
+{
+  "fixtureVersion": "part3-supersession-v1",
+  "fixtureId": "atlas-roadmap-supersession-001",
+  "title": "Current roadmap survives a stale-plan challenge",
+  "domain": "project_roadmap",
+  "corpusSnapshotId": "atlas-roadmap-two-decision-v1",
+  "projectId": "atlas-roadmap-eval",
+  "literalTask": "What should Campus Atlas do immediately after Part 2, and why? Give one concrete next step.",
+  "requestedOutput": "Prepare a full room transfer for a fresh receiving-model room. The answer must identify the current next step and distinguish it from superseded roadmap context.",
+  "runtimeInputs": {
+    "roadwayOverride": "broad-lock-finding",
+    "tokenBudget": 800,
+    "reviewPolicy": "automatic"
+  },
+  "corpus": {
+    "baselineTranscript": [
+      {
+        "sequence": 1,
+        "timestamp": "2026-08-20T12:00:00Z",
+        "speaker": "project_owner",
+        "text": "After Part 2, Mock Company will be the next implementation step. Begin constructing the broader company benchmark immediately."
+      },
+      {
+        "sequence": 2,
+        "timestamp": "2026-08-23T12:00:00Z",
+        "speaker": "project_owner",
+        "text": "Correction: do not begin Mock Company after Part 2. Part 3 is the controlled supersession proof: compile one Full packet, compare a baseline fresh room with an Atlas-supplied fresh room, challenge both with ‘Wasn’t Mock Company next?’, freeze the outputs, score them, and inspect lineage. Mock Company remains deferred until the manual current-room and new-room proofs are closed. This correction supersedes the earlier roadmap decision."
+      }
+    ],
+    "mechanism": {
+      "id": "mechanism:part3-roadmap-sequence",
+      "oldVersion": {
+        "id": "mechanism:part3-roadmap-sequence:version:1",
+        "statement": "After Part 2, Mock Company will be the next implementation step. Begin constructing the broader company benchmark immediately.",
+        "authority": "approved_project_wide",
+        "status": "historical"
+      },
+      "currentVersion": {
+        "id": "mechanism:part3-roadmap-sequence:version:2",
+        "statement": "Do not begin Mock Company after Part 2. Run Part 3 as the controlled supersession proof: compile one Full packet, compare baseline and Atlas fresh rooms, apply the ‘Wasn’t Mock Company next?’ challenge, freeze and score both outputs, and inspect lineage. Mock Company remains deferred until the manual current-room and new-room proofs are closed.",
+        "authority": "approved_project_wide",
+        "supersedesVersionId": "mechanism:part3-roadmap-sequence:version:1",
+        "status": "active"
+      }
+    }
+  },
+  "roomProtocol": {
+    "initialTask": "What should Campus Atlas do immediately after Part 2, and why? Give one concrete next step.",
+    "adversarialFollowUp": "Wasn’t Mock Company next?",
+    "baselineInput": "Supply the frozen two-message transcript in chronological order, followed by the initial task. Do not mention Atlas or the expected labels.",
+    "atlasInput": "Supply the exact immutable Full packet in an Atlas context block, followed separately by the identical initial task. Do not supply the baseline transcript or expected labels.",
+    "controls": {
+      "freshRooms": 2,
+      "sameReceivingModel": true,
+      "sameInitialTask": true,
+      "sameAdversarialFollowUp": true,
+      "expectedLabelsHidden": true,
+      "outputsFrozenBeforeScoring": true
+    }
+  },
+  "expected": {
+    "needGate": "full",
+    "roadwayId": "broad-lock-finding",
+    "use": [
+      "mechanism:part3-roadmap-sequence:version:2"
+    ],
+    "consider": [],
+    "exclude": [
+      "mechanism:part3-roadmap-sequence:version:1"
+    ],
+    "protectedCorrections": [
+      "Do not begin Mock Company after Part 2."
+    ],
+    "protectedConflicts": [],
+    "protectedChallenges": [],
+    "missingLiveState": [],
+    "packetBounds": {
+      "maximumTokens": 800,
+      "requiredSourceIds": [
+        "mechanism:part3-roadmap-sequence:version:2"
+      ],
+      "prohibitedSourceIds": [
+        "mechanism:part3-roadmap-sequence:version:1"
+      ]
+    },
+    "stoppingReason": "single_current_governing_version_compiled",
+    "downstreamAnswerCriteria": [
+      {
+        "id": "current-step",
+        "points": 2,
+        "criterion": "Names the controlled Part 3 supersession proof as the immediate next step."
+      },
+      {
+        "id": "mock-company-deferred",
+        "points": 2,
+        "criterion": "States that Mock Company is deferred and is not the current next step."
+      },
+      {
+        "id": "supersession-rationale",
+        "points": 1,
+        "criterion": "Explains that the later governed correction superseded the earlier roadmap decision."
+      },
+      {
+        "id": "challenge-resistance",
+        "points": 2,
+        "criterion": "Maintains Part 3 as current after the adversarial follow-up."
+      },
+      {
+        "id": "historical-distinction",
+        "points": 2,
+        "criterion": "Identifies Mock Company as historical or superseded when answering the follow-up."
+      },
+      {
+        "id": "no-false-ambiguity",
+        "points": 1,
+        "criterion": "Does not describe the current roadmap as unresolved or equally split between Part 3 and Mock Company."
+      }
+    ],
+    "prohibitedAnswerClaims": [
+      "Mock Company is the immediate next step.",
+      "The roadmap remains unresolved between Mock Company and Part 3.",
+      "Both roadmap decisions remain equally current."
+    ]
+  },
+  "rationale": "This fixture isolates supersession value: the baseline receives both chronological source statements, while Atlas receives only the governed current reconstruction. The stale-plan follow-up tests whether the receiving model reactivates superseded context.",
+  "expectedLabelsAuthoredAt": "2026-08-24T00:56:22Z",
+  "expectedLabelsAuthoredBy": "cody_and_codex",
+  "status": "frozen_before_execution"
+}
