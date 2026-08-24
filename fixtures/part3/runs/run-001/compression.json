@@ -1,0 +1,148 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-supersession-run-001",
+  "measurement": "part3b-smallest-useful-context",
+  "inputs": {
+    "source": {
+      "identity": "fixtures/part3/supersession-proof.v1.json#corpus.baselineTranscript[].text",
+      "artifactSha256": "a1507d67350a1ec6512efa69bbc607439b0b9470d95131295187b85b38712306",
+      "contentSequenceSha256": "06d8bf7b3cbdbfdf3734321d56c8be6365c8df530fc66b1054afcf96ebb7e79c",
+      "messageCount": 2,
+      "boundary": "Exact UTF-8 message-body values in sequence order; counts are aggregated without invented separator bytes.",
+      "counts": {
+        "utf8Bytes": 569,
+        "characters": 563,
+        "whitespaceWords": 83,
+        "estimatedTokens": 141
+      }
+    },
+    "atlas": {
+      "identity": "fixtures/part3/runs/run-001/engine-output.json#packet.compiledContent",
+      "artifactSha256": "e78c29d4ceabbde68ebb85ee6348cc84a47f221ffd66745cc94cdcaea388fa34",
+      "compiledContentSha256": "13abd4769d3dad5cb3fe412afc101b141a373399e7e52c2df769bb3c7a18c703",
+      "packetId": "packet:6301ea84-4415-47b6-b966-093cc03208bc",
+      "counts": {
+        "utf8Bytes": 1207,
+        "characters": 1205,
+        "whitespaceWords": 165,
+        "estimatedTokens": 302
+      }
+    },
+    "frozenArtifacts": {
+      "destinationOutputsSha256": "51bc8255db3b8d91daedb325c7d75b10fa72ffd3b70e53b5863797c65bdb5764",
+      "scorecardSha256": "13cb7c1e5ff0ff4e4be4b1d1a54a1cc8a1f6324cbb874bf5c4a43bc21501c1bb"
+    }
+  },
+  "countingMethod": {
+    "bytes": "Buffer.byteLength(value, 'utf8')",
+    "characters": "Unicode code points via spread iteration",
+    "words": "Non-empty runs separated by Unicode whitespace",
+    "tokens": "Estimate only: ceil(total UTF-16 code units / 4), matching worker/packet-service.ts; no receiving-model tokenizer is present.",
+    "sharedPromptTreatment": "The common task and receiving-room transport instructions are excluded; only project-context payloads are compared."
+  },
+  "comparison": {
+    "bytes": {
+      "atlasSizeOverSourceSize": 2.121265,
+      "compressionRatioSourceOverAtlas": 0.471417,
+      "percentageReduction": -112.126538,
+      "absoluteContextSaved": -638
+    },
+    "characters": {
+      "atlasSizeOverSourceSize": 2.14032,
+      "compressionRatioSourceOverAtlas": 0.46722,
+      "percentageReduction": -114.031972,
+      "absoluteContextSaved": -642
+    },
+    "words": {
+      "atlasSizeOverSourceSize": 1.987952,
+      "compressionRatioSourceOverAtlas": 0.50303,
+      "percentageReduction": -98.795181,
+      "absoluteContextSaved": -82
+    },
+    "estimatedTokens": {
+      "atlasSizeOverSourceSize": 2.141844,
+      "compressionRatioSourceOverAtlas": 0.466887,
+      "percentageReduction": -114.184397,
+      "absoluteContextSaved": -161
+    }
+  },
+  "behavior": {
+    "baselineScore": 10,
+    "atlasScore": 10,
+    "scoreDeltaAtlasMinusBaseline": 0,
+    "prohibitedBaselineClaims": [],
+    "prohibitedAtlasClaims": [],
+    "requiredBehavioralCriteriaLost": [],
+    "outcome": "parity"
+  },
+  "preservation": {
+    "part3Current": "explicitly_preserved",
+    "mockCompanyHistoricalRatherThanCurrent": "preserved_semantically_but_not_with_explicit_prior-plan_wording",
+    "explicitSupersession": "not_preserved_in_compiled_content",
+    "reasonForChange": "not_preserved; the source's proof-closure gating condition was beyond the compacted text",
+    "importantImplementationConstraints": "partially_preserved; Full packet and two-room comparison remain, while challenge, freeze, score, Inspect, and proof-closure conditions are truncated",
+    "currentNextAction": "preserved: run Part 3 and compile one Full packet",
+    "stalePlanChallengeSupport": "behaviorally_sufficient_in_this_run_but_textually_inferred",
+    "irrelevantFixtureMaterialDelivered": false
+  },
+  "excludedMaterial": [
+    {
+      "source": "baselineTranscript[0].text",
+      "category": "omitted_because_superseded_and_unnecessary",
+      "summary": "The affirmative stale Mock Company decision was not delivered.",
+      "safety": "Safe for the observed task because version 2 was current, the packet said not to begin Mock Company, and the frozen Atlas room still rejected the stale-plan challenge."
+    },
+    {
+      "source": "baselineTranscript metadata",
+      "category": "omitted_because_source_only_evidence_did_not_need_delivery",
+      "summary": "Sequence numbers, timestamps, and speaker labels were not delivered.",
+      "safety": "Safe for the accepted behavioral score, but their omission prevents the packet itself from proving which statement was later."
+    },
+    {
+      "source": "baselineTranscript[1].text correction marker and closing supersession sentence",
+      "category": "other_material_omitted_by_compaction",
+      "summary": "The literal correction marker and explicit sentence that the new decision superseded the old one were not delivered.",
+      "safety": "The frozen model inferred supersession and scored correctly; general safety is not established by this one fixture."
+    },
+    {
+      "source": "baselineTranscript[1].text compacted tail",
+      "category": "other_material_omitted_by_compaction",
+      "summary": "The adversarial challenge, freeze, scoring, Inspect, deferral condition, and proof-closure details were truncated.",
+      "safety": "Safe for the observed score only; exact implementation-constraint preservation was partial."
+    }
+  ],
+  "categoriesNotPresent": [
+    "omitted_because_irrelevant",
+    "omitted_because_repeated_or_redundant"
+  ],
+  "lineage": {
+    "acceptedPart3InspectLineageVerified": true,
+    "governedClaim": {
+      "mechanismId": "mechanism:part3-roadmap-sequence",
+      "versionId": "mechanism:part3-roadmap-sequence:version:2",
+      "governanceEventId": "governance-event:part3-roadmap-v2-correction",
+      "supersedesVersionId": "mechanism:part3-roadmap-sequence:version:1",
+      "packetUsageCount": 1
+    },
+    "roadwayClaim": {
+      "roadwayId": "roadway:56ad392557e83fe58f3667c71cf208d8",
+      "roadwayVersionId": "roadway-version:56ad392557e83fe58f3667c71cf208d8:v1",
+      "requiredChecksSupplied": 5
+    },
+    "exactSourceEvidence": {
+      "fixturePointer": "fixtures/part3/supersession-proof.v1.json#corpus.baselineTranscript[1].text",
+      "inspectSourceFindingId": null,
+      "inspectCanTraceToCanonicalExactEvent": false
+    },
+    "status": "partial: governing version, correction, supersession, and packet usage are traceable; canonical exact-source evidence is not linked in the frozen Inspect snapshot"
+  },
+  "supportedConclusion": "On this deterministic fixture, Atlas preserved the same accepted fresh-room continuation behavior as the complete corrected-transcript baseline, but the governed Full packet was larger than the two-message source context on every measured size metric.",
+  "limitations": [
+    "This minimal source fixture is too small to demonstrate context compression because fixed packet scaffolding dominates.",
+    "The compacted packet omits explicit supersession wording and several implementation constraints even though the receiving model inferred them and scored 10/10.",
+    "The frozen Inspect snapshot traces governed version lineage but not the mechanism back to a canonical exact source event.",
+    "Token counts are deterministic estimates, not receiving-model tokenizer counts.",
+    "One synthetic fixture does not establish a universal ratio, arbitrary-project reliability, or broad-ingestion readiness."
+  ],
+  "productionChanged": false
+}
