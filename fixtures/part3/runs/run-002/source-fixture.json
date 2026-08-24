@@ -331,42 +331,42 @@
         "id": "mechanism:part3c-simple-small",
         "versionId": "mechanism:part3c-simple-small:version:1",
         "sourceSequences": [29],
-        "statement": "Reuse existing governed-continuity machinery, keep interaction simple, and prepare the smallest useful context; do not add a second reconstruction path.",
+        "statement": "For the V1.8 Room Transfer proof, reuse governed-continuity machinery, keep interaction simple, and prepare the smallest useful context; add no second reconstruction path.",
         "authority": "approved_project_wide"
       },
       {
         "id": "mechanism:part3c-exact-lineage",
         "versionId": "mechanism:part3c-exact-lineage:version:1",
         "sourceSequences": [30, 41],
-        "statement": "Preserve Exact sources, correction and supersession semantics, and Inspect lineage through governed records to canonical Exact events and source messages.",
+        "statement": "The V1.8 Room Transfer proof must preserve Exact sources, correction and supersession semantics, and Inspect lineage to canonical Exact events and messages.",
         "authority": "approved_project_wide"
       },
       {
         "id": "mechanism:part3c-fresh-room-protocol",
         "versionId": "mechanism:part3c-fresh-room-protocol:version:1",
         "sourceSequences": [31],
-        "statement": "Use identical fresh rooms for transcript-only and Atlas-only inputs, ask the fixed task and challenges, and freeze outputs before applying the fixed score.",
+        "statement": "The V1.8 Room Transfer proof must use identical fresh rooms, the fixed task and challenges, and destination outputs frozen before applying the fixed score.",
         "authority": "approved_project_wide"
       },
       {
         "id": "mechanism:part3c-proof-closure",
         "versionId": "mechanism:part3c-proof-closure:version:1",
         "sourceSequences": [32, 33, 42],
-        "statement": "Continue the deterministic Room Transfer proof now; larger company trials remain deferred until behavior, reduction, causal preservation, and lineage checks close.",
+        "statement": "Continue the deterministic V1.8 Room Transfer proof now; larger company trials remain deferred until behavior, reduction, causal preservation, and lineage checks close.",
         "authority": "approved_project_wide"
       },
       {
         "id": "mechanism:part3c-abandoned-branches",
         "versionId": "mechanism:part3c-abandoned-branches:version:1",
         "sourceSequences": [19, 21, 22, 40],
-        "statement": "Mock Company, embeddings, learned ranking, broad connectors or ingestion, and dashboard redesign are historical branches, not current V1.8 work.",
+        "statement": "For the V1.8 next proof, avoid Mock Company, embeddings, learned ranking, broad connectors or ingestion, and dashboard redesign; each is historical, not current.",
         "authority": "approved_project_wide"
       },
       {
         "id": "mechanism:part3c-expired-status",
         "versionId": "mechanism:part3c-expired-status:version:1",
         "sourceSequences": [15, 16, 18, 37],
-        "statement": "Deployment, auth, test, travel, and scheduling blockers were resolved or expired and must not be presented as current project state.",
+        "statement": "For the V1.8 next proof, deployment, auth, test, travel, and scheduling blockers are resolved or expired and must not be presented as current state.",
         "authority": "approved_project_wide"
       }
     ],
