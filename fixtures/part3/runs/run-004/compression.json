@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-atomic-preservation-run-004",
+  "method": {
+    "sourceBoundary": "Exact transcript message-body values aggregated in chronological order without invented separator bytes.",
+    "atlasBoundary": "Exact server-authored compiledContent in engine-output.json.",
+    "bytes": "UTF-8",
+    "characters": "Unicode code points",
+    "words": "Whitespace-tokenized",
+    "tokens": "Estimate only: ceil(total UTF-16 code units / 4), unchanged from Parts 3B through 3D."
+  },
+  "source": {
+    "identity": "fixtures/part3/runs/run-002/source-fixture.json#transcript[].text",
+    "artifactSha256": "c07cdf8848e2504975f9357a118f5118f95da3e64f7c4be0e58ce64f2e1840d2",
+    "messageCount": 43,
+    "utf8Bytes": 16233,
+    "characters": 16227,
+    "whitespaceWords": 2396,
+    "estimatedTokens": 4057
+  },
+  "atlas": {
+    "identity": "fixtures/part3/runs/run-004/engine-output.json#compiledContent",
+    "utf8Bytes": 2773,
+    "characters": 2773,
+    "whitespaceWords": 338,
+    "estimatedTokens": 694
+  },
+  "comparison": {
+    "estimatedTokens": {
+      "atlasSizeOverSourceSize": 0.171063,
+      "compressionRatioSourceOverAtlas": 5.845821,
+      "percentageReduction": 82.893764,
+      "absoluteContextSaved": 3363
+    }
+  },
+  "minimumEstimatedTokenReductionPercent": 50,
+  "reductionThresholdPassed": true,
+  "continuitySuccess": true
+}

@@ -6578,7 +6578,11 @@ test("V1.7.1 reconstruction/run reproduces the reviewed soccer mechanism and lin
   assert.equal(result.value.summary.auditOnlyProvenanceRetained, 5);
   assert.equal(result.value.summary.protectedCorrectionsSupplied, 0);
   assert.equal(result.value.packet.tokenBudget, 800);
-  assert.equal(result.value.packet.finalTokenCount, 278);
+  assert.equal(result.value.packet.finalTokenCount, 335);
+  assert.match(result.value.packet.compiledContent, /Before entering live on a soccer favorite, require sustained territory/i);
+  assert.match(result.value.packet.compiledContent, /pass rather than chase/i);
+  assert.match(result.value.packet.compiledContent, /time-based, game-state-based, or a combination of both/i);
+  assert.doesNotMatch(result.value.packet.compiledContent, /(?:Before|If|until)[^\n]*…/i);
   assert.equal(result.value.packet.compiledContent.includes(fixture.seeded.events[0].id), false);
   assert.equal(result.value.effects.authorityChanged, false);
   const after = canonicalMutationCounts(DB);
@@ -7223,7 +7227,89 @@ test("broad project-continuation applicability remains governed, bounded, and sc
   }
 });
 
-test("Part 3D rerun records the first remaining strict packet-preservation failure", async () => {
+test("packet compaction preserves complete atomic governing meaning and fails safely under budget", async () => {
+  const worker = await builtWorker("part3e-atomic-packet-compaction");
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "planning", "Atomic Planning");
+    await initializeRoadways(worker, DB, "planning");
+    const atomicStatements = {
+      temporal: "For the migration transfer proof, freeze outputs before applying the fixed score.",
+      until: "Do not begin the larger migration trial until deterministic transfer proof closes.",
+      negation: "Do not deploy the migration transfer branch during this proof.",
+      conditional: "The migration transfer proof must preserve this condition: if the preservation gate fails, stop before destination execution.",
+      supersession: "The current migration transfer pathway supersedes the historical catalog rollout as the governing direction.",
+    };
+    for (const [name, statement] of Object.entries(atomicStatements)) {
+      seedSlice4Mechanism(DB, {
+        id: `mechanism:part3e-${name}`,
+        projectId: "planning",
+        statement,
+      });
+    }
+    const descriptivePrefix = "Compare migration transfer candidate options under one common evidence standard.";
+    const descriptiveStatement = `${descriptivePrefix} ${"Background context explains the earlier exploration without adding a governing condition. ".repeat(4)}`;
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:part3e-descriptive",
+      projectId: "planning",
+      statement: descriptiveStatement,
+    });
+
+    const result = await reconstructionRunRequest(worker, DB, "planning", {
+      task: "What should we build next for the migration transfer proof, what should we avoid, and what constraints govern it?",
+      requestedOutput: "Prepare a full room transfer with current direction, rationale, constraints, and the boundary before expansion.",
+      roadwayOverride: "broad-lock-finding",
+      tokenBudget: 1600,
+    }, "part3e-atomic-rendering");
+    assert.equal(result.response.status, 201, JSON.stringify(result.value));
+    assert.equal(result.value.status, "compiled");
+    assert.equal(result.value.need.level, "full");
+    const content = result.value.packet.compiledContent;
+    for (const statement of Object.values(atomicStatements)) {
+      assert.match(
+        content,
+        new RegExp(statement.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+        JSON.stringify(result.value.receipt.treatmentSummary),
+      );
+    }
+    assert.match(content, /freeze outputs before applying the fixed score/i);
+    assert.doesNotMatch(content, /before applying…/i);
+    assert.match(content, /Do not begin the larger migration trial until deterministic transfer proof closes/i);
+    assert.doesNotMatch(content, /until…/i);
+    assert.match(content, /Do not deploy the migration transfer branch/i);
+    assert.match(content, /if the preservation gate fails, stop before destination execution/i);
+    assert.match(content, /supersedes the historical catalog rollout as the governing direction/i);
+    const descriptiveLine = content.split("\n").find((line) => line.includes(descriptivePrefix));
+    assert.ok(descriptiveLine);
+    assert.match(descriptiveLine, /…/);
+    assert.equal(descriptiveLine.includes(descriptiveStatement), false);
+  }
+
+  {
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, "overflow", "Atomic Overflow");
+    await initializeRoadways(worker, DB, "overflow");
+    seedSlice4Mechanism(DB, {
+      id: "mechanism:part3e-atomic-overflow",
+      projectId: "overflow",
+      statement: `The migration transfer proof must preserve this complete enumerated constraint before destination execution: ${"retain exact source, scope, negation, ordering, prerequisite, exception, threshold, and causal boundary; ".repeat(18)}`,
+    });
+    const result = await createSlice4Packet(worker, DB, {
+      projectId: "overflow",
+      task: "What should we build next for the migration transfer proof, and what constraints govern it?",
+      roadwayOverride: "broad-lock-finding",
+      tokenBudget: 400,
+    }, "part3e-atomic-overflow");
+    assert.equal(result.response.status, 201, JSON.stringify(result.value));
+    assert.equal(result.value.packet.status, "failed");
+    assert.match(result.value.packet.compilationError, /^minimum_safe_packet_exceeds_budget:/);
+    assert.match(result.value.packet.compiledContent, /Compilation stopped: minimum safe packet requires/i);
+    assert.doesNotMatch(result.value.packet.compiledContent, /retain exact source.*…/i);
+  }
+});
+
+test("Part 3E rerun passes the strict atomic packet-preservation gate", async () => {
   const fixtureBytes = await readFile(
     new URL("../fixtures/part3/runs/run-002/source-fixture.json", import.meta.url),
   );
@@ -7521,6 +7607,27 @@ test("Part 3D rerun records the first remaining strict packet-preservation failu
     abandonedBranchGuard: /avoid Mock Company, embeddings, learned ranking, broad connectors or ingestion, and dashboard redesign/i.test(compiledContent),
     expiredStateGuard: /blockers are resolved or expired and must not be presented as curre/i.test(compiledContent),
   };
+  const mechanismSemanticCoverage = {
+    "mechanism:part3c-current-direction": semanticCoverage.currentDirection
+      && semanticCoverage.explicitSupersession && semanticCoverage.rationale,
+    "mechanism:part3c-simple-small": semanticCoverage.simpleInteraction && semanticCoverage.smallestUsefulContext,
+    "mechanism:part3c-exact-lineage": semanticCoverage.exactSources && semanticCoverage.inspectLineage,
+    "mechanism:part3c-fresh-room-protocol": semanticCoverage.freshRoomComparison && semanticCoverage.frozenBeforeScoring,
+    "mechanism:part3c-proof-closure": semanticCoverage.currentDirection && semanticCoverage.proofClosureBoundary,
+    "mechanism:part3c-abandoned-branches": semanticCoverage.abandonedBranchGuard,
+    "mechanism:part3c-expired-status": semanticCoverage.expiredStateGuard,
+  };
+  const requiredClaimCoverage = Object.fromEntries(fixture.governedState.currentMechanisms.map((mechanism) => {
+    const renderedLine = compiledContent.split("\n").find((line) => line.includes(mechanism.id));
+    const classification = compiledContent.includes(mechanism.statement)
+      ? "claim_fully_supplied"
+      : renderedLine?.includes("…")
+        ? "claim_incomplete_truncated"
+        : renderedLine && mechanismSemanticCoverage[mechanism.id]
+          ? "claim_safely_compressed_semantically_complete"
+          : "claim_absent";
+    return [mechanism.id, classification];
+  }));
   const packetPreservationGatePassed = Object.values(semanticCoverage).every(Boolean);
   const sourceUtf16 = fixture.transcript.reduce((total, entry) => total + entry.text.length, 0);
   const sourceMetrics = {
@@ -7590,6 +7697,7 @@ test("Part 3D rerun records the first remaining strict packet-preservation failu
     packetItems,
     preservation,
     semanticCoverage,
+    requiredClaimCoverage,
     packetPreservationGatePassed,
     sourceMetrics,
     atlasMetrics,
@@ -7636,6 +7744,7 @@ test("Part 3D rerun records the first remaining strict packet-preservation failu
         })),
       preservation: capture.preservation,
       semanticCoverage: capture.semanticCoverage,
+      requiredClaimCoverage: capture.requiredClaimCoverage,
       packetPreservationGatePassed: capture.packetPreservationGatePassed,
       sourceMetrics: capture.sourceMetrics,
       atlasMetrics: capture.atlasMetrics,
@@ -7647,9 +7756,9 @@ test("Part 3D rerun records the first remaining strict packet-preservation failu
     })}`);
   }
 
-  assert.equal(packetPreservationGatePassed, false);
-  assert.equal(semanticCoverage.frozenBeforeScoring, false);
-  assert.ok(Object.entries(semanticCoverage).every(([key, value]) => key === "frozenBeforeScoring" || value), JSON.stringify(semanticCoverage));
+  assert.equal(packetPreservationGatePassed, true);
+  assert.ok(Object.values(semanticCoverage).every(Boolean), JSON.stringify(semanticCoverage));
+  assert.ok(Object.values(requiredClaimCoverage).every((value) => value === "claim_fully_supplied"));
   assert.equal(result.value.summary.governingMechanismsSupplied, fixture.governedState.currentMechanisms.length);
   assert.ok(fixture.governedState.currentMechanisms.every((mechanism) => (
     packetItems.some((item) => item.source_id === mechanism.id && item.treatment === "Use")

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-atomic-preservation-run-004",
+  "status": "passed",
+  "selectionGate": "passed",
+  "atomicPacketPreservationGate": "passed",
+  "compressionGate": "passed",
+  "lineageGate": "passed",
+  "behavioralGate": "passed",
+  "firstRemainingFailure": null,
+  "supportedConclusion": "On this deterministic noisy-room fixture, Atlas preserved the same accepted fresh-room continuation behavior as the complete chronological baseline while supplying 82.893764% fewer estimated context tokens and retaining complete atomic governing constraints.",
+  "limitations": [
+    "One synthetic fixture does not establish arbitrary-project reliability or a universal compression ratio.",
+    "Token counts remain deterministic estimates rather than receiving-model tokenizer counts.",
+    "The deterministic atomic-signal boundary is intentionally conservative and may produce safe budget failures for unusually long governing rules."
+  ],
+  "productionChanged": false
+}

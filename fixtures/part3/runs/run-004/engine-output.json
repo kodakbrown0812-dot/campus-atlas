@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-atomic-preservation-run-004",
+  "sourceRunId": "part3-noisy-room-run-002",
+  "fixtureSha256": "c07cdf8848e2504975f9357a118f5118f95da3e64f7c4be0e58ce64f2e1840d2",
+  "rubricSha256": "dd63f39221e45fa47f41ec3df4de127abbd2539f7c7e152c03cc666fff64b6e3",
+  "need": "full",
+  "roadway": "broad-lock-finding",
+  "governingMechanismsSupplied": 7,
+  "requiredChecksSupplied": 5,
+  "mechanismTreatments": {
+    "mechanism:part3c-current-direction": "Use",
+    "mechanism:part3c-simple-small": "Use",
+    "mechanism:part3c-exact-lineage": "Use",
+    "mechanism:part3c-fresh-room-protocol": "Use",
+    "mechanism:part3c-proof-closure": "Use",
+    "mechanism:part3c-abandoned-branches": "Use",
+    "mechanism:part3c-expired-status": "Use"
+  },
+  "compiledContent": "# Atlas reconstruction packet v1\nTask: What should we build next for V1.8, what should we specifically avoid doing, and what constraints must govern the next proof?\nIntent: Prepare a full room transfer for a fresh destination. Preserve the current direction, its supersession rationale, the proof constraints, and the boundary for larger company trials.; compare candidate mechanisms under a common evidence standard.\nPrimary roadway: Broad Lock-Finding v1\nScope: project atlas-noisy-room-eval; narrow.\nBudget: 1600 tokens (deterministic character approximation).\n\n## Required Blueprint checks\n- [USE][CHECK 1] Define the requested decision and candidate universe.\n- [USE][CHECK 2] Separate offered price, probability, mechanism, and uncertainty.\n- [USE][CHECK 3] Compare viable alternatives under the same evidence standard.\n- [USE][CHECK 4] Carry the strongest challenge to the leading pathway.\n- [USE][CHECK 5] Name missing live state that could change the ranking.\n\n## Protected mechanisms, corrections, challenges, and conflicts\n- [USE] For the V1.8 next proof, deployment, auth, test, travel, and scheduling blockers are resolved or expired and must not be presented as current state. [Mechanism:mechanism:part3c-expired-status; Compressed; approved_project_wide]\n- [USE] Room Transfer is current for V1.8 and supersedes Mock Company: Atlas became too complicated, so prove the continuity primitive before widening product scope. [Mechanism:mechanism:part3c-current-direction; Compressed; approved_project_wide]\n- [USE] For the V1.8 next proof, avoid Mock Company, embeddings, learned ranking, broad connectors or ingestion, and dashboard redesign; each is historical, not current. [Mechanism:mechanism:part3c-abandoned-branches; Compressed; approved_project_wide]\n- [USE] Continue the deterministic V1.8 Room Transfer proof now; larger company trials remain deferred until behavior, reduction, causal preservation, and lineage checks close. [Mechanism:mechanism:part3c-proof-closure; Compressed; approved_project_wide]\n- [USE] The V1.8 Room Transfer proof must use identical fresh rooms, the fixed task and challenges, and destination outputs frozen before applying the fixed score. [Mechanism:mechanism:part3c-fresh-room-protocol; Compressed; approved_project_wide]\n- [USE] The V1.8 Room Transfer proof must preserve Exact sources, correction and supersession semantics, and Inspect lineage to canonical Exact events and messages. [Mechanism:mechanism:part3c-exact-lineage; Compressed; approved_project_wide]\n- [USE] For the V1.8 Room Transfer proof, reuse governed-continuity machinery, keep interaction simple, and prepare the smallest useful context; add no second reconstruction path. [Mechanism:mechanism:part3c-simple-small; Compressed; approved_project_wide]",
+  "requiredClaimCoverage": {
+    "mechanism:part3c-current-direction": "claim_fully_supplied",
+    "mechanism:part3c-simple-small": "claim_fully_supplied",
+    "mechanism:part3c-exact-lineage": "claim_fully_supplied",
+    "mechanism:part3c-fresh-room-protocol": "claim_fully_supplied",
+    "mechanism:part3c-proof-closure": "claim_fully_supplied",
+    "mechanism:part3c-abandoned-branches": "claim_fully_supplied",
+    "mechanism:part3c-expired-status": "claim_fully_supplied"
+  },
+  "packetPreservationGatePassed": true,
+  "compressionGatePassed": true,
+  "irrelevantMechanismLeakage": false,
+  "productionChanged": false
+}

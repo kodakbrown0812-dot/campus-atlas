@@ -54,6 +54,28 @@ function compact(value: string, maximum = 220) {
   return `${normalized.slice(0, maximum - 1).trimEnd()}…`;
 }
 
+const ATOMIC_GOVERNING_SIGNALS = [
+  /\b(?:before|after|until|unless|only if|only after)\b/i,
+  /\b(?:must|must not|do not|don't|never)\b/i,
+  /\b(?:require|requires|required|requiring)\b/i,
+  /\b(?:preserve|avoid|defer|deferred|supersedes?|replaces?)\b/i,
+  /\bif\b[\s\S]*\b(?:then|stop|use|exclude|include|fail|continue|defer|preserve)\b/i,
+  /\b(?:constraints?|requirements?|guardrails?)\s*:/i,
+  /\buse\b[\s\S]*\b(?:not|instead of|rather than)\b/i,
+  /\b(?:reuse|keep|add no)\b/i,
+];
+
+function isAtomicGoverningItem(item: PacketItemSnapshot) {
+  return item.treatment === "Use"
+    && item.sourceType !== "LiveStateSnapshot"
+    && ATOMIC_GOVERNING_SIGNALS.some((pattern) => pattern.test(item.statement));
+}
+
+function compactRenderedStatement(item: PacketItemSnapshot, maximum: number) {
+  if (isAtomicGoverningItem(item)) return item.statement.replace(/\s+/g, " ").trim();
+  return compact(item.statement, maximum);
+}
+
 function roadwayChecks(interpretation: TaskInterpretation): PacketItemSnapshot[] {
   const roadway = interpretation.primaryRoadway!;
   return roadway.requiredChecks.map((statement, index) => ({
@@ -142,14 +164,14 @@ function renderHeader(
 function renderItem(item: PacketItemSnapshot) {
   const label = item.treatment === "Use" ? "USE" : item.treatment === "Consider" ? "CONSIDER" : "EXCLUDE";
   if (item.protectedRole === "required_check") {
-    return `- [USE][CHECK ${item.sequenceOrder}] ${compact(item.statement, 110)}`;
+    return `- [USE][CHECK ${item.sequenceOrder}] ${compactRenderedStatement(item, 110)}`;
   }
   if (item.sourceType === "LiveStateSnapshot") {
     return `- [${label}][CURRENT] ${compact(item.statement, 90)} [${item.sourceId}; ${item.freshness}]`;
   }
   const statement = item.protectedRole === "correction"
     ? item.statement
-    : compact(item.statement, item.treatment === "Exclude" ? 80 : 140);
+    : compactRenderedStatement(item, item.treatment === "Exclude" ? 80 : 140);
   const reason = item.treatment === "Exclude" ? ` — ${compact(item.reason, 70)}` : "";
   const historicalLimitation = item.representation === "Reconstructed"
     ? " — historical raw transcript unavailable; not Exact"
@@ -173,12 +195,18 @@ function minimumSafeItems(items: PacketItemSnapshot[]) {
       && item.protectedRole !== "conflict"
     ))
     .slice(0, 1);
+  const atomicGoverningItems = items.filter(isAtomicGoverningItem);
   const protectedItems = items.filter(isPacketEligibleProtectedItem);
   const strongestChallenge = items.find((item) => (
     item.protectedRole === "challenge" && isPacketEligibleProtectedItem(item)
   ));
   const map = new Map<string, PacketItemSnapshot>();
-  for (const item of [...uses, ...protectedItems, ...(strongestChallenge ? [strongestChallenge] : [])]) {
+  for (const item of [
+    ...uses,
+    ...atomicGoverningItems,
+    ...protectedItems,
+    ...(strongestChallenge ? [strongestChallenge] : []),
+  ]) {
     map.set(`${item.sourceType}:${item.sourceId}`, item);
   }
   return [...map.values()];
