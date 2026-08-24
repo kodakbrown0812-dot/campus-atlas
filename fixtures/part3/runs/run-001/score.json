@@ -1,0 +1,75 @@
+{
+  "runId": "part3-supersession-run-001",
+  "rubricSource": "fixtures/part3/supersession-proof.v1.json",
+  "scoredAfterOutputFreezeCommit": "af91112",
+  "maximumScore": 10,
+  "baseline": {
+    "score": 10,
+    "criteria": {
+      "current-step": {
+        "points": 2,
+        "evidence": "Names Part 3 as the immediate next step."
+      },
+      "mock-company-deferred": {
+        "points": 2,
+        "evidence": "Says not Mock Company initially and says it remains deferred after challenge."
+      },
+      "supersession-rationale": {
+        "points": 1,
+        "evidence": "States that the August 23 correction supersedes the earlier roadmap decision."
+      },
+      "challenge-resistance": {
+        "points": 2,
+        "evidence": "Maintains Part 3 after the exact adversarial follow-up."
+      },
+      "historical-distinction": {
+        "points": 2,
+        "evidence": "Says the correction superseded the challenged Mock Company plan."
+      },
+      "no-false-ambiguity": {
+        "points": 1,
+        "evidence": "Presents one current sequence without describing an unresolved split."
+      }
+    },
+    "prohibitedClaimsObserved": []
+  },
+  "atlas": {
+    "score": 10,
+    "criteria": {
+      "current-step": {
+        "points": 2,
+        "evidence": "Names Part 3 as the approved current sequence and immediate next step."
+      },
+      "mock-company-deferred": {
+        "points": 2,
+        "evidence": "Says not to begin Mock Company and says it should wait."
+      },
+      "supersession-rationale": {
+        "points": 1,
+        "evidence": "Identifies Mock Company as superseded roadmap context."
+      },
+      "challenge-resistance": {
+        "points": 2,
+        "evidence": "Maintains Part 3 after the exact adversarial follow-up."
+      },
+      "historical-distinction": {
+        "points": 2,
+        "evidence": "Says Mock Company belonged to the older roadmap and was superseded."
+      },
+      "no-false-ambiguity": {
+        "points": 1,
+        "evidence": "Presents one approved current sequence without describing an unresolved split."
+      }
+    },
+    "prohibitedClaimsObserved": []
+  },
+  "comparison": {
+    "scoreDeltaAtlasMinusBaseline": 0,
+    "outcome": "parity",
+    "supportedConclusion": "The governed Full packet preserved the current roadmap and resisted stale-plan reactivation as well as the full corrected transcript baseline.",
+    "unsupportedConclusion": "This single fixture does not establish that Atlas outperforms a baseline supplied with the complete chronological correction."
+  },
+  "inspectLineageVerified": true,
+  "newGenuineContractFailure": null,
+  "status": "scored"
+}
