@@ -1128,6 +1128,9 @@ test("Transfer Room performs one exact import through review into one governed L
   assert.equal(started.response.status, 201, JSON.stringify(started.value));
   assert.equal(started.value.stage, "awaiting_review");
   assert.equal(started.value.status, "awaiting_review");
+  assert.equal(started.value.caseId, DB.database.prepare(
+    "SELECT active_case_id FROM conversations WHERE id = ?",
+  ).get(started.value.conversationId).active_case_id);
   assert.equal(started.value.expectedCounts.messages, 1);
   assert.equal(started.value.actualCounts.messages, 1);
   assert.equal(started.value.actualCounts.sourceEvents, 1);
@@ -1185,13 +1188,13 @@ test("Transfer Room performs one exact import through review into one governed L
         actorId: "verified-transfer-owner",
         sourceVersionId: review.findingVersionId,
         reviewedStatement: transcript,
-        scope: "project_wide",
-        reason: "Owner accepted the reviewed Friday timing and rationale for future continuity.",
+        scope: "local",
+        reason: "Owner accepted the reviewed Friday timing and rationale within this transfer case.",
       },
     },
   );
   assert.equal(governed.response.status, 201, JSON.stringify(governed.value));
-  assert.equal(governed.value.newAuthority, "approved_project_wide");
+  assert.equal(governed.value.newAuthority, "approved_local");
 
   const resumed = await ownerRequest(
     `/api/v1/projects/sports/transfers/${encodeURIComponent(started.value.id)}/resume`,
@@ -1200,6 +1203,7 @@ test("Transfer Room performs one exact import through review into one governed L
   assert.equal(resumed.response.status, 200, JSON.stringify(resumed.value));
   assert.equal(resumed.value.stage, "ready_for_steward");
   assert.equal(resumed.value.status, "complete");
+  assert.equal(resumed.value.caseId, started.value.caseId);
   assert.equal(resumed.value.reconciliation[0].status, "approved");
   assert.ok(resumed.value.reconciliation[0].mechanismId);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 1);
@@ -1222,13 +1226,18 @@ test("Transfer Room performs one exact import through review into one governed L
   ), ownerEnv, ctx);
   assert.equal(crossProject.status, 404);
 
-  const light = await reconstructionRunRequest(worker, DB, "sports", {
-    task: "Prepare the context needed to identify when the internal project update should be delivered and why.",
-  }, "transfer-room-light-proof");
+  const task = "Prepare the context needed to identify when the internal project update should be delivered and why.";
+  const beforeSteward = canonicalMutationCounts(DB);
+  const light = await ownerRequest("/api/v1/projects/sports/reconstruction/run", {
+    method: "POST",
+    key: "transfer-room-light-proof",
+    body: { task, caseId: resumed.value.caseId, tokenBudget: 800 },
+  });
   assert.equal(light.response.status, 422, JSON.stringify(light.value));
   assert.equal(light.value.status, "light_continuity_only");
   assert.equal(light.value.need.level, "light");
-  assert.equal(light.value.literalTask, "Prepare the context needed to identify when the internal project update should be delivered and why.");
+  assert.equal(light.value.literalTask, task);
+  assert.equal(light.value.caseId, resumed.value.caseId);
   assert.equal(light.value.roadway.interpretiveAmbiguity, true);
   assert.equal(light.value.roadway.materialAmbiguity, false);
   assert.equal(light.value.roadway.outcomeEquivalent, true);
@@ -1236,11 +1245,47 @@ test("Transfer Room performs one exact import through review into one governed L
   assert.match(light.value.capsule.compiledContent, /Friday afternoon/);
   assert.match(light.value.capsule.compiledContent, /Monday and Wednesday were considered/);
   assert.match(light.value.capsule.compiledContent, /Thursday evening/);
+  assert.doesNotMatch(light.value.capsule.compiledContent, /(?:Monday|Wednesday) (?:is|was|will be) (?:selected|delivered)/i);
   assert.equal(light.value.packet, null);
   assert.equal(light.value.receipt, null);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 0);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
+
+  const wrongProjectCase = await ownerRequest("/api/v1/projects/hockey/reconstruction/run", {
+    method: "POST",
+    key: "transfer-room-cross-project-case",
+    body: { task, caseId: resumed.value.caseId, tokenBudget: 800 },
+  });
+  assert.equal(wrongProjectCase.response.status, 404);
+  assert.match(wrongProjectCase.value.error, /case not found/i);
+
+  const directSteward = await ownerRequest("/api/v1/projects/sports/reconstruction/run", {
+    method: "POST",
+    key: "transfer-room-direct-project-scope",
+    body: { task, tokenBudget: 800 },
+  });
+  assert.equal(directSteward.response.status, 422, JSON.stringify(directSteward.value));
+  assert.equal(directSteward.value.status, "atlas_not_needed");
+  assert.equal(directSteward.value.caseId, null);
+  assert.equal(directSteward.value.capsule, null);
+
+  for (const path of [
+    "/api/v1/projects/sports/transfers",
+    `/api/v1/projects/sports/transfers/${encodeURIComponent(started.value.id)}`,
+    "/api/v1/projects/sports/transfers",
+  ]) {
+    const navigationRead = await ownerRequest(path);
+    assert.equal(navigationRead.response.status, 200);
+  }
+  const retriedLight = await ownerRequest("/api/v1/projects/sports/reconstruction/run", {
+    method: "POST",
+    key: "transfer-room-light-proof-navigation-retry",
+    body: { task, caseId: resumed.value.caseId, tokenBudget: 800 },
+  });
+  assert.equal(retriedLight.value.status, "light_continuity_only");
+  assert.equal(retriedLight.value.capsule.compiledContent, light.value.capsule.compiledContent);
+  assert.deepEqual(canonicalMutationCounts(DB), beforeSteward);
 });
 
 test("Transfer Room resumes after a controlled stage failure and treats sensitive proposed state as non-authoritative", async () => {
@@ -2269,6 +2314,8 @@ test("Atlas Steward shell has exactly three primary destinations and mobile pari
 test("Slice 6A Work and conversation actions use canonical services only", async () => {
   const work = await readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8");
   const transfer = await readFile(new URL("../app/projects/[projectId]/work/transfer-room.tsx", import.meta.url), "utf8");
+  const stewardTask = await readFile(new URL("../app/components/steward-task.tsx", import.meta.url), "utf8");
+  const steward = await readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8");
   const conversation = await readFile(new URL("../app/projects/[projectId]/conversations/[conversationId]/workspace.tsx", import.meta.url), "utf8");
   const session = await readFile(new URL("../app/components/write-session.tsx", import.meta.url), "utf8");
   const shell = await readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8");
@@ -2288,6 +2335,13 @@ test("Slice 6A Work and conversation actions use canonical services only", async
     "Consider",
     "Exclude",
   ]) assert.match(transfer, new RegExp(expected.replaceAll("/", "\\/")));
+  assert.match(transfer, /carryTask\(projectId, "", current\.caseId\)/);
+  assert.doesNotMatch(transfer, /\/ask\?(?:[^\s"'`]*&)?caseId=/);
+  assert.match(stewardTask, /caseId: string \| null/);
+  assert.match(stewardTask, /setPendingTask\(\{ projectId, literalTask, caseId \}\)/);
+  assert.match(steward, /pendingTask\?\.projectId === projectId \? pendingTask\.caseId \|\| "" : ""/);
+  assert.match(steward, /\.\.\.\(caseId \? \{ caseId \} : \{\}\)/);
+  assert.match(steward, /<option value="">Project scope only<\/option>/);
   for (const expected of [
     "Atlas Steward",
     "Keep this project coherent",
@@ -2316,7 +2370,7 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   assert.doesNotMatch(session, /authorization:\s*`Bearer/);
 });
 
-test("Home carries the exact literal task to Steward through project-scoped memory, not the URL", async () => {
+test("Home carries the exact literal task and optional case scope through project-scoped memory, not the URL", async () => {
   const [home, steward, taskContext] = await Promise.all([
     readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
@@ -2325,7 +2379,7 @@ test("Home carries the exact literal task to Steward through project-scoped memo
   assert.match(home, /carryTask\(projectId, stewardTask\)/);
   assert.match(home, /router\.push\(`\/projects\/\$\{encodeURIComponent\(projectId\)\}\/ask`\)/);
   assert.doesNotMatch(home, /URLSearchParams|[?&]task=/);
-  assert.match(taskContext, /setPendingTask\(\{ projectId, literalTask \}\)/);
+  assert.match(taskContext, /setPendingTask\(\{ projectId, literalTask, caseId \}\)/);
   assert.doesNotMatch(taskContext, /localStorage|sessionStorage/);
   assert.match(steward, /pendingTask\?\.projectId === projectId \? pendingTask\.literalTask : ""/);
   assert.match(steward, /clearTask\(projectId\)/);

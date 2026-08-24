@@ -402,6 +402,7 @@ async function view(db: D1Database, projectId: string, row: Row) {
     id: row.id,
     projectId: row.project_id,
     conversationId: row.conversation_id,
+    caseId: row.case_id,
     conversationTitle: conversation?.title || "Transferred room",
     sourceImportId: row.source_import_id,
     sourceFingerprint: row.source_fingerprint,

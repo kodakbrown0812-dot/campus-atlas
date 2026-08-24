@@ -5,11 +5,12 @@ import { createContext, ReactNode, useContext, useMemo, useState } from "react";
 type PendingStewardTask = {
   projectId: string;
   literalTask: string;
+  caseId: string | null;
 };
 
 type StewardTaskContextValue = {
   pendingTask: PendingStewardTask | null;
-  carryTask(projectId: string, literalTask: string): void;
+  carryTask(projectId: string, literalTask: string, caseId?: string | null): void;
   clearTask(projectId: string): void;
 };
 
@@ -19,8 +20,8 @@ export function StewardTaskProvider({ children }: { children: ReactNode }) {
   const [pendingTask, setPendingTask] = useState<PendingStewardTask | null>(null);
   const value = useMemo<StewardTaskContextValue>(() => ({
     pendingTask,
-    carryTask(projectId, literalTask) {
-      setPendingTask({ projectId, literalTask });
+    carryTask(projectId, literalTask, caseId = null) {
+      setPendingTask({ projectId, literalTask, caseId });
     },
     clearTask(projectId) {
       setPendingTask((current) => current?.projectId === projectId ? null : current);

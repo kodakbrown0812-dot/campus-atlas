@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useStewardTask } from "../../../components/steward-task";
 import { useWriteSession } from "../../../components/write-session";
 import styles from "./work.module.css";
 
@@ -33,6 +34,7 @@ type Transfer = {
   id: string;
   projectId: string;
   conversationId: string;
+  caseId: string | null;
   conversationTitle: string;
   status: string;
   stage: string;
@@ -67,6 +69,7 @@ export default function TransferRoom({
   onCanonicalChange: () => void;
 }) {
   const { session, authorizationHeaders } = useWriteSession();
+  const { carryTask } = useStewardTask();
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [current, setCurrent] = useState<Transfer | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">("loading");
@@ -330,7 +333,12 @@ export default function TransferRoom({
           {current.stage === "ready_for_steward" && (
             <div className={styles.transferReady}>
               <strong>Accepted project state is available to Atlas Steward.</strong>
-              <Link href={`/projects/${encodeURIComponent(projectId)}/ask`}>Prepare context in Steward</Link>
+              <Link
+                href={`/projects/${encodeURIComponent(projectId)}/ask`}
+                onClick={() => carryTask(projectId, "", current.caseId)}
+              >
+                Prepare context in Steward
+              </Link>
             </div>
           )}
           {["blocked", "failed"].includes(current.stage) && (
