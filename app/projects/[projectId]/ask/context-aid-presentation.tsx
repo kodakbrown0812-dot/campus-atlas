@@ -19,10 +19,10 @@ function selectContextAid() {
 
 export default function ContextAidPresentation({
   capsule,
-  onPrepareFullTransfer,
+  literalTask,
 }: {
   capsule: TargetedContextCapsule;
-  onPrepareFullTransfer(): void;
+  literalTask: string;
 }) {
   const [copyState, setCopyState] = useState<CopyState>("idle");
 
@@ -40,25 +40,24 @@ export default function ContextAidPresentation({
     <section className={styles.contextAidPanel} aria-labelledby="context-aid-title">
       <header className={styles.readyHeader}>
         <div>
-          <span>Context aid ready</span>
-          <h2 id="context-aid-title">Aid this room</h2>
-          <p>A targeted governed context capsule is ready for the conversation already in progress.</p>
+          <span>Compact context</span>
+          <h2 id="context-aid-title">
+            {capsule.includedItems === 1 ? "One project decision matters here" : `${capsule.includedItems} project decisions matter here`}
+          </h2>
+          <p>Atlas prepared the governed context that applies to this task.</p>
         </div>
-        <dl>
-          <div><dt>Included items</dt><dd>{capsule.includedItems}</dd></div>
-          <div><dt>Estimated tokens</dt><dd>{capsule.estimatedTokens}</dd></div>
-        </dl>
       </header>
+
+      <div className={styles.resultTask}>
+        <span>Your task</span>
+        <p>{literalTask}</p>
+      </div>
 
       <pre className={styles.compiledContent} id="context-aid-content" tabIndex={0}>{capsule.compiledContent}</pre>
 
-      <article className={`${styles.contextAidDestination} ${styles.primaryDestination}`}>
-        <div>
-          <h3>Aid this room</h3>
-          <p>Copy the targeted context into the conversation already in progress.</p>
-        </div>
+      <div className={styles.contextAidDestination}>
         <button onClick={() => void copy()} type="button">Copy for this room</button>
-      </article>
+      </div>
 
       {copyState === "copied" ? (
         <div className={styles.copySuccess} role="status">
@@ -74,20 +73,7 @@ export default function ContextAidPresentation({
         </div>
       ) : null}
 
-      <details className={styles.whyDisclosure}>
-        <summary>Why Atlas chose this</summary>
-        <dl className={styles.capsuleEvidence}>
-          <div><dt>Treatment</dt><dd>Used</dd></div>
-          <div><dt>Source</dt><dd>{capsule.sourceType} · {capsule.sourceId}</dd></div>
-          <div><dt>Authority</dt><dd>{capsule.authority}</dd></div>
-          <div><dt>Provenance</dt><dd>{capsule.sourceVersionId}</dd></div>
-          <div><dt>Reason</dt><dd>{capsule.reason}</dd></div>
-        </dl>
-      </details>
-
-      <button className={styles.fullTransferAction} onClick={onPrepareFullTransfer} type="button">
-        Prepare full room transfer
-      </button>
+      <p className={styles.resultExplanation}>Atlas kept this preparation compact, and no packet or receipt was created.</p>
     </section>
   );
 }

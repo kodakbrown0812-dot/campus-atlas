@@ -16,11 +16,7 @@
 }
 
 .header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 28px;
-  margin: 22px 0 24px;
+  margin: 18px 0 24px;
 }
 
 .header > div > span,
@@ -37,7 +33,7 @@
 
 .header h1 {
   margin: 5px 0 7px;
-  font-size: clamp(34px, 5vw, 58px);
+  font-size: clamp(32px, 4vw, 48px);
   letter-spacing: -.045em;
 }
 
@@ -66,7 +62,7 @@
 }
 
 .workspace {
-  width: min(940px, 100%);
+  width: min(900px, 100%);
   margin: 0 auto;
 }
 
@@ -90,26 +86,7 @@
 }
 
 .contextAidDestination {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
   margin-top: 14px;
-  padding: 16px;
-  border: 1px solid rgba(77, 124, 254, .4);
-  border-radius: 12px;
-  background: rgba(77, 124, 254, .07);
-}
-
-.contextAidDestination h3,
-.contextAidDestination p {
-  margin: 0;
-}
-
-.contextAidDestination p {
-  margin-top: 5px;
-  color: #879ab6;
-  font-size: 11px;
 }
 
 .contextAidDestination button,
@@ -122,6 +99,10 @@
   background: linear-gradient(145deg, #466ed8, #304fa7);
   cursor: pointer;
   white-space: nowrap;
+}
+
+.contextAidDestination button {
+  min-width: 190px;
 }
 
 .capsuleEvidence {
@@ -151,11 +132,36 @@
 }
 
 .fullTransferAction {
-  display: block;
-  margin: 14px auto 0;
+  margin: 0;
   border-color: rgba(137, 160, 197, .22);
   color: #9fb2d1;
   background: transparent;
+}
+
+.formHeader {
+  margin-bottom: 20px;
+}
+
+.formHeader span,
+.resultTask span {
+  color: #829ff0;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.formHeader h2 {
+  margin: 6px 0 8px;
+  font-size: clamp(25px, 4vw, 36px);
+  letter-spacing: -.035em;
+}
+
+.formHeader p {
+  max-width: 620px;
+  margin: 0;
+  color: #879bb9;
+  line-height: 1.6;
 }
 
 .stewardForm > .field textarea {
@@ -167,7 +173,8 @@
 .whyDisclosure,
 .inspectLinks,
 .sendAnotherWay,
-.historyDisclosure {
+.historyDisclosure,
+.technicalDetails {
   margin-top: 15px;
   padding: 12px 14px;
   border: 1px solid rgba(137, 160, 197, .15);
@@ -180,7 +187,8 @@
 .whyDisclosure > summary,
 .inspectLinks > summary,
 .sendAnotherWay > summary,
-.historyDisclosure > summary {
+.historyDisclosure > summary,
+.technicalDetails > summary {
   color: #b8c6da;
   font-size: 11px;
   font-weight: 650;
@@ -224,7 +232,7 @@
 
 .preparingState,
 .outcomeState {
-  text-align: center;
+  text-align: left;
 }
 
 .preparingState > span,
@@ -263,6 +271,10 @@
   animation: stewardPulse 1.5s ease-in-out infinite;
 }
 
+.preparingState {
+  text-align: center;
+}
+
 @keyframes stewardPulse {
   0%, 100% { opacity: .35; transform: scaleX(.78); }
   50% { opacity: 1; transform: scaleX(1); }
@@ -275,6 +287,20 @@
   color: #c8d4e7;
   background: rgba(77, 124, 254, .05);
   text-align: left;
+}
+
+.resultTask {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid rgba(137, 160, 197, .13);
+  border-radius: 10px;
+  background: rgba(4, 16, 33, .36);
+}
+
+.resultTask p {
+  margin: 5px 0 0;
+  color: #c7d3e5;
+  line-height: 1.55;
 }
 
 .outcomeState > strong {
@@ -309,7 +335,7 @@
 
 .textAction {
   display: block;
-  margin: 18px auto 0;
+  margin: 18px 0 0;
   border: 0;
   color: #91a9da;
   background: transparent;
@@ -321,21 +347,11 @@
 }
 
 .readyHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
+  display: block;
 }
 
 .readyHeader p {
   max-width: 650px;
-}
-
-.projectName {
-  display: block;
-  margin: -2px 0 8px;
-  color: #91a7c8;
-  font-size: 10px;
 }
 
 .readyHeader > dl {
@@ -381,7 +397,7 @@
 
 .compiledContent {
   width: 100%;
-  max-height: 54vh;
+  max-height: 58vh;
   margin: 18px 0 0;
   padding: 18px;
   overflow: auto;
@@ -492,6 +508,34 @@
   margin-top: 10px;
 }
 
+.advancedLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.advancedLinks a {
+  padding: 7px 9px;
+  border: 1px solid rgba(137, 160, 197, .14);
+  border-radius: 8px;
+  color: #9fb3d4;
+  font-size: 9px;
+  text-decoration: none;
+}
+
+.continuationActions {
+  margin-top: 20px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(137, 160, 197, .14);
+}
+
+.continuationActions > h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
 .inspectLinks a {
   padding: 7px 9px;
   border: 1px solid rgba(137, 160, 197, .14);
@@ -523,9 +567,9 @@
   background: rgba(77, 124, 254, .07);
 }
 
-.destinationGrid h3 {
-  margin: 0;
-  font-size: 18px;
+.destinationGrid article > strong {
+  display: block;
+  font-size: 16px;
 }
 
 .destinationGrid p {
@@ -560,6 +604,67 @@
   font-size: 10px;
 }
 
+.resultExplanation,
+.copyNote,
+.serverExplanation {
+  margin: 12px 0 0;
+  color: #879ab6;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.copyNote {
+  color: #a4dbd6;
+}
+
+.resultMetadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0 0;
+}
+
+.resultMetadata div {
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid rgba(137, 160, 197, .12);
+  border-radius: 8px;
+}
+
+.resultMetadata dt,
+.resultMetadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.resultMetadata dt {
+  color: #7187a7;
+  font-size: 8px;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.resultMetadata dd {
+  margin-top: 4px;
+  color: #b8c5d9;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.missingState {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(244, 184, 96, .25);
+  border-radius: 10px;
+  color: #d7b978;
+  background: rgba(244, 184, 96, .04);
+}
+
+.missingState ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
 .copyFailure {
   border-color: rgba(245, 138, 168, .28);
   color: #efafc0;
@@ -576,6 +681,18 @@
   grid-template-columns: 1fr auto;
   gap: 8px;
   margin-top: 12px;
+}
+
+.providerSection {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(137, 160, 197, .12);
+}
+
+.providerSection h3 {
+  margin: 0;
+  color: #c7d3e5;
+  font-size: 12px;
 }
 
 .providerControls label {
@@ -1371,7 +1488,6 @@
   }
 
   .header {
-    display: block;
     margin-top: 15px;
   }
 
@@ -1379,15 +1495,55 @@
     font-size: 36px;
   }
 
-  .header > b {
-    display: inline-block;
-    margin-top: 10px;
-  }
-
   .readyHeader,
   .treatmentSummary > section > header {
     display: grid;
     gap: 7px;
+  }
+
+  .readyPanel,
+  .contextAidPanel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .readyPanel > .resultTask,
+  .contextAidPanel > .resultTask {
+    order: 1;
+    margin: 0 0 14px;
+  }
+
+  .readyPanel > .readyHeader,
+  .contextAidPanel > .readyHeader {
+    order: 2;
+  }
+
+  .uncertaintyNotice {
+    order: 3;
+  }
+
+  .readyPanel > .compiledContent,
+  .contextAidPanel > .compiledContent {
+    order: 4;
+    max-height: 180px;
+  }
+
+  .continuationActions,
+  .contextAidDestination {
+    order: 5;
+  }
+
+  .contextAidPanel > .copySuccess,
+  .contextAidPanel > .copyFailure {
+    order: 6;
+  }
+
+  .contextAidPanel > .resultExplanation {
+    order: 7;
+  }
+
+  .readyPanel > .technicalDetails {
+    order: 6;
   }
 
   .readyHeader > dl {
@@ -1404,6 +1560,7 @@
 
   .destinationGrid,
   .capsuleEvidence,
+  .resultMetadata,
   .sourceItem dl,
   .handoffReceipt dl {
     grid-template-columns: 1fr;
@@ -1413,12 +1570,12 @@
     grid-column: 1;
   }
 
-  .contextAidDestination {
-    display: grid;
-  }
-
   .contextAidDestination button {
     width: 100%;
+  }
+
+  .continuationActions {
+    margin-top: 18px;
   }
 
   .providerControls {

@@ -20,22 +20,8 @@ function selectPreparedContext() {
 
 export default function HandoffPresentation({
   context,
-  handoff,
-  models,
-  selectedModel,
-  canWrite,
-  busy,
-  onModelChange,
-  onSend,
 }: {
   context: PreparedContext;
-  handoff: HandoffResult | null;
-  models: ReceivingModel[];
-  selectedModel: string;
-  canWrite: boolean;
-  busy: boolean;
-  onModelChange(value: string): void;
-  onSend(): void;
 }) {
   const [copyState, setCopyState] = useState<CopyState>(null);
 
@@ -50,16 +36,17 @@ export default function HandoffPresentation({
   }
 
   return (
-    <section className={styles.destinationSection} aria-label="Prepared context destinations">
+    <section className={styles.continuationActions} aria-label="Prepared context destinations">
+      <h3>Continue with this context</h3>
       <div className={styles.destinationGrid}>
         <article className={styles.primaryDestination}>
-          <h3>Aid this room</h3>
-          <p>Copy the prepared context into the conversation already in progress.</p>
+          <strong>This room</strong>
+          <p>Paste the prepared context into the conversation already in progress.</p>
           <button onClick={() => void copy("aid")} type="button">Copy for this room</button>
         </article>
         <article>
-          <h3>Transfer to a new room</h3>
-          <p>Copy the same governed project state into a fresh conversation.</p>
+          <strong>A new room</strong>
+          <p>Start a fresh conversation with the same prepared project state.</p>
           <button onClick={() => void copy("transfer")} type="button">Copy for a new room</button>
         </article>
       </div>
@@ -78,41 +65,63 @@ export default function HandoffPresentation({
         </div>
       ) : null}
 
-      <details className={styles.sendAnotherWay}>
-        <summary>Send another way</summary>
-        <div className={styles.providerControls}>
-          <label htmlFor="receiving-model">Supported production receiving model</label>
-          <select
-            id="receiving-model"
-            onChange={(event) => onModelChange(event.target.value)}
-            value={selectedModel}
-          >
-            {models.map((model) => (
-              <option key={`${model.provider}:${model.model}`} value={model.model}>
-                {model.provider} · {model.model}
-              </option>
-            ))}
-          </select>
-          <button disabled={!canWrite || busy || !models.length} onClick={onSend} type="button">
-            {busy ? "Sending immutable packet…" : "Send exact saved packet"}
-          </button>
-          {!models.length ? <p>No supported production provider is configured.</p> : null}
-        </div>
+      <p className={styles.resultExplanation}>Both actions copy the identical context returned by Atlas.</p>
+    </section>
+  );
+}
 
-        {handoff ? (
-          <details className={styles.handoffReceipt} open={handoff.handoff.status === "failed"}>
-            <summary>Provider handoff and receipt · {handoff.handoff.status}</summary>
-            <dl>
-              <div><dt>Handoff</dt><dd>{handoff.handoff.id}</dd></div>
-              <div><dt>Provider / model</dt><dd>{handoff.handoff.provider} · {handoff.handoff.model}</dd></div>
-              <div><dt>Packet</dt><dd>{handoff.handoff.packetId}</dd></div>
-              <div><dt>Answer</dt><dd>{handoff.answer?.id || "No answer exists"}</dd></div>
-            </dl>
-            {handoff.handoff.failureReason ? <p role="alert">{handoff.handoff.failureReason}</p> : null}
-            {handoff.answer ? <p>{handoff.answer.answerText}</p> : null}
-          </details>
-        ) : null}
-      </details>
+export function HandoffAdvanced({
+  busy,
+  canWrite,
+  handoff,
+  models,
+  onModelChange,
+  onSend,
+  selectedModel,
+}: {
+  busy: boolean;
+  canWrite: boolean;
+  handoff: HandoffResult | null;
+  models: ReceivingModel[];
+  onModelChange(value: string): void;
+  onSend(): void;
+  selectedModel: string;
+}) {
+  return (
+    <section className={styles.providerSection} aria-label="Provider handoff controls">
+      <h3>Send another way</h3>
+      <div className={styles.providerControls}>
+        <label htmlFor="receiving-model">Supported production receiving model</label>
+        <select
+          id="receiving-model"
+          onChange={(event) => onModelChange(event.target.value)}
+          value={selectedModel}
+        >
+          {models.map((model) => (
+            <option key={`${model.provider}:${model.model}`} value={model.model}>
+              {model.provider} · {model.model}
+            </option>
+          ))}
+        </select>
+        <button disabled={!canWrite || busy || !models.length} onClick={onSend} type="button">
+          {busy ? "Sending immutable packet…" : "Send exact saved packet"}
+        </button>
+        {!models.length ? <p>No supported production provider is configured.</p> : null}
+      </div>
+
+      {handoff ? (
+        <details className={styles.handoffReceipt} open={handoff.handoff.status === "failed"}>
+          <summary>Provider handoff and receipt · {handoff.handoff.status}</summary>
+          <dl>
+            <div><dt>Handoff</dt><dd>{handoff.handoff.id}</dd></div>
+            <div><dt>Provider / model</dt><dd>{handoff.handoff.provider} · {handoff.handoff.model}</dd></div>
+            <div><dt>Packet</dt><dd>{handoff.handoff.packetId}</dd></div>
+            <div><dt>Answer</dt><dd>{handoff.answer?.id || "No answer exists"}</dd></div>
+          </dl>
+          {handoff.handoff.failureReason ? <p role="alert">{handoff.handoff.failureReason}</p> : null}
+          {handoff.answer ? <p>{handoff.answer.answerText}</p> : null}
+        </details>
+      ) : null}
     </section>
   );
 }

@@ -16,12 +16,10 @@ export default async function AskPage({
         </Link>
         <header className={styles.header}>
           <div>
-            <span>Project context steward</span>
-            <h1>Atlas Steward</h1>
-            <p>Restore the project context this work needs.</p>
-            <small>Prepare it once, then use it here or carry it into a new room.</small>
+            <span>Steward</span>
+            <h1>Continue with Atlas</h1>
+            <p>Tell Atlas what you are continuing. It will prepare only the project context that matters.</p>
           </div>
-          <b>Active project · {projectId}</b>
         </header>
         <ReconstructionWorkspace key={projectId} projectId={projectId} />
       </div>

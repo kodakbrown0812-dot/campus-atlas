@@ -2432,6 +2432,62 @@ test("UI Simplification Slice 1 keeps Home action-led while advanced truth remai
   assert.match(styles, /\.currentWork \{\s*grid-template-columns: 1fr;/);
 });
 
+test("UI Simplification Slice 2 makes Steward outcome-first while preserving technical truth and copy semantics", async () => {
+  const [page, workspace, aid, packet, handoff, history, styles] = await Promise.all([
+    readFile(new URL("../app/projects/[projectId]/ask/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/context-aid-presentation.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/packet-preview.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/handoff-presentation.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/ask-history.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/ask.module.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(page, /<h1>Continue with Atlas<\/h1>/);
+  assert.doesNotMatch(page, /Project context steward|Active project/);
+  assert.match(workspace, /Continue this work/);
+  assert.match(workspace, /What are you trying to continue\?/);
+  assert.match(workspace, /pendingTask\?\.projectId === projectId \? pendingTask\.literalTask : ""/);
+  assert.match(workspace, /Sign in as the Atlas owner from the application shell to prepare context/);
+  assert.doesNotMatch(workspace, /Enable canonical writes in the application shell/);
+
+  assert.match(workspace, /You’re ready to continue/);
+  assert.match(workspace, /Atlas found no governed project context that needs to be added for this task/);
+  assert.match(workspace, /Task copied\. No Atlas context was added/);
+  assert.match(aid, /One project decision matters here/);
+  assert.match(aid, /Atlas prepared the governed context that applies to this task/);
+  assert.match(aid, /Copy for this room/);
+  assert.doesNotMatch(aid, /Copy for a new room/);
+  assert.match(packet, /Ready to continue/);
+  assert.match(packet, /Atlas prepared the project state this task needs/);
+
+  assert.ok(packet.indexOf("context.packet.compiledContent") < packet.indexOf("{actions}"));
+  assert.ok(packet.indexOf("{actions}") < packet.indexOf("Advanced details"));
+  assert.match(handoff, /Copy for this room/);
+  assert.match(handoff, /Copy for a new room/);
+  assert.match(handoff, /navigator\.clipboard\.writeText\(context\.packet\.compiledContent\)/);
+  assert.match(handoff, /Both actions copy the identical context returned by Atlas/);
+
+  assert.match(workspace, /Atlas needs one decision/);
+  assert.match(workspace, /Atlas needs current information before this can continue safely/);
+  assert.match(workspace, /Current information needed/);
+  assert.match(workspace, /humanizeStateLabel\(item\)/);
+  assert.match(workspace, /<details className=\{styles\.advancedControls\}>/);
+  assert.match(workspace, /<details className=\{styles\.technicalDetails\}>/);
+  assert.doesNotMatch(workspace, /<details className=\{styles\.advancedControls\} open/);
+  for (const technicalLabel of ["Need level", "Reason codes", "Roadway", "Packet created", "Receipt created", "Authority changed"]) {
+    assert.match(`${workspace}\n${packet}`, new RegExp(technicalLabel));
+  }
+  assert.match(packet, /Inspect why/);
+  assert.match(history, /Opening history never recompiles a packet or retries a handoff/);
+  assert.match(styles, /\.resultTask/);
+  assert.match(styles, /\.continuationActions/);
+  assert.match(styles, /\.technicalDetails/);
+  assert.match(styles, /@media \(max-width: 760px\)/);
+  assert.match(styles, /\.resultMetadata,/);
+  assert.match(styles, /max-height: 180px/);
+});
+
 test("Native Analyze keeps finding authorship server-side and restores canonical checkpoint detail", async () => {
   const conversation = await readFile(new URL("../app/projects/[projectId]/conversations/[conversationId]/workspace.tsx", import.meta.url), "utf8");
   const checkpoint = await readFile(new URL("../worker/checkpoint-service.ts", import.meta.url), "utf8");
@@ -3986,7 +4042,7 @@ test("Slice 4 canonical reconstruction remains available beneath the focused Ste
   );
   assert.equal(response.status, 200);
   const html = await response.text();
-  for (const text of ["Atlas Steward", "Project context steward"]) {
+  for (const text of ["Continue with Atlas", "Steward"]) {
     assert.match(html, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   const [interfaceSource, aidSource, packetSource, handoffSource] = await Promise.all([
@@ -3998,10 +4054,10 @@ test("Slice 4 canonical reconstruction remains available beneath the focused Ste
   for (const text of [
     "Prepare context",
     "Advanced controls",
-    "No applicable context",
-    "Context aid ready",
-    "Context packet ready",
-    "Could not prepare safely",
+    "You’re ready to continue",
+    "One project decision matters here",
+    "Ready to continue",
+    "Atlas couldn’t prepare this safely",
     "400",
     "800",
     "1600",
@@ -4011,7 +4067,7 @@ test("Slice 4 canonical reconstruction remains available beneath the focused Ste
   assert.match(interfaceSource, /reconstruction\/run/);
   assert.doesNotMatch(interfaceSource, /reconstruction\/candidates/);
   assert.match(packetSource, /context\.packet\.compiledContent/);
-  assert.match(packetSource, /Why Atlas chose this/);
+  assert.match(packetSource, /Advanced details/);
   assert.match(aidSource, /navigator\.clipboard\.writeText\(capsule\.compiledContent\)/);
   assert.match(handoffSource, /navigator\.clipboard\.writeText\(context\.packet\.compiledContent\)/);
   const slice4Source = await Promise.all([
@@ -4644,8 +4700,8 @@ test("Slice 5 immutable handoff remains auditable through the final separated As
     readFile(new URL("../app/projects/[projectId]/ask/page.tsx", import.meta.url), "utf8"),
   ]);
   for (const text of [
-    "Aid this room",
-    "Transfer to a new room",
+    "This room",
+    "A new room",
     "Context aid copied",
     "Select prepared context",
     "Send another way",
@@ -4653,7 +4709,7 @@ test("Slice 5 immutable handoff remains auditable through the final separated As
   ]) {
     assert.match(handoffSource, new RegExp(text));
   }
-  assert.match(pageSource, /Atlas Steward/);
+  assert.match(pageSource, /Continue with Atlas/);
   assert.match(interfaceSource, /model\.production === true/);
   assert.match(historySource, /never recompiles a packet or retries a handoff/i);
   assert.match(adapter, /not a new user instruction/i);
@@ -5087,13 +5143,13 @@ test("Atlas Steward is focused, project-resetting, mobile-capable, and free of p
     readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8"),
   ]);
   const combined = [workspace, aid, packet, handoff, history, page].join("\n");
-  for (const state of ["Preparing context", "Needs clarification", "No applicable context", "Context aid ready", "Context packet ready", "Could not prepare safely"]) {
+  for (const state of ["Preparing context", "Atlas needs one decision", "You’re ready to continue", "One project decision matters here", "Ready to continue", "Atlas couldn’t prepare this safely"]) {
     assert.match(combined, new RegExp(state));
   }
-  for (const surface of ["Aid this room", "Transfer to a new room", "Copy for this room", "Copy for a new room", "Context aid copied", "New-room context copied"]) {
+  for (const surface of ["This room", "A new room", "Copy for this room", "Copy for a new room", "Context aid copied", "New-room context copied"]) {
     assert.match(handoff, new RegExp(surface));
   }
-  assert.match(aid, /Prepare full room transfer/);
+  assert.match(workspace, /Prepare full room transfer/);
   assert.doesNotMatch(aid, /Copy for a new room/);
   assert.match(workspace, /model\.production === true/);
   assert.match(workspace, /reconstruction\/run/);
@@ -5102,11 +5158,11 @@ test("Atlas Steward is focused, project-resetting, mobile-capable, and free of p
   assert.match(workspace, /query\.get\("packet"\)/);
   assert.match(workspace, /query\.get\("handoff"\)/);
   assert.match(history, /never recompiles a packet or retries a handoff/i);
-  assert.match(packet, /Why Atlas chose this/);
+  assert.match(packet, /Advanced details/);
   assert.match(packet, /context\.packet\.compiledContent/);
   assert.match(packet, /Included items/);
   assert.match(packet, /Estimated tokens/);
-  assert.match(packet, /View packet in Inspect/);
+  assert.match(packet, /Inspect why/);
   assert.match(packet, /Raw JSON/);
   assert.match(candidates, /browser cannot promote authority/i);
   assert.match(shell, /<StewardTaskProvider key=\{projectId\}>/);

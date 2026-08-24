@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useStewardTask } from "../../../components/steward-task";
 import { useWriteSession } from "../../../components/write-session";
@@ -14,19 +15,23 @@ import {
   ReconstructionRunResult,
   Roadway,
 } from "./ask-types";
-import HandoffPresentation from "./handoff-presentation";
+import HandoffPresentation, { HandoffAdvanced } from "./handoff-presentation";
 import ContextAidPresentation from "./context-aid-presentation";
 import PacketPreview from "./packet-preview";
 import styles from "./ask.module.css";
 
 type CaseChoice = { id: string; objective: string; status: string };
-type ProjectChoice = { id: string; name: string };
 type ViewState = "idle" | "preparing" | "clarification" | "not_needed" | "light" | "ready" | "failure";
 
 const budgets = [400, 800, 1600] as const;
 
 function endpoint(projectId: string, suffix: string) {
   return `/api/v1/projects/${encodeURIComponent(projectId)}/${suffix}`;
+}
+
+function humanizeStateLabel(value: string) {
+  const words = value.replaceAll("_", " ").trim();
+  return words ? `${words[0].toUpperCase()}${words.slice(1)}` : value;
 }
 
 function preparedFromPacket(projectId: string, result: PacketResult): PreparedContext {
@@ -45,11 +50,56 @@ function preparedFromPacket(projectId: string, result: PacketResult): PreparedCo
   };
 }
 
+function RunTechnicalDetails({
+  onPrepareFullTransfer,
+  projectId,
+  run,
+}: {
+  onPrepareFullTransfer?: () => void;
+  projectId: string;
+  run: ReconstructionRunResult;
+}) {
+  const roadway = run.roadway.primary?.name || run.roadway.name || run.roadway.id || "Not selected";
+  return (
+    <details className={styles.technicalDetails}>
+      <summary>Advanced details</summary>
+      <dl className={styles.resultMetadata}>
+        <div><dt>Server status</dt><dd>{run.status}</dd></div>
+        <div><dt>Need level</dt><dd>{run.need.level}</dd></div>
+        <div><dt>Reason codes</dt><dd>{run.need.reasonCodes.join(", ") || "None"}</dd></div>
+        <div><dt>Case scope</dt><dd>{run.caseId || "Project scope"}</dd></div>
+        <div><dt>Roadway</dt><dd>{roadway}</dd></div>
+        <div><dt>Packet created</dt><dd>{run.effects.packetCreated ? "Yes" : "No"}</dd></div>
+        <div><dt>Receipt created</dt><dd>{run.effects.receiptCreated ? "Yes" : "No"}</dd></div>
+        <div><dt>Authority changed</dt><dd>{run.effects.authorityChanged ? "Yes" : "No"}</dd></div>
+      </dl>
+      {run.capsule ? (
+        <dl className={styles.resultMetadata}>
+          <div><dt>Included items</dt><dd>{run.capsule.includedItems}</dd></div>
+          <div><dt>Estimated tokens</dt><dd>{run.capsule.estimatedTokens}</dd></div>
+          <div><dt>Source</dt><dd>{run.capsule.sourceType} · {run.capsule.sourceId}</dd></div>
+          <div><dt>Authority</dt><dd>{run.capsule.authority}</dd></div>
+          <div><dt>Provenance</dt><dd>{run.capsule.sourceVersionId}</dd></div>
+          <div><dt>Treatment</dt><dd>{run.capsule.treatment}</dd></div>
+        </dl>
+      ) : null}
+      <p className={styles.serverExplanation}><strong>Server explanation:</strong> {run.need.explanation}</p>
+      <div className={styles.advancedLinks}>
+        <Link href={`/projects/${encodeURIComponent(projectId)}/inspect`}>Inspect why</Link>
+        {onPrepareFullTransfer ? (
+          <button className={styles.fullTransferAction} onClick={onPrepareFullTransfer} type="button">
+            Prepare full room transfer
+          </button>
+        ) : null}
+      </div>
+    </details>
+  );
+}
+
 export default function ReconstructionWorkspace({ projectId }: { projectId: string }) {
   const { session, authorizationHeaders } = useWriteSession();
   const { pendingTask, clearTask } = useStewardTask();
   const [roadways, setRoadways] = useState<Roadway[]>([]);
-  const [projectName, setProjectName] = useState(projectId);
   const [cases, setCases] = useState<CaseChoice[]>([]);
   const [models, setModels] = useState<ReceivingModel[]>([]);
   const [packets, setPackets] = useState<PacketSummary[]>([]);
@@ -73,11 +123,11 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
   const [selectedHandoffId, setSelectedHandoffId] = useState<string | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [error, setError] = useState("");
+  const [taskCopyStatus, setTaskCopyStatus] = useState<"idle" | "copied" | "failed">("idle");
 
   useEffect(() => {
     let active = true;
     Promise.all([
-      fetch("/api/v1/projects", { cache: "no-store" }),
       fetch(endpoint(projectId, "roadways"), { cache: "no-store" }),
       fetch(endpoint(projectId, "cases"), { cache: "no-store" }),
       fetch(endpoint(projectId, "handoffs/models"), { cache: "no-store" }),
@@ -90,15 +140,13 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
       })
       .then((values) => {
         if (!active) return;
-        const [projectValue, roadwayValue, caseValue, modelValue, packetValue, handoffValue] = values as [
-          { projects: ProjectChoice[] },
+        const [roadwayValue, caseValue, modelValue, packetValue, handoffValue] = values as [
           { roadways: Roadway[] },
           { cases: CaseChoice[] },
           { models: ReceivingModel[] },
           { packets: PacketSummary[] },
           { handoffs: HandoffSummary[] },
         ];
-        setProjectName(projectValue.projects.find((project) => project.id === projectId)?.name || projectId);
         const productionModels = modelValue.models.filter((model) => model.production === true);
         setRoadways(roadwayValue.roadways);
         setCases(caseValue.cases);
@@ -324,19 +372,29 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
     setSelectedPacketId(null);
     setSelectedHandoffId(null);
     setFullTransferRequested(false);
+    setTaskCopyStatus("idle");
     setView("idle");
     clearHistoryUrl();
   }
 
+  async function copyTask() {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
+      await navigator.clipboard.writeText(task);
+      setTaskCopyStatus("copied");
+    } catch {
+      setTaskCopyStatus("failed");
+    }
+  }
+
   if (status === "loading") {
-    return <section className={styles.loading}>Loading project scope and Steward controls…</section>;
+    return <section className={styles.loading}>Opening Steward…</section>;
   }
   if (status === "unavailable") {
     return (
       <section className={styles.failureState} role="alert">
-        <strong>Could not prepare safely</strong>
+        <strong>Steward is unavailable</strong>
         <p>{error}</p>
-        <p>No fixture, seeded packet, or hidden fallback was substituted.</p>
       </section>
     );
   }
@@ -396,8 +454,13 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
     <div className={styles.workspace}>
       {view === "idle" ? (
         <form className={styles.stewardForm} onSubmit={(event) => void prepareContext(event)}>
+          <header className={styles.formHeader}>
+            <span>Continue this work</span>
+            <h2>What are you trying to continue?</h2>
+            <p>Atlas will decide whether prior project context matters and prepare only what you need.</p>
+          </header>
           <label className={styles.field} htmlFor="steward-task">
-            What are you trying to continue?
+            Your task
             <textarea
               id="steward-task"
               onChange={(event) => setTask(event.target.value)}
@@ -406,7 +469,7 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
             />
           </label>
           {advancedControls}
-          {!canWrite ? <p className={styles.readOnly}>Enable canonical writes in the application shell before preparing context.</p> : null}
+          {!canWrite ? <p className={styles.readOnly}>Sign in as the Atlas owner from the application shell to prepare context.</p> : null}
           <button className={styles.primaryButton} disabled={!canWrite || !task.trim()} type="submit">Prepare context</button>
         </form>
       ) : null}
@@ -414,17 +477,17 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
       {view === "preparing" ? (
         <section className={styles.preparingState} role="status">
           <span>Preparing context</span>
-          <h2>Finding and governing the prior work this task needs.</h2>
-          <p>Atlas is checking relevance, authority, scope, freshness, and packet safety.</p>
+          <h2>Atlas is preparing what this task needs.</h2>
+          <p>Checking the current project state and what should carry forward.</p>
           <i aria-hidden="true" />
         </section>
       ) : null}
 
       {view === "clarification" && run ? (
         <section className={styles.outcomeState}>
-          <span>Needs clarification</span>
-          <h2>One material choice is required.</h2>
-          <blockquote>{run.literalTask}</blockquote>
+          <span>Your decision</span>
+          <h2>Atlas needs one decision</h2>
+          <div className={styles.resultTask}><span>Your task</span><p>{run.literalTask}</p></div>
           <p>{run.need.explanation}</p>
           <div className={styles.clarificationChoices}>
             {(run.roadway.candidates || []).map((candidate) => (
@@ -434,16 +497,21 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
             ))}
           </div>
           <button className={styles.textAction} onClick={resetPreparation} type="button">Return to task</button>
+          <RunTechnicalDetails projectId={projectId} run={run} />
         </section>
       ) : null}
 
       {view === "not_needed" && run ? (
         <section className={styles.outcomeState}>
-          <span>No applicable context</span>
-          <h2>Atlas found no applicable governed context to supply.</h2>
-          <p>{run.need.explanation}</p>
-          <strong>No capsule, packet, or packet receipt was created.</strong>
+          <span>No added context</span>
+          <h2>You’re ready to continue</h2>
+          <p>Atlas found no governed project context that needs to be added for this task.</p>
+          <div className={styles.resultTask}><span>Your task</span><p>{run.literalTask}</p></div>
+          <button className={styles.primaryButton} onClick={() => void copyTask()} type="button">Copy task</button>
+          {taskCopyStatus === "copied" ? <p className={styles.copyNote} role="status">Task copied. No Atlas context was added.</p> : null}
+          {taskCopyStatus === "failed" ? <p className={styles.copyNote} role="alert">Copy was unavailable. Select the task above to copy it manually.</p> : null}
           <button className={styles.textAction} onClick={resetPreparation} type="button">Prepare a different task</button>
+          <RunTechnicalDetails projectId={projectId} run={run} />
         </section>
       ) : null}
 
@@ -451,46 +519,63 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
         <>
           <ContextAidPresentation
             capsule={run.capsule}
-            onPrepareFullTransfer={() => void prepareContext(undefined, roadwayOverride, true)}
+            literalTask={run.literalTask}
           />
           <button className={styles.textAction} onClick={resetPreparation} type="button">Prepare another task</button>
+          <RunTechnicalDetails
+            onPrepareFullTransfer={() => void prepareContext(undefined, roadwayOverride, true)}
+            projectId={projectId}
+            run={run}
+          />
         </>
       ) : null}
 
       {view === "light" && run && !run.capsule ? (
         <section className={styles.outcomeState} role="alert">
-          <span>Could not prepare safely</span>
-          <h2>Atlas found a bounded continuity signal but could not produce a governed context aid.</h2>
-          <p>{run.need.explanation}</p>
-          <strong>No capsule, packet, or packet receipt was created.</strong>
+          <span>Preparation stopped</span>
+          <h2>Atlas needs current information before this can continue safely</h2>
+          <div className={styles.resultTask}><span>Your task</span><p>{run.literalTask}</p></div>
+          <p>Atlas found relevant project context but could not prepare a safe result.</p>
           <button className={styles.textAction} onClick={resetPreparation} type="button">Review task and controls</button>
+          <RunTechnicalDetails projectId={projectId} run={run} />
         </section>
       ) : null}
 
       {view === "failure" ? (
         <section className={styles.outcomeState} role="alert">
-          <span>Could not prepare safely</span>
-          <h2>Atlas did not produce a valid context packet.</h2>
-          <p>{error}</p>
-          {run?.preflight?.freshness.missing?.length ? <p>Missing current state: {run.preflight.freshness.missing.join(", ")}.</p> : null}
+          <span>Preparation stopped</span>
+          <h2>{run?.status === "missing_required_state" ? "Atlas needs current information before this can continue safely" : "Atlas couldn’t prepare this safely"}</h2>
+          {run?.literalTask ? <div className={styles.resultTask}><span>Your task</span><p>{run.literalTask}</p></div> : null}
+          {run?.preflight?.freshness.missing?.length ? (
+            <div className={styles.missingState}>
+              <strong>Current information needed</strong>
+              <ul>{run.preflight.freshness.missing.map((item) => <li key={item}>{humanizeStateLabel(item)}</li>)}</ul>
+            </div>
+          ) : <p>{error}</p>}
           <button className={styles.textAction} onClick={resetPreparation} type="button">Review task and controls</button>
+          {run ? <RunTechnicalDetails projectId={projectId} run={run} /> : null}
         </section>
       ) : null}
 
       {view === "ready" && prepared ? (
         <>
           {error ? <div className={styles.failureBanner} role="alert">{error}</div> : null}
-          <PacketPreview context={prepared} projectName={projectName} />
-          <HandoffPresentation
-            busy={working}
-            canWrite={canWrite}
+          <PacketPreview
+            advancedActions={(
+              <HandoffAdvanced
+                busy={working}
+                canWrite={canWrite}
+                handoff={handoff}
+                models={models}
+                onModelChange={setReceivingModel}
+                onSend={() => void sendToReceivingModel()}
+                selectedModel={receivingModel}
+              />
+            )}
+            actions={(
+              <HandoffPresentation context={prepared} key={prepared.packet.id} />
+            )}
             context={prepared}
-            handoff={handoff}
-            key={prepared.packet.id}
-            models={models}
-            onModelChange={setReceivingModel}
-            onSend={() => void sendToReceivingModel()}
-            selectedModel={receivingModel}
           />
           <button className={styles.textAction} onClick={resetPreparation} type="button">Prepare another task</button>
         </>

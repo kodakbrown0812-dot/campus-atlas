@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { PreparedContext, TreatmentItem } from "./ask-types";
+import { ReactNode } from "react";
+import { PreparedContext, ReconstructionRunResult, TreatmentItem } from "./ask-types";
 import styles from "./ask.module.css";
 
 const treatmentMeaning = {
@@ -29,29 +30,32 @@ function SourceItem({ item }: { item: TreatmentItem }) {
 }
 
 export default function PacketPreview({
+  advancedActions,
+  actions,
   context,
-  projectName,
 }: {
+  advancedActions: ReactNode;
+  actions: ReactNode;
   context: PreparedContext;
-  projectName: string;
 }) {
   const includedItems = context.receipt.treatmentSummary.Use.filter((item) => item.sourceType !== "RoadwayCheck").length;
   const comparisonUrl = `${context.links.packet}/comparison`;
+  const run = context.raw as Partial<ReconstructionRunResult>;
 
   return (
     <section className={styles.readyPanel} aria-labelledby="prepared-context-title">
       <header className={styles.readyHeader}>
         <div>
-          <span>Context packet ready</span>
-          <h2 id="prepared-context-title">Prepared context</h2>
-          <small className={styles.projectName}>Project · {projectName}</small>
-          <p>{context.literalTask}</p>
+          <span>Full project context</span>
+          <h2 id="prepared-context-title">Ready to continue</h2>
+          <p>Atlas prepared the project state this task needs.</p>
         </div>
-        <dl>
-          <div><dt>Included items</dt><dd>{includedItems}</dd></div>
-          <div><dt>Estimated tokens</dt><dd>{context.packet.finalTokenCount}/{context.packet.tokenBudget}</dd></div>
-        </dl>
       </header>
+
+      <div className={styles.resultTask}>
+        <span>Your task</span>
+        <p>{context.literalTask}</p>
+      </div>
 
       {context.receipt.unresolvedConflicts.length ? (
         <div className={styles.uncertaintyNotice}>
@@ -61,8 +65,22 @@ export default function PacketPreview({
 
       <pre className={styles.compiledContent} id="prepared-context-content" tabIndex={0}>{context.packet.compiledContent}</pre>
 
-      <details className={styles.whyDisclosure}>
-        <summary>Why Atlas chose this</summary>
+      {actions}
+
+      <details className={styles.technicalDetails}>
+        <summary>Advanced details</summary>
+        <dl className={styles.resultMetadata}>
+          <div><dt>Need level</dt><dd>Full</dd></div>
+          <div><dt>Reason codes</dt><dd>{run.need?.reasonCodes?.join(", ") || "Available in Inspect"}</dd></div>
+          <div><dt>Roadway</dt><dd>{run.roadway?.primary?.name || run.roadway?.name || "Available in Inspect"}</dd></div>
+          <div><dt>Included items</dt><dd>{includedItems}</dd></div>
+          <div><dt>Estimated tokens</dt><dd>{context.packet.finalTokenCount}/{context.packet.tokenBudget}</dd></div>
+          <div><dt>Packet</dt><dd>{context.packet.id}</dd></div>
+          <div><dt>Receipt</dt><dd>{context.receipt.id}</dd></div>
+          <div><dt>Packet created this run</dt><dd>{run.effects ? run.effects.packetCreated ? "Yes" : "No · immutable replay" : "Existing record"}</dd></div>
+          <div><dt>Receipt created this run</dt><dd>{run.effects ? run.effects.receiptCreated ? "Yes" : "No · immutable replay" : "Existing record"}</dd></div>
+        </dl>
+        {advancedActions}
         <div className={styles.treatmentSummary}>
           {(["Use", "Consider", "Exclude"] as const).map((treatment) => (
             <section key={treatment}>
@@ -83,13 +101,9 @@ export default function PacketPreview({
             </section>
           ))}
         </div>
-      </details>
-
-      <details className={styles.inspectLinks}>
-        <summary>Inspect sources and receipts</summary>
-        <nav aria-label="Prepared context inspection">
+        <nav className={styles.advancedLinks} aria-label="Prepared context inspection">
+          <Link href={context.links.inspect}>Inspect why</Link>
           <Link href={`/projects/${encodeURIComponent(context.projectId)}/inspect`}>View sources</Link>
-          <Link href={context.links.inspect}>View packet in Inspect</Link>
           <a href={comparisonUrl} rel="noreferrer" target="_blank">Compare packet</a>
           <Link href={context.links.inspect}>Source lineage</Link>
           <a href={context.links.packet} rel="noreferrer" target="_blank">Raw JSON</a>
