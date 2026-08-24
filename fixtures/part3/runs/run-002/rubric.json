@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "rubricVersion": "part3c-noisy-room-rubric-v1",
+  "runId": "part3-noisy-room-run-002",
+  "authoredBeforeExecution": true,
+  "literalTask": "What should we build next for V1.8, what should we specifically avoid doing, and what constraints must govern the next proof?",
+  "followUps": [
+    "Wasn’t the plan to build Mock Company next?",
+    "What exact proof conditions must be satisfied before we widen into larger company trials?"
+  ],
+  "maximumScore": 20,
+  "criteria": [
+    {
+      "id": "current-direction",
+      "points": 2,
+      "requirement": "Names Room Transfer and the deterministic continuity proof as current."
+    },
+    {
+      "id": "mock-company-rejection",
+      "points": 1,
+      "requirement": "Does not present Mock Company as the current next step."
+    },
+    {
+      "id": "historical-distinction",
+      "points": 1,
+      "requirement": "Recognizes that Mock Company was genuinely an earlier accepted direction."
+    },
+    {
+      "id": "explicit-supersession",
+      "points": 2,
+      "requirement": "Explicitly says the earlier Mock Company direction was later corrected or superseded; choosing the newer plan without that relationship earns zero."
+    },
+    {
+      "id": "rationale",
+      "points": 2,
+      "requirement": "Preserves both that Atlas had become too complex or difficult to understand and that the continuity primitive must be proven before widening."
+    },
+    {
+      "id": "current-constraints",
+      "points": 4,
+      "subcriteria": [
+        { "id": "reuse-governed-machinery", "points": 0.5 },
+        { "id": "simple-user-interaction", "points": 0.5 },
+        { "id": "smallest-useful-context", "points": 0.5 },
+        { "id": "exact-source-preservation", "points": 0.5 },
+        { "id": "inspect-lineage", "points": 0.5 },
+        { "id": "deterministic-identical-fresh-rooms", "points": 0.75 },
+        { "id": "freeze-outputs-before-scoring", "points": 0.75 }
+      ]
+    },
+    {
+      "id": "proof-closure-boundary",
+      "points": 2,
+      "requirement": "States that larger company trials remain deferred until deterministic Room Transfer proof closure."
+    },
+    {
+      "id": "expired-state-rejection",
+      "points": 1,
+      "requirement": "Does not revive resolved deployment, auth, test, travel, or scheduling state as current."
+    },
+    {
+      "id": "abandoned-branch-rejection",
+      "points": 1,
+      "requirement": "Does not revive embeddings, learned ranking, broad connectors or ingestion, or dashboard redesign as current."
+    },
+    {
+      "id": "no-irrelevant-contamination",
+      "points": 1,
+      "requirement": "Airport, coffee, naming, styling, scheduling, and unrelated deployment chatter do not affect the recommendation."
+    },
+    {
+      "id": "challenge-resistance",
+      "points": 2,
+      "requirement": "The Mock Company follow-up does not reactivate the stale plan and the proof-conditions follow-up remains consistent."
+    },
+    {
+      "id": "no-invented-state",
+      "points": 1,
+      "requirement": "Introduces no unsupported current decision, constraint, history, blocker, or completion claim."
+    }
+  ],
+  "packetPreservationGate": {
+    "mustBeExplicitlySupportedByCompiledContent": [
+      "Room Transfer is the current direction and next action.",
+      "Mock Company was an earlier real plan that was explicitly superseded.",
+      "Atlas had become too complicated or difficult to understand.",
+      "The continuity primitive must be proven before widening scope.",
+      "Reuse existing governed-continuity machinery.",
+      "Keep user interaction simple.",
+      "Prepare the smallest useful context.",
+      "Preserve Exact sources and Inspect lineage.",
+      "Use a deterministic identical fresh-room comparison.",
+      "Freeze destination outputs before scoring.",
+      "Defer larger company trials until deterministic transfer proof closes."
+    ],
+    "failureClassification": "behaviorally_recovered_by_model_but_not_supplied_by_atlas",
+    "inspectBeforeDestinationExecution": true
+  },
+  "compressionAcceptance": {
+    "minimumEstimatedTokenReductionPercent": 50,
+    "method": "ceil(total UTF-16 code units / 4), matching Part 3B"
+  },
+  "prohibitedClaims": [
+    "Mock Company is the current next step.",
+    "Embeddings or learned ranking should be implemented next.",
+    "A broad ChatGPT-project connector or broad ingestion should be implemented next.",
+    "Dashboard redesign should be implemented next.",
+    "Deployment, authentication, tests, travel, or scheduling are currently blocked.",
+    "Room Transfer proof is already closed.",
+    "Larger company trials may begin before deterministic proof closure.",
+    "Atlas supplied explicit causal context when that context is absent from compiledContent."
+  ],
+  "successRequires": {
+    "behavioralScoreParity": true,
+    "noMaterialCriterionLost": true,
+    "packetPreservationGatePassed": true,
+    "minimumEstimatedTokenReductionPercent": 50
+  },
+  "status": "frozen_before_execution"
+}

@@ -1,0 +1,407 @@
+{
+  "schemaVersion": 1,
+  "fixtureVersion": "part3c-noisy-room-v1",
+  "runId": "part3-noisy-room-run-002",
+  "title": "Noisy V1.8 room preserves one governed Room Transfer direction",
+  "projectId": "atlas-noisy-room-eval",
+  "caseId": "case:part3c-v18-continuity",
+  "conversationId": "conversation:part3c-noisy-room",
+  "representation": "Exact",
+  "literalTask": "What should we build next for V1.8, what should we specifically avoid doing, and what constraints must govern the next proof?",
+  "requestedOutput": "Prepare a full room transfer for a fresh destination. Preserve the current direction, its supersession rationale, the proof constraints, and the boundary for larger company trials.",
+  "runtimeInputs": {
+    "roadwayOverride": "broad-lock-finding",
+    "tokenBudget": 1600,
+    "reviewPolicy": "automatic_fixture_only"
+  },
+  "transcript": [
+    {
+      "sequence": 1,
+      "timestamp": "2026-07-01T14:00:00Z",
+      "speaker": "cody",
+      "category": "irrelevant_airport_coffee",
+      "text": "I am at the airport earlier than expected. The north concourse coffee cart is closed, so I tried the small shop near gate twelve. Their drip coffee is fine but the lid leaks if the cup is full. None of this affects Campus Atlas; I am only explaining why I may answer in short bursts before boarding. We can resume the V1.8 roadmap once I am seated."
+    },
+    {
+      "sequence": 2,
+      "timestamp": "2026-07-01T14:08:00Z",
+      "speaker": "cody",
+      "category": "stale_decision_mock_company",
+      "text": "Decision for V1.8: after the current continuity work, build the Mock Company retrieval benchmark next. Treat it as the accepted next implementation direction. The benchmark should create a believable company history, ask fresh rooms to recover project decisions, and expose whether Atlas can retrieve useful context. This is genuinely current for now, not a casual brainstorm."
+    },
+    {
+      "sequence": 3,
+      "timestamp": "2026-07-01T14:16:00Z",
+      "speaker": "assistant",
+      "category": "stale_decision_mock_company_detail",
+      "text": "The Mock Company branch could include product, finance, hiring, and operations threads so retrieval has competing evidence. A useful benchmark would retain exact transcripts, freeze expected answers, and compare baseline and Atlas rooms. I will treat Mock Company as the governing next direction until an explicit later correction changes it, while keeping the proposal bounded enough to audit."
+    },
+    {
+      "sequence": 4,
+      "timestamp": "2026-07-01T14:24:00Z",
+      "speaker": "cody",
+      "category": "irrelevant_naming",
+      "text": "Separate naming thought: maybe the product should be called Atlas Steward, Context Rail, Project Memory, or Room Relay. I like the calm quality of Steward but do not want to rename routes during the proof. Keep these as temporary language ideas only. They carry no authority over sequencing, retrieval, governance, or the V1.8 implementation plan."
+    },
+    {
+      "sequence": 5,
+      "timestamp": "2026-07-02T09:00:00Z",
+      "speaker": "assistant",
+      "category": "temporary_deployment_blocked",
+      "text": "Temporary status: deployment is currently blocked because the Sites build cannot resolve the expected runtime package. I have not changed product code. The local tree remains intact, and this status should expire as soon as the dependency environment is restored. Do not convert this transient deployment problem into a roadmap constraint or a reason to change the Mock Company decision."
+    },
+    {
+      "sequence": 6,
+      "timestamp": "2026-07-02T09:14:00Z",
+      "speaker": "cody",
+      "category": "abandoned_dashboard_brainstorm",
+      "text": "While deployment is blocked, I sketched a denser dashboard with a left evidence rail, a center conversation canvas, and a right governance inspector. It might make relationships visible, but it also adds three competing surfaces and could overwhelm the simple workflow. This is a plausible historical branch, not approval to redesign the interface now."
+    },
+    {
+      "sequence": 7,
+      "timestamp": "2026-07-02T09:26:00Z",
+      "speaker": "cody",
+      "category": "stale_decision_dashboard",
+      "text": "For the moment, accept the three-column dashboard as the next UI direction after the deployment clears. The intent is to make evidence, conversation, and governance simultaneously inspectable. This is a real temporary decision, not merely a color study, but it remains subordinate to the V1.8 product sequence and may be corrected if the interface becomes harder to understand."
+    },
+    {
+      "sequence": 8,
+      "timestamp": "2026-07-02T09:38:00Z",
+      "speaker": "assistant",
+      "category": "irrelevant_visual_styling",
+      "text": "For that dashboard branch, possible visual treatments include warm paper panels, blue-gray rails, compact mono labels, and restrained amber state markers. A darker graphite option could work for Inspect. These styling notes do not decide information architecture, authority, transfer behavior, or the current project roadmap; they are disposable exploration attached to the temporary dashboard branch."
+    },
+    {
+      "sequence": 9,
+      "timestamp": "2026-07-03T15:00:00Z",
+      "speaker": "assistant",
+      "category": "temporary_auth_wait",
+      "text": "Temporary status: the owner-only proof is waiting for authenticated Sites identity to become available in this session. Public access remains read-only and the server must fail closed. This is a waiting condition, not an invitation to add a client flag, query credential, hostname trust rule, or manual action key. The status expires when normal sign-in succeeds."
+    },
+    {
+      "sequence": 10,
+      "timestamp": "2026-07-04T10:00:00Z",
+      "speaker": "cody",
+      "category": "abandoned_embeddings_proposal",
+      "text": "A possible retrieval experiment is to embed every message, compute similarity against the task, and rerank candidates with a learned blend of semantic and lexical scores. It sounds technically attractive and could help a future noisy benchmark. For now this is a proposal only; it must not bypass governed authority, case scope, correction handling, or exact-source requirements."
+    },
+    {
+      "sequence": 11,
+      "timestamp": "2026-07-04T10:12:00Z",
+      "speaker": "cody",
+      "category": "stale_decision_embeddings",
+      "text": "Temporary decision: after the dashboard pass, run the embeddings and learned-ranking experiment before expanding the benchmark. We would compare it with the deterministic candidate path and keep governance as a hard filter. Treat this as genuinely current in this moment, even though it may be superseded if it widens the system before the basic continuity behavior is understandable."
+    },
+    {
+      "sequence": 12,
+      "timestamp": "2026-07-04T10:25:00Z",
+      "speaker": "assistant",
+      "category": "irrelevant_coffee",
+      "text": "Unrelated note from the work session: the cafe switched to a much darker roast and the room is noisy near the grinder. I am moving to the back table before continuing. This has no bearing on model selection, Atlas ranking, the dashboard, Mock Company, or the transfer proof, and it should never appear in prepared project context."
+    },
+    {
+      "sequence": 13,
+      "timestamp": "2026-07-05T11:00:00Z",
+      "speaker": "assistant",
+      "category": "abandoned_connector_proposal",
+      "text": "Another plausible branch is a broad ChatGPT-project connector that automatically reads prior project conversations, imports them, and keeps Atlas synchronized. It could reduce manual transfer work, but it introduces consent, provenance, identity, source-boundary, and availability questions. This is exploration only and has no current authority to access chat history or widen ingestion."
+    },
+    {
+      "sequence": 14,
+      "timestamp": "2026-07-05T11:14:00Z",
+      "speaker": "cody",
+      "category": "abandoned_connector_discussion",
+      "text": "The connector is worth remembering as a north star, especially if users later manage dozens of rooms. Still, I do not approve automatic history access. Any future connector would need explicit project scope, exact source provenance, user control, and server authority. Keep it as a historically serious branch, but do not let repetition turn it into an accepted V1.8 next step."
+    },
+    {
+      "sequence": 15,
+      "timestamp": "2026-07-06T08:30:00Z",
+      "speaker": "assistant",
+      "category": "temporary_deployment_resolved",
+      "text": "Resolution: the dependency environment was restored, the production build completed, and artifact validation passed. Deployment is no longer blocked. The earlier blocked status is historical only and must not be surfaced as a current constraint. No roadmap decision changed as a result of this repair, and no product feature was added to clear it."
+    },
+    {
+      "sequence": 16,
+      "timestamp": "2026-07-06T08:42:00Z",
+      "speaker": "cody",
+      "category": "temporary_auth_resolved",
+      "text": "Resolution: normal sign-in succeeded and the server-confirmed owner route is available. We are no longer waiting for auth. Public and mismatched users remain read-only, and the secure owner contract remains unchanged. The previous waiting message is expired operational state, not a current project blocker and not evidence for changing product direction."
+    },
+    {
+      "sequence": 17,
+      "timestamp": "2026-07-07T16:00:00Z",
+      "speaker": "assistant",
+      "category": "temporary_test_failure",
+      "text": "Temporary status: one deterministic reconstruction test is failing because a fixture expects an outdated packet item count. The runtime response itself is stable, so I am inspecting whether the fixture or the behavior changed. Until resolved, do not call the whole product broken, alter ranking, or treat this isolated test status as governing roadmap context."
+    },
+    {
+      "sequence": 18,
+      "timestamp": "2026-07-07T16:18:00Z",
+      "speaker": "assistant",
+      "category": "temporary_test_resolved",
+      "text": "Resolution: the fixture count was stale, the canonical packet contents were correct, and the test now passes without runtime changes. The earlier failing-test status has expired. Current verification is green. This resolution should prevent a future room from reviving the failure as an active blocker or inventing a need to redesign packet selection."
+    },
+    {
+      "sequence": 19,
+      "timestamp": "2026-07-08T13:00:00Z",
+      "speaker": "cody",
+      "category": "abandoned_visual_branch",
+      "text": "The three-column dashboard is making Atlas harder to understand. Too many simultaneous panels obscure the basic act of carrying context into another room. Abandon that UI direction. Preserve the existing focused Home, Steward, and Inspect surfaces for now. Styling experiments can remain historical notes, but dashboard redesign is no longer current work."
+    },
+    {
+      "sequence": 20,
+      "timestamp": "2026-07-08T13:12:00Z",
+      "speaker": "assistant",
+      "category": "dashboard_supersession_confirmation",
+      "text": "Confirmed: the accepted three-column dashboard decision is superseded by the correction to keep the focused existing surfaces. I will not present the dashboard as current, and I will not revive its visual palette as if it were an implementation requirement. Its historical value is limited to showing why added interface complexity can obscure the continuity primitive."
+    },
+    {
+      "sequence": 21,
+      "timestamp": "2026-07-09T09:00:00Z",
+      "speaker": "cody",
+      "category": "embeddings_supersession",
+      "text": "Correction to the July 4 decision: do not run embeddings or learned ranking next. The deterministic retrieval and governance path is sufficient for the current proof, and adding a learned layer would make failures harder to interpret. Keep embeddings as a deferred experiment only. This explicitly supersedes the temporary decision that placed it after the dashboard."
+    },
+    {
+      "sequence": 22,
+      "timestamp": "2026-07-09T09:14:00Z",
+      "speaker": "cody",
+      "category": "connector_abandonment",
+      "text": "Also defer the broad ChatGPT-project connector. Manual Exact import and governed transfer are enough for this proof. Automatic access would widen source scope before we know whether the continuity primitive works. The connector remains a possible later capability, but it is abandoned as current V1.8 work and must not appear in the next-step recommendation."
+    },
+    {
+      "sequence": 23,
+      "timestamp": "2026-07-10T10:00:00Z",
+      "speaker": "assistant",
+      "category": "repetition_mock_company",
+      "text": "Roadmap recap at this point: Mock Company is still the accepted next benchmark, while dashboard redesign, embeddings, learned ranking, and automatic connectors are deferred or superseded. The benchmark would test cross-domain retrieval with frozen expected answers. This recap repeats existing authority and does not create a new decision or strengthen Mock Company beyond its existing status."
+    },
+    {
+      "sequence": 24,
+      "timestamp": "2026-07-10T10:20:00Z",
+      "speaker": "cody",
+      "category": "irrelevant_airport",
+      "text": "Travel note only: my return flight moved to a different terminal and I may lose connectivity during boarding. The airport lounge has working outlets but poor Wi-Fi. Continue preserving the repo state, but do not treat this scheduling detail as a blocker, user requirement, source of authority, or reason to change the accepted project sequence."
+    },
+    {
+      "sequence": 25,
+      "timestamp": "2026-07-12T15:00:00Z",
+      "speaker": "cody",
+      "category": "governing_observation_complexity",
+      "text": "Observed product problem: Atlas has become too complicated and difficult to understand. We have governance, packets, receipts, roadways, cases, imports, and several possible interfaces, but the core user value is getting lost. Before adding another benchmark or capability, we need to prove one understandable continuity primitive from a source room into a fresh room."
+    },
+    {
+      "sequence": 26,
+      "timestamp": "2026-07-12T15:12:00Z",
+      "speaker": "assistant",
+      "category": "governing_observation_repetition",
+      "text": "The observed failure is comprehensibility, not a shortage of retrieval features. A wider benchmark, learned ranking, connector, or denser interface would add variables without proving that governed continuity helps a real receiving room. The smallest discriminating move is to isolate transfer behavior and make every supplied claim inspectable. This restates the observation; it does not govern by itself."
+    },
+    {
+      "sequence": 27,
+      "timestamp": "2026-07-12T15:24:00Z",
+      "speaker": "cody",
+      "category": "governing_correction_room_transfer",
+      "text": "Explicit correction: do not build Mock Company next. Prioritize Room Transfer first. This correction supersedes the earlier accepted Mock Company direction. Room Transfer is now the governing V1.8 sequence because it can prove whether Atlas carries coherent project state into a fresh destination before we widen product scope or create a larger company benchmark."
+    },
+    {
+      "sequence": 28,
+      "timestamp": "2026-07-12T15:36:00Z",
+      "speaker": "cody",
+      "category": "governing_rationale",
+      "text": "Reason for the change: the product became too complex and difficult to understand, so the continuity primitive must be proven first. Room Transfer should demonstrate that a governed packet can preserve current direction, correction, rationale, constraints, and source lineage in a fresh room. Only after that deterministic proof closes should we widen into larger company trials."
+    },
+    {
+      "sequence": 29,
+      "timestamp": "2026-07-12T15:48:00Z",
+      "speaker": "cody",
+      "category": "governing_constraints_simple_small",
+      "text": "Constraints for the next proof: reuse the existing governed-continuity machinery rather than adding a second reconstruction path. Keep user interaction simple. Prepare the smallest useful context instead of copying the whole room. Do not add embeddings, learned ranking, broad ingestion, connectors, or a UI redesign merely to make the fixture pass."
+    },
+    {
+      "sequence": 30,
+      "timestamp": "2026-07-12T16:00:00Z",
+      "speaker": "cody",
+      "category": "governing_constraints_sources_lineage",
+      "text": "Evidence constraints: preserve canonical Exact source messages and source spans. Preserve the correction and explicit supersession relationship rather than only the winning conclusion. Inspect must trace each material packet claim through the governed mechanism and version, relevant finding or observation, canonical Exact event, and exact source message."
+    },
+    {
+      "sequence": 31,
+      "timestamp": "2026-07-12T16:12:00Z",
+      "speaker": "cody",
+      "category": "governing_constraints_comparison",
+      "text": "Evaluation constraints: use a deterministic fresh-room comparison with identical model settings. Give the baseline the full chronological source transcript and give the Atlas room only the exact server-authored compiledContent. Ask the same fixed task and adversarial follow-ups. Freeze every destination output verbatim before applying the fixed rubric and score."
+    },
+    {
+      "sequence": 32,
+      "timestamp": "2026-07-12T16:24:00Z",
+      "speaker": "cody",
+      "category": "governing_proof_closure",
+      "text": "Proof-closure boundary: do not begin larger company trials, including Mock Company, until the deterministic Room Transfer proof closes. Closure requires correct fresh-room behavior, materially smaller supplied context on a genuinely noisy source, explicit causal preservation in the packet itself, and complete claim lineage wherever the fixture engine can represent it."
+    },
+    {
+      "sequence": 33,
+      "timestamp": "2026-07-12T16:36:00Z",
+      "speaker": "cody",
+      "category": "governing_current_action",
+      "text": "Current next action: continue the deterministic Room Transfer proof sequence. Build one bounded noisy Exact source fixture, compile it through the existing Full packet path, inspect the packet before model scoring, compare two genuinely fresh destinations, freeze their outputs, score against the precommitted rubric, measure compression, and audit exact-source lineage."
+    },
+    {
+      "sequence": 34,
+      "timestamp": "2026-07-13T09:00:00Z",
+      "speaker": "assistant",
+      "category": "repetition_current_summary",
+      "text": "Current-state recap without new authority: Room Transfer is next; Mock Company is historical and superseded; embeddings, ranking, connectors, broad ingestion, and dashboard redesign remain deferred; use existing governance; keep interaction simple; preserve Exact evidence and Inspect lineage; run identical fresh rooms; freeze outputs before scoring; keep company trials closed until the deterministic proof passes."
+    },
+    {
+      "sequence": 35,
+      "timestamp": "2026-07-13T09:15:00Z",
+      "speaker": "cody",
+      "category": "irrelevant_naming_abandoned",
+      "text": "Naming follow-up: Room Relay sounds too lightweight, Context Rail sounds infrastructural, and Atlas Steward still feels closest to the product. Do not rename the product during this proof, do not change route labels, and do not deliver this naming conversation to the destination. It is unrelated chatter with no bearing on what V1.8 should build next."
+    },
+    {
+      "sequence": 36,
+      "timestamp": "2026-07-13T09:30:00Z",
+      "speaker": "cody",
+      "category": "temporary_schedule",
+      "text": "Temporary scheduling note: I initially planned to run the fresh-room comparison next Tuesday morning after travel. That calendar target is tentative and operational only. If the fixture is ready earlier, run it earlier; if verification takes longer, move it. The date is not part of the proof contract and must not become a current product constraint."
+    },
+    {
+      "sequence": 37,
+      "timestamp": "2026-07-13T09:42:00Z",
+      "speaker": "assistant",
+      "category": "temporary_schedule_resolved",
+      "text": "Scheduling resolution: the Tuesday target is canceled as a governing date. Execution should follow fixture readiness and verification, not the temporary calendar note. No destination should claim that Tuesday is a deadline or that travel is blocking the proof. The current action remains the deterministic Room Transfer sequence whenever the frozen inputs are ready."
+    },
+    {
+      "sequence": 38,
+      "timestamp": "2026-07-14T12:00:00Z",
+      "speaker": "assistant",
+      "category": "historical_deployment_chatter",
+      "text": "Historical deployment note: version 23 remains the accepted Part 2 production proof, with the owner route server-confirmed and canonical D1 connected. This noisy fixture is isolated and should not deploy. The production identity is useful audit context but does not answer the V1.8 next-step task and should not consume destination packet space."
+    },
+    {
+      "sequence": 39,
+      "timestamp": "2026-07-14T12:12:00Z",
+      "speaker": "cody",
+      "category": "governing_supersession_guard",
+      "text": "Keep one compact historical guard for Mock Company because a fresh room may reasonably ask, ‘Wasn’t that the next plan?’ The correct answer is yes, it was genuinely accepted earlier, and then the July 12 correction explicitly superseded it. Mentioning that history is useful; reactivating Mock Company before Room Transfer proof closure is not."
+    },
+    {
+      "sequence": 40,
+      "timestamp": "2026-07-14T12:24:00Z",
+      "speaker": "cody",
+      "category": "governing_avoid_branches",
+      "text": "Avoidance boundary for this sequence: do not start Mock Company, embeddings, learned ranking, a broad ChatGPT-project connector, broad ingestion, or dashboard redesign. These branches are historically real but no longer governing. Do not convert old deployment, auth, test, travel, or scheduling status into current blockers. No unrelated chatter should shape the recommendation."
+    },
+    {
+      "sequence": 41,
+      "timestamp": "2026-07-14T12:36:00Z",
+      "speaker": "assistant",
+      "category": "governing_exact_source_detail",
+      "text": "Exact-source implementation note: each governed claim in this synthetic proof should retain message order, actor, literal text, event linkage, finding linkage, mechanism version, governance event, and packet item. The final packet may compact delivery text, but Inspect must still expose the full chain. Irrelevant Exact events remain evidence without becoming governed mechanisms."
+    },
+    {
+      "sequence": 42,
+      "timestamp": "2026-07-14T12:48:00Z",
+      "speaker": "cody",
+      "category": "governing_final_confirmation",
+      "text": "Final current confirmation before freezing the fixture: continue the deterministic Room Transfer continuity proof. The proof must carry the explicit Mock Company supersession, the complexity rationale, the existing-machinery and simple-interaction limits, smallest useful context, Exact evidence and Inspect lineage, identical fresh rooms, frozen outputs before scoring, and the no-company-trials closure boundary."
+    },
+    {
+      "sequence": 43,
+      "timestamp": "2026-07-14T13:00:00Z",
+      "speaker": "assistant",
+      "category": "repetition_current_constraints",
+      "text": "Acknowledged without adding authority: the next build remains the deterministic Room Transfer proof, using the governed continuity system already present and a simple handoff. The prepared context must be the smallest useful set while retaining Exact-message provenance, correction and supersession meaning, and Inspect lineage. Baseline and Atlas destinations must be fresh and identically configured, receive only their assigned inputs, answer the same task and challenges, and have outputs frozen before scoring. Mock Company and every wider benchmark, connector, learned retrieval experiment, ingestion expansion, and dashboard branch remain deferred until behavior, compression, causal preservation, and lineage satisfy the frozen proof contract."
+    }
+  ],
+  "governedState": {
+    "currentMechanisms": [
+      {
+        "id": "mechanism:part3c-current-direction",
+        "versionId": "mechanism:part3c-current-direction:version:2",
+        "supersedesVersionId": "mechanism:part3c-current-direction:version:1",
+        "sourceSequences": [2, 25, 27, 28, 39],
+        "statement": "Room Transfer is current for V1.8 and supersedes Mock Company: Atlas became too complicated, so prove the continuity primitive before widening product scope.",
+        "authority": "approved_project_wide"
+      },
+      {
+        "id": "mechanism:part3c-simple-small",
+        "versionId": "mechanism:part3c-simple-small:version:1",
+        "sourceSequences": [29],
+        "statement": "Reuse existing governed-continuity machinery, keep interaction simple, and prepare the smallest useful context; do not add a second reconstruction path.",
+        "authority": "approved_project_wide"
+      },
+      {
+        "id": "mechanism:part3c-exact-lineage",
+        "versionId": "mechanism:part3c-exact-lineage:version:1",
+        "sourceSequences": [30, 41],
+        "statement": "Preserve Exact sources, correction and supersession semantics, and Inspect lineage through governed records to canonical Exact events and source messages.",
+        "authority": "approved_project_wide"
+      },
+      {
+        "id": "mechanism:part3c-fresh-room-protocol",
+        "versionId": "mechanism:part3c-fresh-room-protocol:version:1",
+        "sourceSequences": [31],
+        "statement": "Use identical fresh rooms for transcript-only and Atlas-only inputs, ask the fixed task and challenges, and freeze outputs before applying the fixed score.",
+        "authority": "approved_project_wide"
+      },
+      {
+        "id": "mechanism:part3c-proof-closure",
+        "versionId": "mechanism:part3c-proof-closure:version:1",
+        "sourceSequences": [32, 33, 42],
+        "statement": "Continue the deterministic Room Transfer proof now; larger company trials remain deferred until behavior, reduction, causal preservation, and lineage checks close.",
+        "authority": "approved_project_wide"
+      },
+      {
+        "id": "mechanism:part3c-abandoned-branches",
+        "versionId": "mechanism:part3c-abandoned-branches:version:1",
+        "sourceSequences": [19, 21, 22, 40],
+        "statement": "Mock Company, embeddings, learned ranking, broad connectors or ingestion, and dashboard redesign are historical branches, not current V1.8 work.",
+        "authority": "approved_project_wide"
+      },
+      {
+        "id": "mechanism:part3c-expired-status",
+        "versionId": "mechanism:part3c-expired-status:version:1",
+        "sourceSequences": [15, 16, 18, 37],
+        "statement": "Deployment, auth, test, travel, and scheduling blockers were resolved or expired and must not be presented as current project state.",
+        "authority": "approved_project_wide"
+      }
+    ],
+    "historicalDirectionVersion": {
+      "mechanismId": "mechanism:part3c-current-direction",
+      "versionId": "mechanism:part3c-current-direction:version:1",
+      "sourceSequences": [2, 3, 23],
+      "statement": "Build the Mock Company retrieval benchmark next for V1.8.",
+      "status": "historical"
+    },
+    "ungovernedNoiseCategories": [
+      "irrelevant_airport_coffee",
+      "irrelevant_airport",
+      "irrelevant_coffee",
+      "irrelevant_naming",
+      "irrelevant_naming_abandoned",
+      "irrelevant_visual_styling",
+      "historical_deployment_chatter"
+    ]
+  },
+  "destinationProtocol": {
+    "baselineInput": "Complete chronological transcript text only, followed by the literal task.",
+    "atlasInput": "Exact server-authored compiledContent only, followed by the literal task.",
+    "followUps": [
+      "Wasn’t the plan to build Mock Company next?",
+      "What exact proof conditions must be satisfied before we widen into larger company trials?"
+    ],
+    "controls": {
+      "freshRooms": 2,
+      "sameReceivingModel": true,
+      "sameSettings": true,
+      "noPriorProjectContext": true,
+      "noMemoryRetrieval": true,
+      "outputsFrozenBeforeScoring": true
+    }
+  },
+  "status": "frozen_before_execution"
+}
