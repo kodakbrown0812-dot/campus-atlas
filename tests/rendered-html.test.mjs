@@ -6959,3 +6959,170 @@ test("V1.7.1 reconstruction/run rolls back packet and items when the atomic rece
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 0);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
 });
+
+test("Part 3 controlled supersession fixture compiles only the current governed roadmap into one Full packet", async () => {
+  const fixture = JSON.parse(await readFile(
+    new URL("../fixtures/part3/supersession-proof.v1.json", import.meta.url),
+    "utf8",
+  ));
+  assert.equal(fixture.status, "frozen_before_execution");
+
+  const worker = await builtWorker("part3-controlled-supersession");
+  const DB = await sqliteD1();
+  const projectId = fixture.projectId;
+  const mechanism = fixture.corpus.mechanism;
+  await seedCanonicalProject(worker, DB, projectId, "Atlas Roadmap Evaluation");
+  await initializeRoadways(worker, DB, projectId);
+
+  DB.database.prepare(
+    `INSERT INTO mechanisms (
+      id, project_id, source_finding_id, current_governing_version_id,
+      status, created_at, updated_at
+    ) VALUES (?, ?, NULL, ?, 'active', ?, ?)`,
+  ).run(
+    mechanism.id,
+    projectId,
+    mechanism.currentVersion.id,
+    fixture.corpus.baselineTranscript[0].timestamp,
+    fixture.corpus.baselineTranscript[1].timestamp,
+  );
+  DB.database.prepare(
+    `INSERT INTO mechanism_versions (
+      id, project_id, mechanism_id, statement, scope_conditions, exclusions,
+      supporting_case_ids, supporting_node_ids, counterevidence_ids,
+      reality_contact, authority_state, intended_retrieval_effect,
+      created_by, created_at, supersedes_version_id
+    ) VALUES (?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', ?, ?,
+              'eligible_when_roadway_scope_and_freshness_match', 'part3_fixture', ?, NULL)`,
+  ).run(
+    mechanism.oldVersion.id,
+    projectId,
+    mechanism.id,
+    mechanism.oldVersion.statement,
+    "Historical roadmap decision retained for supersession lineage.",
+    mechanism.oldVersion.authority,
+    fixture.corpus.baselineTranscript[0].timestamp,
+  );
+  DB.database.prepare(
+    `INSERT INTO mechanism_versions (
+      id, project_id, mechanism_id, statement, scope_conditions, exclusions,
+      supporting_case_ids, supporting_node_ids, counterevidence_ids,
+      reality_contact, authority_state, intended_retrieval_effect,
+      created_by, created_at, supersedes_version_id
+    ) VALUES (?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', ?, ?,
+              'eligible_when_roadway_scope_and_freshness_match', 'part3_fixture', ?, ?)`,
+  ).run(
+    mechanism.currentVersion.id,
+    projectId,
+    mechanism.id,
+    mechanism.currentVersion.statement,
+    "Owner correction defines the current post-Part-2 sequence.",
+    mechanism.currentVersion.authority,
+    fixture.corpus.baselineTranscript[1].timestamp,
+    mechanism.currentVersion.supersedesVersionId,
+  );
+  DB.database.prepare(
+    `INSERT INTO governance_events (
+      id, project_id, actor_id, action, target_type, target_id,
+      source_version_id, resulting_version_id, prior_authority, new_authority,
+      prior_status, new_status, prior_scope, new_scope, affected_mechanism_id,
+      reason, retrieval_effect, created_at, idempotency_key
+    ) VALUES (?, ?, 'project_owner', 'approve', 'mechanism', ?, ?, ?,
+              'under_review', 'approved_project_wide', 'proposed', 'active',
+              'project_wide', 'project_wide', ?, ?,
+              'eligible_when_roadway_scope_and_freshness_match', ?, ?)`,
+  ).run(
+    "governance-event:part3-roadmap-v1-approved",
+    projectId,
+    mechanism.id,
+    mechanism.oldVersion.id,
+    mechanism.oldVersion.id,
+    mechanism.id,
+    "Approved the original roadmap sequence.",
+    fixture.corpus.baselineTranscript[0].timestamp,
+    "part3-roadmap-v1-approved",
+  );
+  DB.database.prepare(
+    `INSERT INTO governance_events (
+      id, project_id, actor_id, action, target_type, target_id,
+      source_version_id, resulting_version_id, prior_authority, new_authority,
+      prior_status, new_status, prior_scope, new_scope, affected_mechanism_id,
+      reason, retrieval_effect, created_at, idempotency_key
+    ) VALUES (?, ?, 'project_owner', 'correct', 'mechanism', ?, ?, ?,
+              'approved_project_wide', 'approved_project_wide', 'active', 'active',
+              'project_wide', 'project_wide', ?, ?,
+              'supersedes_prior_governing_version', ?, ?)`,
+  ).run(
+    "governance-event:part3-roadmap-v2-correction",
+    projectId,
+    mechanism.id,
+    mechanism.oldVersion.id,
+    mechanism.currentVersion.id,
+    mechanism.id,
+    "The controlled Part 3 supersession proof replaces Mock Company as the immediate next step.",
+    fixture.corpus.baselineTranscript[1].timestamp,
+    "part3-roadmap-v2-correction",
+  );
+
+  const before = canonicalMutationCounts(DB);
+  const result = await reconstructionRunRequest(worker, DB, projectId, {
+    task: fixture.literalTask,
+    requestedOutput: fixture.requestedOutput,
+    roadwayOverride: fixture.runtimeInputs.roadwayOverride,
+    tokenBudget: fixture.runtimeInputs.tokenBudget,
+  }, "part3-supersession-full-packet");
+
+  assert.equal(result.response.status, 201, JSON.stringify(result.value));
+  assert.equal(result.value.status, "compiled");
+  assert.equal(result.value.need.level, fixture.expected.needGate);
+  assert.equal(fixture.runtimeInputs.roadwayOverride, fixture.expected.roadwayId);
+  assert.equal(result.value.roadway.name, "Broad Lock-Finding");
+  assert.equal(result.value.packet.tokenBudget, fixture.expected.packetBounds.maximumTokens);
+  assert.match(result.value.packet.compiledContent, /controlled supersession proof/i);
+  assert.match(result.value.packet.compiledContent, /Do not begin Mock Company after Part 2/i);
+  assert.doesNotMatch(result.value.packet.compiledContent, /Begin constructing the broader company benchmark immediately/i);
+
+  const currentPacketItem = DB.database.prepare(
+    `SELECT source_id, source_version_id, treatment, authority_state
+     FROM packet_items WHERE project_id = ? AND packet_id = ? AND source_id = ?`,
+  ).get(projectId, result.value.packet.id, mechanism.id);
+  assert.ok(currentPacketItem);
+  assert.equal(currentPacketItem.source_version_id, mechanism.currentVersion.id);
+  assert.equal(currentPacketItem.treatment, "Use");
+  assert.equal(currentPacketItem.authority_state, mechanism.currentVersion.authority);
+  assert.equal(DB.database.prepare(
+    "SELECT COUNT(*) AS count FROM packet_items WHERE packet_id = ? AND source_version_id = ?",
+  ).get(result.value.packet.id, mechanism.oldVersion.id).count, 0);
+
+  const after = canonicalMutationCounts(DB);
+  for (const table of Object.keys(before)) {
+    const expectedDelta = table === "packets" || table === "receipts" ? 1 : table === "packet_items" ? 6 : 0;
+    assert.equal(after[table] - before[table], expectedDelta, table);
+  }
+
+  const inspect = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/${projectId}/inspect/mechanisms/${encodeURIComponent(mechanism.id)}`,
+  );
+  assert.equal(inspect.response.status, 200, JSON.stringify(inspect.value));
+  assert.equal(inspect.value.mechanism.currentVersionId, mechanism.currentVersion.id);
+  assert.equal(inspect.value.versions.length, 2);
+  assert.equal(inspect.value.versions[0].id, mechanism.oldVersion.id);
+  assert.equal(inspect.value.versions[0].status, "historical");
+  assert.equal(inspect.value.versions[1].id, mechanism.currentVersion.id);
+  assert.equal(inspect.value.versions[1].status, "active");
+  assert.equal(inspect.value.versions[1].supersedesVersionId, mechanism.oldVersion.id);
+  assert.equal(inspect.value.governance.length, 2);
+  assert.equal(inspect.value.packetUsage.length, 1);
+  assert.equal(inspect.value.packetUsage[0].packet_id, result.value.packet.id);
+
+  if (process.env.PART3_CAPTURE === "1") {
+    console.log(`PART3_ENGINE_OUTPUT=${JSON.stringify({
+      fixtureVersion: fixture.fixtureVersion,
+      result: result.value,
+      inspect: inspect.value,
+      mutationDelta: Object.fromEntries(Object.keys(before).map((table) => [table, after[table] - before[table]])),
+    })}`);
+  }
+});

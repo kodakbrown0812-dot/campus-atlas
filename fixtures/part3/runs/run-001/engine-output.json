@@ -1,0 +1,64 @@
+{
+  "runId": "part3-supersession-run-001",
+  "fixtureVersion": "part3-supersession-v1",
+  "fixtureSha256": "a1507d67350a1ec6512efa69bbc607439b0b9470d95131295187b85b38712306",
+  "fixtureCommit": "6a02102",
+  "environment": "isolated_sqlite_backed_d1",
+  "productionMutation": false,
+  "need": {
+    "level": "full",
+    "reasonCodes": [
+      "explicit_full_room_transfer"
+    ]
+  },
+  "roadway": {
+    "id": "roadway:56ad392557e83fe58f3667c71cf208d8",
+    "versionId": "roadway-version:56ad392557e83fe58f3667c71cf208d8:v1",
+    "name": "Broad Lock-Finding"
+  },
+  "packet": {
+    "id": "packet:6301ea84-4415-47b6-b966-093cc03208bc",
+    "status": "compiled",
+    "tokenBudget": 800,
+    "finalTokenCount": 302,
+    "compiledContent": "# Atlas reconstruction packet v1\nTask: What should Campus Atlas do immediately after Part 2, and why? Give one concrete next step.\nIntent: Prepare a full room transfer for a fresh receiving-model room. The answer must identify the current next step and distinguish it from superseded roadmap context.; compare candidate mechanisms under a common evidence standard.\nPrimary roadway: Broad Lock-Finding v1\nScope: project atlas-roadmap-eval; narrow.\nBudget: 800 tokens (deterministic character approximation).\n\n## Required Blueprint checks\n- [USE][CHECK 1] Define the requested decision and candidate universe.\n- [USE][CHECK 2] Separate offered price, probability, mechanism, and uncertainty.\n- [USE][CHECK 3] Compare viable alternatives under the same evidence standard.\n- [USE][CHECK 4] Carry the strongest challenge to the leading pathway.\n- [USE][CHECK 5] Name missing live state that could change the ranking.\n\n## Protected mechanisms, corrections, challenges, and conflicts\n- [USE] Do not begin Mock Company after Part 2. Run Part 3 as the controlled supersession proof: compile one Full packet, compare baseline and Atla… [Mechanism:mechanism:part3-roadmap-sequence; Compressed; approved_project_wide]"
+  },
+  "receipt": {
+    "id": "receipt:04f48d6f-ec80-4874-bd52-05a2a608784e",
+    "currentMechanismId": "mechanism:part3-roadmap-sequence",
+    "currentMechanismVersionId": "mechanism:part3-roadmap-sequence:version:2",
+    "currentStatement": "Do not begin Mock Company after Part 2. Run Part 3 as the controlled supersession proof: compile one Full packet, compare baseline and Atlas fresh rooms, apply the ‘Wasn’t Mock Company next?’ challenge, freeze and score both outputs, and inspect lineage. Mock Company remains deferred until the manual current-room and new-room proofs are closed.",
+    "treatment": "Use",
+    "authority": "approved_project_wide",
+    "governanceEventId": "governance-event:part3-roadmap-v2-correction",
+    "oldVersionIncluded": false
+  },
+  "inspect": {
+    "mechanismId": "mechanism:part3-roadmap-sequence",
+    "currentVersionId": "mechanism:part3-roadmap-sequence:version:2",
+    "versions": [
+      {
+        "id": "mechanism:part3-roadmap-sequence:version:1",
+        "status": "historical",
+        "supersedesVersionId": null
+      },
+      {
+        "id": "mechanism:part3-roadmap-sequence:version:2",
+        "status": "active",
+        "supersedesVersionId": "mechanism:part3-roadmap-sequence:version:1"
+      }
+    ],
+    "governanceEventIds": [
+      "governance-event:part3-roadmap-v1-approved",
+      "governance-event:part3-roadmap-v2-correction"
+    ],
+    "packetUsageCount": 1
+  },
+  "mutationDelta": {
+    "packets": 1,
+    "packet_items": 6,
+    "receipts": 1,
+    "allOtherCanonicalTables": 0
+  },
+  "status": "frozen_before_room_execution"
+}
