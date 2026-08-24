@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-run-002",
+  "summary": {
+    "intendedProjectClaims": 7,
+    "completeLineageClaims": 7,
+    "governedLineageOnlyClaims": 5,
+    "missingExactSourceLinkClaims": 0,
+    "projectClaimsActuallySupplied": 0,
+    "status": "exact fixture lineage is complete, but no project claim survived treatment into compiledContent"
+  },
+  "suppliedRoadwayClaims": {
+    "classification": "governed_lineage_only",
+    "roadwayId": "roadway:dfb5912e333597c370c63db605b4195e",
+    "roadwayVersionId": "roadway-version:dfb5912e333597c370c63db605b4195e:v1",
+    "packetItemSourceIds": [
+      "roadway-version:dfb5912e333597c370c63db605b4195e:v1:check:1",
+      "roadway-version:dfb5912e333597c370c63db605b4195e:v1:check:2",
+      "roadway-version:dfb5912e333597c370c63db605b4195e:v1:check:3",
+      "roadway-version:dfb5912e333597c370c63db605b4195e:v1:check:4",
+      "roadway-version:dfb5912e333597c370c63db605b4195e:v1:check:5"
+    ],
+    "exactSourceMessageApplicability": "not_applicable_system_blueprint_claims"
+  },
+  "intendedProjectClaims": [
+    {
+      "classification": "complete_lineage",
+      "delivered": false,
+      "packetTreatment": "Exclude",
+      "packetItemId": "packet-item:3192a0fd-a7fb-4b9b-b3e3-30d32a96d23f",
+      "mechanismId": "mechanism:part3c-current-direction",
+      "mechanismVersionId": "mechanism:part3c-current-direction:version:2",
+      "supersedesVersionId": "mechanism:part3c-current-direction:version:1",
+      "governanceEventId": "governance-event:part3c-room-transfer-correction",
+      "findingId": "finding:part3c:01",
+      "exactSourceChain": [
+        { "eventId": "event:part3c:02", "messageId": "message:part3c:02", "sequence": 2 },
+        { "eventId": "event:part3c:25", "messageId": "message:part3c:25", "sequence": 25 },
+        { "eventId": "event:part3c:27", "messageId": "message:part3c:27", "sequence": 27 },
+        { "eventId": "event:part3c:28", "messageId": "message:part3c:28", "sequence": 28 },
+        { "eventId": "event:part3c:39", "messageId": "message:part3c:39", "sequence": 39 }
+      ]
+    },
+    {
+      "classification": "complete_lineage",
+      "delivered": false,
+      "packetTreatment": "Consider",
+      "packetItemId": "packet-item:2fb3c758-04fb-4c86-86bb-5198b17d4215",
+      "mechanismId": "mechanism:part3c-simple-small",
+      "mechanismVersionId": "mechanism:part3c-simple-small:version:1",
+      "supersedesVersionId": null,
+      "governanceEventId": "governance-event:part3c:02",
+      "findingId": "finding:part3c:02",
+      "exactSourceChain": [
+        { "eventId": "event:part3c:29", "messageId": "message:part3c:29", "sequence": 29 }
+      ]
+    },
+    {
+      "classification": "complete_lineage",
+      "delivered": false,
+      "packetTreatment": "Consider",
+      "packetItemId": "packet-item:ebadf4db-f17f-44b3-892c-19443fdede89",
+      "mechanismId": "mechanism:part3c-exact-lineage",
+      "mechanismVersionId": "mechanism:part3c-exact-lineage:version:1",
+      "supersedesVersionId": null,
+      "governanceEventId": "governance-event:part3c:03",
+      "findingId": "finding:part3c:03",
+      "exactSourceChain": [
+        { "eventId": "event:part3c:30", "messageId": "message:part3c:30", "sequence": 30 },
+        { "eventId": "event:part3c:41", "messageId": "message:part3c:41", "sequence": 41 }
+      ]
+    },
+    {
+      "classification": "complete_lineage",
+      "delivered": false,
+      "packetTreatment": "Consider",
+      "packetItemId": "packet-item:81de6462-04f2-4dca-aab6-84d4c9e616a2",
+      "mechanismId": "mechanism:part3c-fresh-room-protocol",
+      "mechanismVersionId": "mechanism:part3c-fresh-room-protocol:version:1",
+      "supersedesVersionId": null,
+      "governanceEventId": "governance-event:part3c:04",
+      "findingId": "finding:part3c:04",
+      "exactSourceChain": [
+        { "eventId": "event:part3c:31", "messageId": "message:part3c:31", "sequence": 31 }
+      ]
+    },
+    {
+      "classification": "complete_lineage",
+      "delivered": false,
+      "packetTreatment": "Consider",
+      "packetItemId": "packet-item:9cede197-df79-4de7-821d-c0124a90777e",
+      "mechanismId": "mechanism:part3c-proof-closure",
+      "mechanismVersionId": "mechanism:part3c-proof-closure:version:1",
+      "supersedesVersionId": null,
+      "governanceEventId": "governance-event:part3c:05",
+      "findingId": "finding:part3c:05",
+      "exactSourceChain": [
+        { "eventId": "event:part3c:32", "messageId": "message:part3c:32", "sequence": 32 },
+        { "eventId": "event:part3c:33", "messageId": "message:part3c:33", "sequence": 33 },
+        { "eventId": "event:part3c:42", "messageId": "message:part3c:42", "sequence": 42 }
+      ]
+    },
+    {
+      "classification": "complete_lineage",
+      "delivered": false,
+      "packetTreatment": "Consider",
+      "packetItemId": "packet-item:5cc3c0a4-43b5-491d-bc7f-c601186511c9",
+      "mechanismId": "mechanism:part3c-abandoned-branches",
+      "mechanismVersionId": "mechanism:part3c-abandoned-branches:version:1",
+      "supersedesVersionId": null,
+      "governanceEventId": "governance-event:part3c:06",
+      "findingId": "finding:part3c:06",
+      "exactSourceChain": [
+        { "eventId": "event:part3c:19", "messageId": "message:part3c:19", "sequence": 19 },
+        { "eventId": "event:part3c:21", "messageId": "message:part3c:21", "sequence": 21 },
+        { "eventId": "event:part3c:22", "messageId": "message:part3c:22", "sequence": 22 },
+        { "eventId": "event:part3c:40", "messageId": "message:part3c:40", "sequence": 40 }
+      ]
+    },
+    {
+      "classification": "complete_lineage",
+      "delivered": false,
+      "packetTreatment": "Consider",
+      "packetItemId": "packet-item:25b6c88a-b65f-4806-9ed5-c20211c42570",
+      "mechanismId": "mechanism:part3c-expired-status",
+      "mechanismVersionId": "mechanism:part3c-expired-status:version:1",
+      "supersedesVersionId": null,
+      "governanceEventId": "governance-event:part3c:07",
+      "findingId": "finding:part3c:07",
+      "exactSourceChain": [
+        { "eventId": "event:part3c:15", "messageId": "message:part3c:15", "sequence": 15 },
+        { "eventId": "event:part3c:16", "messageId": "message:part3c:16", "sequence": 16 },
+        { "eventId": "event:part3c:18", "messageId": "message:part3c:18", "sequence": 18 },
+        { "eventId": "event:part3c:37", "messageId": "message:part3c:37", "sequence": 37 }
+      ]
+    }
+  ]
+}

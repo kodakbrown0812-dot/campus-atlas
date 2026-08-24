@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-run-002",
+  "failureNumber": 1,
+  "stage": "critical_packet_preservation_gate_before_destination_execution",
+  "classification": "required_governed_context_not_supplied",
+  "exactInput": {
+    "task": "What should we build next for V1.8, what should we specifically avoid doing, and what constraints must govern the next proof?",
+    "requestedOutput": "Prepare a full room transfer for a fresh destination. Preserve the current direction, its supersession rationale, the proof constraints, and the boundary for larger company trials.",
+    "roadwayOverride": "broad-lock-finding",
+    "tokenBudget": 1600,
+    "fixtureSha256": "c07cdf8848e2504975f9357a118f5118f95da3e64f7c4be0e58ce64f2e1840d2",
+    "rubricSha256": "dd63f39221e45fa47f41ec3df4de127abbd2539f7c7e152c03cc666fff64b6e3"
+  },
+  "identifiers": {
+    "projectId": "atlas-noisy-room-eval",
+    "packetId": "packet:0cbaadd8-30d1-4b62-8d75-0a6803654f1b",
+    "receiptId": "receipt:19f69d81-38be-425c-add8-140c48bc20a7",
+    "roadwayId": "roadway:dfb5912e333597c370c63db605b4195e",
+    "roadwayVersionId": "roadway-version:dfb5912e333597c370c63db605b4195e:v1"
+  },
+  "expected": {
+    "need": "full",
+    "governingMechanismsSupplied": 7,
+    "packetPreservationGatePassed": true,
+    "requiredProjectContext": [
+      "current Room Transfer direction",
+      "explicit Mock Company supersession guard",
+      "complexity and continuity-first rationale",
+      "simple interaction and smallest-context constraints",
+      "Exact source and Inspect lineage constraints",
+      "fresh-room and frozen-output protocol",
+      "proof-closure boundary",
+      "abandoned-branch and expired-state guards"
+    ]
+  },
+  "actual": {
+    "serverStatus": "compiled",
+    "need": "full",
+    "governingMechanismsSupplied": 0,
+    "requiredChecksSupplied": 5,
+    "packetPreservationGatePassed": false,
+    "compiledContent": "Only the task header, intent, roadway metadata, and five generic Blueprint checks were supplied.",
+    "currentDirectionTreatment": "Exclude",
+    "currentDirectionReason": "Same project context does not match the selected task mechanism.",
+    "otherRequiredMechanismTreatment": "Consider",
+    "otherRequiredMechanismReason": "Candidate is related but its mechanism fit is indirect."
+  },
+  "preservationResults": {
+    "explicitCurrentDirection": false,
+    "explicitSupersessionGuard": false,
+    "rationale": false,
+    "requiredProofConstraints": false,
+    "currentNextAction": false,
+    "proofClosureBoundary": false
+  },
+  "compression": {
+    "sourceEstimatedTokens": 4057,
+    "packetEstimatedTokens": 242,
+    "estimatedTokenReductionPercent": 94.035001,
+    "thresholdPassed": true,
+    "usableContinuity": false
+  },
+  "lineage": {
+    "intendedProjectClaims": "complete_lineage",
+    "suppliedProjectClaims": 0,
+    "suppliedRoadwayChecks": "governed_lineage_only"
+  },
+  "destinationExecution": "stopped_before_fresh_rooms",
+  "behavioralScores": "not_available",
+  "likelyCause": "The existing deterministic task-mechanism match treated the explicit approved V1.8 mechanisms as indirect or non-matching, so the Full compiler omitted all project mechanisms despite valid authority, scope, evidence, and lineage.",
+  "smallestLikelyCorrectiveSlice": "Narrowly repair or calibrate deterministic relevance for broad project-plan questions so explicit approved mechanisms that answer current direction, avoidances, and proof constraints can reach Use; then rerun this frozen fixture unchanged.",
+  "runtimeRepairAttempted": false,
+  "productionChanged": false,
+  "status": "frozen_failure"
+}

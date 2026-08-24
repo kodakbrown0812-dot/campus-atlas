@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-run-002",
+  "baseline": null,
+  "atlas": null,
+  "followUps": [],
+  "status": "not_run_due_packet_preservation_failure",
+  "reason": "The exact compiledContent failed the pre-destination preservation gate; creating fresh rooms would test model inference rather than Atlas-supplied continuity."
+}

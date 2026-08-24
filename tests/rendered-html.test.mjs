@@ -7126,3 +7126,427 @@ test("Part 3 controlled supersession fixture compiles only the current governed 
     })}`);
   }
 });
+
+test("Part 3C noisy Exact room records the first packet-preservation contract failure before destination execution", async () => {
+  const fixtureBytes = await readFile(
+    new URL("../fixtures/part3/runs/run-002/source-fixture.json", import.meta.url),
+  );
+  const rubricBytes = await readFile(
+    new URL("../fixtures/part3/runs/run-002/rubric.json", import.meta.url),
+  );
+  const fixture = JSON.parse(fixtureBytes.toString("utf8"));
+  const rubric = JSON.parse(rubricBytes.toString("utf8"));
+  assert.equal(fixture.status, "frozen_before_execution");
+  assert.equal(rubric.status, "frozen_before_execution");
+  assert.equal(fixture.runId, rubric.runId);
+
+  const worker = await builtWorker("part3c-noisy-room");
+  const DB = await sqliteD1();
+  const projectId = fixture.projectId;
+  const caseId = fixture.caseId;
+  const conversationId = fixture.conversationId;
+  await seedCanonicalProject(worker, DB, projectId, "Atlas Noisy Room Evaluation");
+  await initializeRoadways(worker, DB, projectId);
+
+  const startedAt = fixture.transcript[0].timestamp;
+  const endedAt = fixture.transcript.at(-1).timestamp;
+  DB.database.prepare(
+    `INSERT INTO conversations (
+      id, project_id, source_type, title, provenance, active_case_id, status,
+      original_started_at, original_ended_at, metadata, created_at, updated_at
+    ) VALUES (?, ?, 'exact_fixture', ?, ?, ?, 'active', ?, ?, ?, ?, ?)`,
+  ).run(
+    conversationId,
+    projectId,
+    fixture.title,
+    JSON.stringify({ representation: fixture.representation, fixtureVersion: fixture.fixtureVersion }),
+    caseId,
+    startedAt,
+    endedAt,
+    JSON.stringify({ runId: fixture.runId, immutableFixture: true }),
+    startedAt,
+    endedAt,
+  );
+  DB.database.prepare(
+    `INSERT INTO cases (
+      id, project_id, objective, current_thesis, current_decision, status,
+      scope, active_constraints, case_core, metadata, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, 'active', 'project_wide', ?, ?, ?, ?, ?)`,
+  ).run(
+    caseId,
+    projectId,
+    fixture.literalTask,
+    "Room Transfer must prove governed continuity before V1.8 widens.",
+    "Continue the deterministic Room Transfer proof sequence.",
+    JSON.stringify([
+      "reuse governed continuity",
+      "simple interaction",
+      "smallest useful context",
+      "Exact sources and Inspect lineage",
+      "fresh-room comparison with frozen outputs",
+    ]),
+    JSON.stringify({ fixtureVersion: fixture.fixtureVersion, sourceMessageCount: fixture.transcript.length }),
+    JSON.stringify({ runId: fixture.runId }),
+    startedAt,
+    endedAt,
+  );
+  DB.database.prepare(
+    `INSERT INTO conversation_case_links (
+      id, project_id, conversation_id, case_id, relationship_state,
+      linked_by, link_reason, created_at
+    ) VALUES (?, ?, ?, ?, 'active', 'fixture', 'Single bounded Part 3C case.', ?)`,
+  ).run("conversation-case-link:part3c", projectId, conversationId, caseId, startedAt);
+
+  const eventIdsBySequence = new Map();
+  for (const entry of fixture.transcript) {
+    const suffix = String(entry.sequence).padStart(2, "0");
+    const messageId = `message:part3c:${suffix}`;
+    const eventId = `event:part3c:${suffix}`;
+    const actorType = entry.speaker === "assistant" ? "assistant" : "user";
+    const contentHash = createHash("sha256").update(entry.text).digest("hex");
+    const eventType = /correction|supersession/.test(entry.category)
+      ? "correction"
+      : /resolved|resolution/.test(entry.category)
+        ? "outcome"
+        : /decision/.test(entry.category)
+          ? "decision"
+          : "observation";
+    DB.database.prepare(
+      `INSERT INTO messages (
+        id, project_id, conversation_id, sequence_number, actor_type, actor_id,
+        exact_content, original_timestamp, ingested_at, source_reference,
+        source_message_key, content_hash, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      messageId,
+      projectId,
+      conversationId,
+      entry.sequence,
+      actorType,
+      entry.speaker,
+      entry.text,
+      entry.timestamp,
+      entry.timestamp,
+      `${fixture.fixtureVersion}#message-${entry.sequence}`,
+      `part3c-message-${entry.sequence}`,
+      contentHash,
+      JSON.stringify({ representationType: "Exact", category: entry.category }),
+    );
+    DB.database.prepare(
+      `INSERT INTO events (
+        id, project_id, conversation_id, case_id, event_type, exact_source_span,
+        source_message_ids, actor_id, observed_at, ingested_at, valid_from,
+        extraction_method, extraction_version, authority_state, assignment_state,
+        version, metadata
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                'exact_fixture', 'part3c-v1', 'observed', 'assigned', 1, ?)`,
+    ).run(
+      eventId,
+      projectId,
+      conversationId,
+      caseId,
+      eventType,
+      entry.text,
+      JSON.stringify([messageId]),
+      entry.speaker,
+      entry.timestamp,
+      entry.timestamp,
+      entry.timestamp,
+      JSON.stringify({
+        representationType: "Exact",
+        category: entry.category,
+        sourceSpans: [{ messageId, start: 0, end: entry.text.length }],
+      }),
+    );
+    DB.database.prepare(
+      `INSERT INTO case_event_attachments (
+        id, project_id, case_id, event_id, attachment_state,
+        attached_by, attachment_reason, created_at
+      ) VALUES (?, ?, ?, ?, 'attached', 'fixture', 'Exact noisy-room evidence.', ?)`,
+    ).run(`case-event-attachment:part3c:${suffix}`, projectId, caseId, eventId, entry.timestamp);
+    eventIdsBySequence.set(entry.sequence, eventId);
+  }
+
+  const findingIdByMechanism = new Map();
+  for (const [index, mechanism] of fixture.governedState.currentMechanisms.entries()) {
+    const findingId = `finding:part3c:${String(index + 1).padStart(2, "0")}`;
+    const findingVersionId = `${findingId}:version:1`;
+    const sourceEventIds = mechanism.sourceSequences.map((sequence) => eventIdsBySequence.get(sequence));
+    const createdAt = fixture.transcript.find(({ sequence }) => sequence === mechanism.sourceSequences.at(-1)).timestamp;
+    DB.database.prepare(
+      `INSERT INTO findings (
+        id, project_id, case_id, finding_type, source_event_ids,
+        current_version_id, status, authority_state, review_required, created_at
+      ) VALUES (?, ?, ?, 'governing_mechanism', ?, ?, 'accepted',
+                'approved_project_wide', 0, ?)`,
+    ).run(findingId, projectId, caseId, JSON.stringify(sourceEventIds), findingVersionId, createdAt);
+    DB.database.prepare(
+      `INSERT INTO finding_versions (
+        id, project_id, finding_id, proposal_statement, proposed_scope,
+        conditions, exclusions, supporting_evidence, counterevidence,
+        reason_for_surfacing, expected_retrieval_effect, proposal_hash,
+        created_by, created_at
+      ) VALUES (?, ?, ?, ?, 'project_wide', '[]', '[]', ?, '[]', ?,
+                'eligible_when_roadway_scope_and_freshness_match', ?, 'cody', ?)`,
+    ).run(
+      findingVersionId,
+      projectId,
+      findingId,
+      mechanism.statement,
+      JSON.stringify(sourceEventIds),
+      `Frozen Part 3C governed claim ${index + 1}.`,
+      createHash("sha256").update(mechanism.statement).digest("hex"),
+      createdAt,
+    );
+    findingIdByMechanism.set(mechanism.id, findingId);
+  }
+
+  const currentDirection = fixture.governedState.currentMechanisms[0];
+  const historical = fixture.governedState.historicalDirectionVersion;
+  for (const mechanism of fixture.governedState.currentMechanisms) {
+    const createdAt = fixture.transcript.find(({ sequence }) => sequence === mechanism.sourceSequences.at(-1)).timestamp;
+    DB.database.prepare(
+      `INSERT INTO mechanisms (
+        id, project_id, source_finding_id, current_governing_version_id,
+        status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'active', ?, ?)`,
+    ).run(
+      mechanism.id,
+      projectId,
+      findingIdByMechanism.get(mechanism.id),
+      mechanism.versionId,
+      mechanism.id === currentDirection.id ? fixture.transcript[1].timestamp : createdAt,
+      createdAt,
+    );
+    if (mechanism.id === currentDirection.id) {
+      DB.database.prepare(
+        `INSERT INTO mechanism_versions (
+          id, project_id, mechanism_id, statement, scope_conditions, exclusions,
+          supporting_case_ids, supporting_node_ids, counterevidence_ids,
+          reality_contact, authority_state, intended_retrieval_effect,
+          created_by, created_at, supersedes_version_id
+        ) VALUES (?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', ?,
+                  'approved_project_wide', 'historical_after_explicit_supersession',
+                  'cody', ?, NULL)`,
+      ).run(
+        historical.versionId,
+        projectId,
+        mechanism.id,
+        historical.statement,
+        "Historically accepted Mock Company direction.",
+        fixture.transcript[1].timestamp,
+      );
+    }
+    DB.database.prepare(
+      `INSERT INTO mechanism_versions (
+        id, project_id, mechanism_id, statement, scope_conditions, exclusions,
+        supporting_case_ids, supporting_node_ids, counterevidence_ids,
+        reality_contact, authority_state, intended_retrieval_effect,
+        created_by, created_at, supersedes_version_id
+      ) VALUES (?, ?, ?, ?, '[]', '[]', '[]', '[]', '[]', ?, ?,
+                'eligible_when_roadway_scope_and_freshness_match',
+                'cody', ?, ?)`,
+    ).run(
+      mechanism.versionId,
+      projectId,
+      mechanism.id,
+      mechanism.statement,
+      "Exact owner-reviewed Part 3C evidence.",
+      mechanism.authority,
+      createdAt,
+      mechanism.supersedesVersionId || null,
+    );
+    const governanceId = mechanism.id === currentDirection.id
+      ? "governance-event:part3c-room-transfer-correction"
+      : `governance-event:part3c:${String(fixture.governedState.currentMechanisms.indexOf(mechanism) + 1).padStart(2, "0")}`;
+    DB.database.prepare(
+      `INSERT INTO governance_events (
+        id, project_id, actor_id, action, target_type, target_id,
+        source_version_id, resulting_version_id, prior_authority, new_authority,
+        prior_status, new_status, prior_scope, new_scope, affected_mechanism_id,
+        reason, retrieval_effect, created_at, idempotency_key
+      ) VALUES (?, ?, 'cody', ?, 'mechanism', ?, ?, ?, ?, ?, ?, 'active',
+                'project_wide', 'project_wide', ?, ?, ?, ?, ?)`,
+    ).run(
+      governanceId,
+      projectId,
+      mechanism.id === currentDirection.id ? "correct" : "approve",
+      mechanism.id,
+      mechanism.id === currentDirection.id ? historical.versionId : mechanism.versionId,
+      mechanism.versionId,
+      mechanism.id === currentDirection.id ? "approved_project_wide" : "under_review",
+      mechanism.authority,
+      mechanism.id === currentDirection.id ? "active" : "proposed",
+      mechanism.id,
+      mechanism.id === currentDirection.id
+        ? "Room Transfer explicitly supersedes Mock Company after the product became too complicated."
+        : "Approved frozen Part 3C proof constraint.",
+      mechanism.id === currentDirection.id
+        ? "supersedes_prior_governing_version"
+        : "eligible_when_roadway_scope_and_freshness_match",
+      createdAt,
+      `part3c-governance-${mechanism.id}`,
+    );
+  }
+
+  const before = canonicalMutationCounts(DB);
+  const result = await reconstructionRunRequest(worker, DB, projectId, {
+    task: fixture.literalTask,
+    requestedOutput: fixture.requestedOutput,
+    roadwayOverride: fixture.runtimeInputs.roadwayOverride,
+    tokenBudget: fixture.runtimeInputs.tokenBudget,
+  }, "part3c-noisy-room-full-packet");
+  assert.equal(result.response.status, 201, JSON.stringify(result.value));
+  assert.equal(result.value.status, "compiled");
+  assert.equal(result.value.need.level, "full");
+
+  const compiledContent = result.value.packet.compiledContent;
+  const packetItems = DB.database.prepare(
+    `SELECT id, source_id, source_version_id, treatment, representation_type,
+            authority_state, inclusion_reason, exclusion_reason
+     FROM packet_items WHERE project_id = ? AND packet_id = ?
+     ORDER BY sequence_order`,
+  ).all(projectId, result.value.packet.id);
+  const preservation = Object.fromEntries(fixture.governedState.currentMechanisms.map((mechanism) => [
+    mechanism.id,
+    compiledContent.includes(mechanism.statement),
+  ]));
+  const packetPreservationGatePassed = Object.values(preservation).every(Boolean);
+  const sourceUtf16 = fixture.transcript.reduce((total, entry) => total + entry.text.length, 0);
+  const sourceMetrics = {
+    utf8Bytes: fixture.transcript.reduce((total, entry) => total + Buffer.byteLength(entry.text, "utf8"), 0),
+    characters: fixture.transcript.reduce((total, entry) => total + [...entry.text].length, 0),
+    whitespaceWords: fixture.transcript.reduce((total, entry) => total + entry.text.trim().split(/\s+/u).length, 0),
+    estimatedTokens: Math.ceil(sourceUtf16 / 4),
+  };
+  const atlasMetrics = {
+    utf8Bytes: Buffer.byteLength(compiledContent, "utf8"),
+    characters: [...compiledContent].length,
+    whitespaceWords: compiledContent.trim().split(/\s+/u).length,
+    estimatedTokens: Math.ceil(compiledContent.length / 4),
+  };
+  const tokenReductionPercent = Number(
+    (((sourceMetrics.estimatedTokens - atlasMetrics.estimatedTokens) / sourceMetrics.estimatedTokens) * 100).toFixed(6),
+  );
+
+  const lineage = [];
+  for (const mechanism of fixture.governedState.currentMechanisms) {
+    const inspect = await slice2Request(
+      worker,
+      DB,
+      `/api/v1/projects/${projectId}/inspect/mechanisms/${encodeURIComponent(mechanism.id)}`,
+    );
+    assert.equal(inspect.response.status, 200, JSON.stringify(inspect.value));
+    const sourceFinding = inspect.value.sourceFinding;
+    const sourceEventIds = JSON.parse(sourceFinding.source_event_ids);
+    const exactSources = sourceEventIds.map((eventId) => {
+      const event = DB.database.prepare(
+        "SELECT id, exact_source_span, source_message_ids FROM events WHERE project_id = ? AND id = ?",
+      ).get(projectId, eventId);
+      const messageId = JSON.parse(event.source_message_ids)[0];
+      const message = DB.database.prepare(
+        "SELECT id, sequence_number, exact_content, content_hash FROM messages WHERE project_id = ? AND id = ?",
+      ).get(projectId, messageId);
+      return {
+        eventId,
+        messageId,
+        sequence: message.sequence_number,
+        contentHash: message.content_hash,
+        exactBytesMatch: Buffer.from(event.exact_source_span).equals(Buffer.from(message.exact_content)),
+      };
+    });
+    lineage.push({
+      claim: mechanism.statement,
+      classification: exactSources.every(({ exactBytesMatch }) => exactBytesMatch)
+        ? "complete_lineage"
+        : "missing_exact_source_link",
+      packetItemId: packetItems.find(({ source_id }) => source_id === mechanism.id)?.id || null,
+      mechanismId: mechanism.id,
+      mechanismVersionId: inspect.value.mechanism.currentVersionId,
+      sourceFindingId: sourceFinding.id,
+      governanceEventIds: inspect.value.governance.map(({ id }) => id),
+      supersedesVersionId: inspect.value.versions.find(({ status }) => status === "active").supersedesVersionId,
+      exactSources,
+    });
+  }
+
+  const after = canonicalMutationCounts(DB);
+  const mutationDelta = Object.fromEntries(Object.keys(before).map((table) => [table, after[table] - before[table]]));
+  const capture = {
+    runId: fixture.runId,
+    fixtureSha256: createHash("sha256").update(fixtureBytes).digest("hex"),
+    rubricSha256: createHash("sha256").update(rubricBytes).digest("hex"),
+    result: result.value,
+    packetItems,
+    preservation,
+    packetPreservationGatePassed,
+    sourceMetrics,
+    atlasMetrics,
+    tokenReductionPercent,
+    lineage,
+    mutationDelta,
+    irrelevantNoisePresent: /airport|coffee|naming thought|north concourse|gate twelve/i.test(compiledContent),
+    staleCurrentStatePresent: /currently blocked|waiting for auth|test is failing|Tuesday is a deadline/i.test(compiledContent),
+  };
+  if (process.env.PART3C_CAPTURE === "1") {
+    console.log(`PART3C_ENGINE_OUTPUT=${JSON.stringify({
+      runId: capture.runId,
+      fixtureSha256: capture.fixtureSha256,
+      rubricSha256: capture.rubricSha256,
+      response: {
+        apiVersion: result.value.apiVersion,
+        status: result.value.status,
+        projectId: result.value.projectId,
+        caseId: result.value.caseId,
+        literalTask: result.value.literalTask,
+        need: result.value.need,
+        roadway: result.value.roadway,
+        packet: result.value.packet,
+        summary: result.value.summary,
+        receipt: {
+          id: result.value.receipt.id,
+          treatmentCounts: result.value.receipt.treatmentCounts,
+          governanceCauses: result.value.receipt.governanceCauses,
+          unresolvedConflicts: result.value.receipt.unresolvedConflicts,
+          honestyStatement: result.value.receipt.honestyStatement,
+        },
+        effects: result.value.effects,
+      },
+      projectMechanismTreatments: result.value.receipt.treatmentSummary.Consider
+        .concat(result.value.receipt.treatmentSummary.Exclude)
+        .filter(({ sourceType }) => sourceType === "Mechanism")
+        .map(({ sourceId, sourceVersionId, treatment, reason, discovery, ranking }) => ({
+          sourceId,
+          sourceVersionId,
+          treatment,
+          reason,
+          discovery,
+          ranking,
+        })),
+      preservation: capture.preservation,
+      packetPreservationGatePassed: capture.packetPreservationGatePassed,
+      sourceMetrics: capture.sourceMetrics,
+      atlasMetrics: capture.atlasMetrics,
+      tokenReductionPercent: capture.tokenReductionPercent,
+      lineage: capture.lineage,
+      mutationDelta: capture.mutationDelta,
+      irrelevantNoisePresent: capture.irrelevantNoisePresent,
+      staleCurrentStatePresent: capture.staleCurrentStatePresent,
+    })}`);
+  }
+
+  assert.equal(packetPreservationGatePassed, false);
+  assert.equal(result.value.summary.governingMechanismsSupplied, 0);
+  assert.ok(fixture.governedState.currentMechanisms.every((mechanism) => (
+    packetItems.some((item) => item.source_id === mechanism.id && item.treatment !== "Use")
+  )));
+  assert.equal(tokenReductionPercent >= rubric.compressionAcceptance.minimumEstimatedTokenReductionPercent, true);
+  assert.equal(capture.irrelevantNoisePresent, false);
+  assert.equal(capture.staleCurrentStatePresent, false);
+  assert.ok(lineage.every(({ classification }) => classification === "complete_lineage"));
+  assert.equal(mutationDelta.packets, 1);
+  assert.equal(mutationDelta.receipts, 1);
+  for (const table of Object.keys(mutationDelta)) {
+    if (!["packets", "packet_items", "receipts"].includes(table)) assert.equal(mutationDelta[table], 0, table);
+  }
+});

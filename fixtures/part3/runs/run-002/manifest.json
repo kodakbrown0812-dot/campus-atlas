@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-run-002",
+  "fixtureFreezeCommits": [
+    "3734cf0",
+    "975a82b"
+  ],
+  "artifacts": {
+    "source-fixture.json": "c07cdf8848e2504975f9357a118f5118f95da3e64f7c4be0e58ce64f2e1840d2",
+    "rubric.json": "dd63f39221e45fa47f41ec3df4de127abbd2539f7c7e152c03cc666fff64b6e3",
+    "engine-output.json": "f635c22d4d1adee7f73e687846a91119a1f44dec7cf9c0982d59cb067e4da1ed",
+    "compression.json": "acfddcfd1023729d147eb89503d561b3f72c6d575b92cf7431cbc3feeeee0ce1",
+    "room-outputs.json": "d1371ace78504427473605d0a2e52372c51c3627f0c0c6bfc40061ef3c23c560",
+    "scorecard.json": "5d2bf413022b85cf84b275386d65e45aff1bd062ecd8b486ee011389f71a327f",
+    "lineage.json": "04e18a7d616eba998d967ca4db6cb5dece9f604182854b9e480f67bbb7226c8d",
+    "failure.json": "be59798d7c062a0f8abf92e11e8ff9ae78450c3aaad327d5c2ad552b6dc54cae"
+  },
+  "compiledContentSha256": "d76d360eef3c8a225a4cee3417411f51a9e643a3cb178e08ddad0e93ed15c15b",
+  "executionStatus": "stopped_at_first_contract_failure_before_destination_execution",
+  "productionChanged": false
+}

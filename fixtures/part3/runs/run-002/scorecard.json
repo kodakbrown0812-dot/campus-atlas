@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-run-002",
+  "rubricIdentity": "fixtures/part3/runs/run-002/rubric.json",
+  "baselineScore": null,
+  "atlasScore": null,
+  "scoreDeltaAtlasMinusBaseline": null,
+  "prohibitedClaimsObserved": null,
+  "requiredBehavioralCriteriaLost": null,
+  "packetPreservationGatePassed": false,
+  "behavioralScoringPerformed": false,
+  "status": "not_scored_due_packet_preservation_failure"
+}

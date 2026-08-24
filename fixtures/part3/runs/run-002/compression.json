@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-run-002",
+  "method": {
+    "sourceBoundary": "Exact transcript message-body values aggregated in chronological order without invented separator bytes.",
+    "atlasBoundary": "Exact server-authored compiledContent bytes in compiled-content.txt.",
+    "bytes": "UTF-8",
+    "characters": "Unicode code points",
+    "words": "Whitespace-tokenized",
+    "tokens": "Estimate only: ceil(total UTF-16 code units / 4), matching Part 3B."
+  },
+  "source": {
+    "identity": "fixtures/part3/runs/run-002/source-fixture.json#transcript[].text",
+    "artifactSha256": "c07cdf8848e2504975f9357a118f5118f95da3e64f7c4be0e58ce64f2e1840d2",
+    "contentSequenceSha256": "0c8e0c2d1bbf520c2ca21bc98b05ebdda254aa746e0802f1316279869ee0c95e",
+    "messageCount": 43,
+    "utf8Bytes": 16233,
+    "characters": 16227,
+    "whitespaceWords": 2396,
+    "estimatedTokens": 4057
+  },
+  "atlas": {
+    "identity": "fixtures/part3/runs/run-002/engine-output.json#response.packet.compiledContent",
+    "compiledContentSha256": "d76d360eef3c8a225a4cee3417411f51a9e643a3cb178e08ddad0e93ed15c15b",
+    "utf8Bytes": 968,
+    "characters": 968,
+    "whitespaceWords": 135,
+    "estimatedTokens": 242
+  },
+  "comparison": {
+    "bytes": {
+      "atlasSizeOverSourceSize": 0.059632,
+      "compressionRatioSourceOverAtlas": 16.769628,
+      "percentageReduction": 94.036839,
+      "absoluteContextSaved": 15265
+    },
+    "characters": {
+      "atlasSizeOverSourceSize": 0.059654,
+      "compressionRatioSourceOverAtlas": 16.76343,
+      "percentageReduction": 94.034634,
+      "absoluteContextSaved": 15259
+    },
+    "words": {
+      "atlasSizeOverSourceSize": 0.056344,
+      "compressionRatioSourceOverAtlas": 17.748148,
+      "percentageReduction": 94.365609,
+      "absoluteContextSaved": 2261
+    },
+    "estimatedTokens": {
+      "atlasSizeOverSourceSize": 0.05965,
+      "compressionRatioSourceOverAtlas": 16.764463,
+      "percentageReduction": 94.035001,
+      "absoluteContextSaved": 3815
+    }
+  },
+  "minimumEstimatedTokenReductionPercent": 50,
+  "reductionThresholdPassed": true,
+  "continuitySuccess": false,
+  "reason": "The small packet omitted every governed project mechanism, so reduction alone is not useful continuity."
+}
