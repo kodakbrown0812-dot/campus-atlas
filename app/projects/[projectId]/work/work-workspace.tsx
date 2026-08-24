@@ -8,29 +8,11 @@ import { useStewardTask } from "../../../components/steward-task";
 import TransferRoom from "./transfer-room";
 import styles from "./work.module.css";
 
-type ReasoningHealth = {
-  state: "Forming" | "Missing information" | "Awaiting decision" | "Awaiting outcome" | "Awaiting governance" | "Conflict";
-  cause: { id: string; label: string; href: string };
-  recommendedNextAction: string;
-  latestCheckpoint: {
-    id: string;
-    status: string;
-    completedAt: string | null;
-  } | null;
-  pendingFindingCount: number;
-};
-
 type WorkConversation = {
   id: string;
   title: string;
   sourceType: string;
-  status: string;
-  activeCaseId: string | null;
   activeCaseObjective: string | null;
-  activeCaseStatus: string | null;
-  outcomeState: string | null;
-  reasoningHealth: ReasoningHealth;
-  lastMeaningfulChange: string;
   nextAction: string;
 };
 
@@ -43,70 +25,23 @@ type WorkOverview = {
   };
   activeConversationId: string | null;
   conversations: WorkConversation[];
-  recentlyChangedPackets: Array<{
-    id: string;
-    task: string;
-    status: string;
-    tokenBudget: number;
-    finalTokenCount: number;
-    createdAt: string;
-  }>;
-  fixtureMode: false;
-  source: "canonical_d1";
 };
 
-function formatTime(value: string | null) {
-  if (!value) return "No canonical change recorded";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("en", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function healthClass(state: ReasoningHealth["state"]) {
-  return state.toLowerCase().replace(/\s+/g, "-");
-}
-
-function ConversationCard({
+function HistoryCard({
   projectId,
   conversation,
-  featured = false,
 }: {
   projectId: string;
   conversation: WorkConversation;
-  featured?: boolean;
 }) {
   return (
     <Link
-      className={`${styles.workCard} ${featured ? styles.featured : ""}`}
+      className={styles.historyCard}
       href={`/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversation.id)}`}
     >
-      <div>
-        <span className={styles.cardEyebrow}>{featured ? "Continue working" : conversation.sourceType}</span>
-        <h3>{conversation.title}</h3>
-        <p>{conversation.activeCaseObjective || "No active case selected"}</p>
-      </div>
-      <span className={`${styles.health} ${styles[healthClass(conversation.reasoningHealth.state)]}`}>
-        {conversation.reasoningHealth.state}
-      </span>
-      <dl>
-        <div>
-          <dt>Last meaningful change</dt>
-          <dd>{formatTime(conversation.lastMeaningfulChange)}</dd>
-        </div>
-        <div>
-          <dt>Pending findings</dt>
-          <dd>{conversation.reasoningHealth.pendingFindingCount}</dd>
-        </div>
-        <div>
-          <dt>Next action</dt>
-          <dd>{conversation.nextAction}</dd>
-        </div>
-      </dl>
+      <strong>{conversation.title}</strong>
+      <span>{conversation.activeCaseObjective || "No active objective yet"}</span>
+      <small>Open work →</small>
     </Link>
   );
 }
@@ -130,7 +65,7 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
       ? String((value as { error: string }).error)
       : null;
     if (!response.ok || !value || responseError) {
-      throw new Error(responseError || "Canonical Work state is unavailable.");
+      throw new Error(responseError || "Project state is unavailable.");
     }
     return value as WorkOverview;
   }, [projectId]);
@@ -145,7 +80,7 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
       })
       .catch((caught) => {
         if (!active) return;
-        setError(caught instanceof Error ? caught.message : "Canonical Work state is unavailable.");
+        setError(caught instanceof Error ? caught.message : "Project state is unavailable.");
         setStatus("unavailable");
       });
     return () => { active = false; };
@@ -207,9 +142,9 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     return (
       <div className={styles.page}>
         <section className={styles.loadingState}>
-          <span>Project Home</span>
-          <h1>Restoring your project…</h1>
-          <p>Reading project conversations, active cases, checkpoints, and pending findings from D1.</p>
+          <span>Home</span>
+          <h1>Getting your work ready…</h1>
+          <p>Loading the latest state of this project.</p>
         </section>
       </div>
     );
@@ -219,11 +154,11 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     return (
       <div className={styles.page}>
         <section className={styles.failureState} role="alert">
-          <span>Project Home unavailable</span>
-          <h1>Home could not be loaded</h1>
+          <span>Home unavailable</span>
+          <h1>We couldn’t load this project</h1>
           <p>{error}</p>
-          <strong>No seeded conversation or project was substituted.</strong>
-          <button onClick={() => window.location.reload()} type="button">Retry canonical read</button>
+          <strong>Atlas did not substitute other project data.</strong>
+          <button onClick={() => window.location.reload()} type="button">Try again</button>
         </section>
       </div>
     );
@@ -233,19 +168,43 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     <div className={styles.page}>
       <header className={styles.header}>
         <div>
-          <span className={styles.eyebrow}>Home · {overview.source}</span>
+          <span className={styles.eyebrow}>Current project</span>
           <h1>{overview.project.name}</h1>
-          <p>{overview.project.description || "Continue the canonical conversation that matters now."}</p>
+          <p>Your current work and the simplest way to continue it.</p>
         </div>
       </header>
 
+      {activeConversation ? (
+        <section className={styles.currentWork} aria-labelledby="current-work-title">
+          <div>
+            <span className={styles.eyebrow}>Current work</span>
+            <h2 id="current-work-title">{activeConversation.title}</h2>
+            <p>{activeConversation.activeCaseObjective || "Continue this conversation and shape the next useful decision."}</p>
+          </div>
+          <div className={styles.nextAction}>
+            <span>Next</span>
+            <p>{activeConversation.nextAction}</p>
+          </div>
+          <Link
+            className={styles.continueButton}
+            href={`/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(activeConversation.id)}`}
+          >
+            Continue
+          </Link>
+        </section>
+      ) : (
+        <section className={styles.emptyState}>
+          <span>Current work</span>
+          <h2>Nothing is active yet.</h2>
+          <p>Transfer an existing room or start a new conversation when you’re ready.</p>
+        </section>
+      )}
+
       <form className={styles.stewardEntry} onSubmit={openSteward}>
         <div>
-          <span className={styles.eyebrow}>Atlas Steward</span>
-          <h2>Keep this project coherent.</h2>
-          <p>
-            Atlas finds the relevant prior work available to this project, reconstructs the current project state, and prepares reviewable context for the work ahead.
-          </p>
+          <span className={styles.eyebrow}>Continue with Atlas</span>
+          <h2>Pick up the work without starting over.</h2>
+          <p>Tell Atlas what you’re continuing. Steward will prepare the context that matters.</p>
         </div>
         <label htmlFor="home-steward-task">What are you trying to continue?</label>
         <textarea
@@ -257,39 +216,20 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         <button disabled={!stewardTask.trim()} type="submit">Prepare context</button>
       </form>
 
-      <div className={styles.secondaryActions} aria-label="Additional project actions">
-        <span>Other ways to continue</span>
-        <button onClick={() => setMode(mode === "native" ? "none" : "native")} type="button">
-          Start Atlas conversation
-        </button>
-        <button onClick={() => setMode(mode === "transfer" ? "none" : "transfer")} type="button">
-          Transfer a room into Atlas
-        </button>
-      </div>
-
-      {!canWrite && (
-        <div className={styles.readOnlyNotice}>
-          <strong>Read-only session</strong>
-          <span>Enable canonical writes once in the desktop sidebar or from the D1 session control in the mobile header.</span>
+      <section className={styles.transferEntry}>
+        <div>
+          <span className={styles.eyebrow}>Bring in existing work</span>
+          <h2>Transfer a room</h2>
+          <p>Bring in an existing conversation so Atlas can preserve what still matters and prepare it for future work.</p>
         </div>
-      )}
-
-      {mode === "native" && (
-        <form className={styles.entryForm} onSubmit={createNative}>
-          <div>
-            <span className={styles.eyebrow}>Native exact-source conversation</span>
-            <h2>Start in Atlas</h2>
-            <p>The conversation becomes canonical only after the server confirms it.</p>
-          </div>
-          <label>
-            Conversation title
-            <input name="title" placeholder="What are we working through?" required />
-          </label>
-          <button disabled={!canWrite || status === "saving"} type="submit">
-            {status === "saving" ? "Saving canonical conversation…" : "Create conversation"}
-          </button>
-        </form>
-      )}
+        <button
+          aria-expanded={mode === "transfer"}
+          onClick={() => setMode(mode === "transfer" ? "none" : "transfer")}
+          type="button"
+        >
+          {mode === "transfer" ? "Close transfer" : "Transfer a room"}
+        </button>
+      </section>
 
       {mode === "transfer" && (
         <TransferRoom
@@ -301,58 +241,51 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
 
       {error && <p className={styles.error} role="alert">{error}</p>}
 
-      {activeConversation ? (
-        <section className={styles.continue}>
-          <ConversationCard conversation={activeConversation} featured projectId={projectId} />
-        </section>
-      ) : (
-        <section className={styles.emptyState}>
-          <span>Canonical Work is empty</span>
-          <h2>Start a conversation or import existing work to begin.</h2>
-          <p>No fixture, decorative project card, or simulated activity was inserted.</p>
-        </section>
-      )}
-
       {overview.project.pendingFindingCount > 0 ? (
         <Link className={styles.reviewNotice} href={`/projects/${encodeURIComponent(projectId)}/findings`}>
-          <span className={styles.eyebrow}>Needs review</span>
-          <strong>{overview.project.pendingFindingCount} governed finding{overview.project.pendingFindingCount === 1 ? "" : "s"} require attention</strong>
-          <small>Reviewing can change what Atlas is allowed to use later.</small>
+          <strong>Needs review · {overview.project.pendingFindingCount}</strong>
+          <span>Atlas needs your judgment before this can become part of the project’s working truth.</span>
+          <small>Review now →</small>
         </Link>
       ) : null}
 
-      {projectWork.length ? (
-        <section className={styles.section}>
-          <div className={styles.sectionHeading}>
-            <h2>Project work</h2>
-            <span>{projectWork.length}</span>
-          </div>
+      <details className={styles.historyDisclosure}>
+        <summary>Project history · {projectWork.length}</summary>
+        <div className={styles.historyHeader}>
+          <p>Earlier work stays available without crowding the next step.</p>
+          <Link href={`/projects/${encodeURIComponent(projectId)}/conversations`}>View all work</Link>
+        </div>
+        {projectWork.length ? (
           <div className={styles.cardGrid}>
             {projectWork.map((conversation) => (
-              <ConversationCard conversation={conversation} key={conversation.id} projectId={projectId} />
+              <HistoryCard conversation={conversation} key={conversation.id} projectId={projectId} />
             ))}
           </div>
-        </section>
-      ) : null}
+        ) : <p className={styles.quietEmpty}>No earlier work in this project.</p>}
+      </details>
 
-      <section className={styles.section}>
-        <div className={styles.sectionHeading}>
-          <h2>Recent context packets</h2>
-          <span>{overview.recentlyChangedPackets.length}</span>
-        </div>
-        {overview.recentlyChangedPackets.length ? (
-          <div className={styles.packetList}>
-            {overview.recentlyChangedPackets.map((packet) => (
-              <Link href={`/projects/${encodeURIComponent(projectId)}/ask?packet=${encodeURIComponent(packet.id)}`} key={packet.id}>
-                <strong>{packet.task}</strong>
-                <span>{packet.status} · {packet.finalTokenCount}/{packet.tokenBudget} tokens · {formatTime(packet.createdAt)}</span>
-              </Link>
-            ))}
-          </div>
-        ) : (
-          <p className={styles.quietEmpty}>Packets appear after Atlas prepares context for a task.</p>
+      <details className={styles.moreActions}>
+        <summary>More ways to work</summary>
+        <button onClick={() => setMode(mode === "native" ? "none" : "native")} type="button">
+          Start a new conversation in Atlas
+        </button>
+        {mode === "native" && (
+          <form className={styles.entryForm} onSubmit={createNative}>
+            <div>
+              <h2>Start a new conversation</h2>
+              <p>Give the work a clear title. Atlas will open a new space for it.</p>
+            </div>
+            <label>
+              Conversation title
+              <input name="title" placeholder="What are we working through?" required />
+            </label>
+            {!canWrite && <p className={styles.readOnlyNotice}>Sign in as the owner to create a conversation.</p>}
+            <button disabled={!canWrite || status === "saving"} type="submit">
+              {status === "saving" ? "Creating conversation…" : "Create conversation"}
+            </button>
+          </form>
         )}
-      </section>
+      </details>
     </div>
   );
 }

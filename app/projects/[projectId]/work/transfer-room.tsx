@@ -48,13 +48,6 @@ type Transfer = {
   attemptCount: number;
 };
 
-const outcomes = [
-  ["source_preserved", "Source preserved"],
-  ["events_materialized", "Exact evidence prepared"],
-  ["analyzed", "Project state analyzed"],
-  ["reconciled", "Compared with existing state"],
-] as const;
-
 function count(value: Record<string, number>, key: string) {
   return Number(value[key] || 0);
 }
@@ -222,14 +215,31 @@ export default function TransferRoom({
   );
   const reviewItems = current?.reconciliation.filter((item) => item.reviewRequired) || [];
   const preserved = current ? count(current.actualCounts, "messages") : 0;
-  const candidates = current ? count(current.actualCounts, "durableCandidates") : 0;
+  const journey = current ? [
+    {
+      label: "Conversation preserved",
+      complete: Boolean(current.stageTimestamps.source_preserved),
+    },
+    {
+      label: "Project state identified",
+      complete: Boolean(current.stageTimestamps.analyzed || current.stageTimestamps.reconciled),
+    },
+    ...(reviewItems.length ? [{
+      label: `Needs review · ${reviewItems.length}`,
+      complete: current.stage === "awaiting_review" || current.stage === "ready_for_steward",
+    }] : []),
+    {
+      label: "Ready to continue",
+      complete: current.stage === "ready_for_steward",
+    },
+  ] : [];
 
   return (
     <section className={styles.transferRoom}>
       <header>
-        <span className={styles.eyebrow}>Incoming continuity</span>
-        <h2>Transfer a room into Atlas</h2>
-        <p>Bring in a conversation once. Atlas preserves the exact source, identifies durable project state, and prepares it for future work.</p>
+        <span className={styles.eyebrow}>Room transfer</span>
+        <h2>Bring in an existing conversation</h2>
+        <p>Atlas will preserve the conversation, identify what still matters, and make it ready for future work.</p>
       </header>
 
       <form className={styles.transferForm} onSubmit={submit}>
@@ -238,24 +248,24 @@ export default function TransferRoom({
           <input name="title" placeholder="What work is this room preserving?" required />
         </label>
         <label>
-          Source format
+          How are you bringing it in?
           <select defaultValue="text" name="format">
-            <option value="text">Exact text transcript</option>
-            <option value="json">ChatGPT or structured JSON export</option>
+            <option value="text">Pasted conversation</option>
+            <option value="json">ChatGPT or structured export</option>
           </select>
         </label>
         <label className={styles.transferTranscript}>
-          Exact room transcript
-          <textarea name="transcript" placeholder="Paste the unchanged conversation or export." required />
+          Conversation
+          <textarea name="transcript" placeholder="Paste the conversation or export here." required />
         </label>
         <button disabled={!canWrite || status === "saving"} type="submit">
-          {status === "saving" ? "Transferring this room…" : "Transfer this room into Atlas"}
+          {status === "saving" ? "Transferring room…" : "Transfer room"}
         </button>
       </form>
 
       {imported.length ? (
         <div className={styles.preservedRooms}>
-          <span>Already preserved rooms</span>
+          <span>Continue a previous transfer</span>
           {imported.map((conversation) => {
             const existing = transfers.find((item) => item.conversationId === conversation.id);
             return (
@@ -266,64 +276,60 @@ export default function TransferRoom({
                 type="button"
               >
                 <strong>{conversation.title}</strong>
-                <small>{existing ? `Continue · ${existing.stage.replaceAll("_", " ")}` : "Continue transfer"}</small>
+                <small>{existing?.stage === "ready_for_steward" ? "Ready to continue" : "Continue transfer"}</small>
               </button>
             );
           })}
         </div>
       ) : null}
 
-      {!canWrite && <p className={styles.readOnlyNotice}>Sign in as the verified owner to transfer or review project state. Public visitors remain read-only.</p>}
+      {!canWrite && <p className={styles.readOnlyNotice}>Sign in as the owner to transfer a room or make review decisions.</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
 
       {current ? (
         <article className={styles.transferResult} aria-live="polite">
           <div className={styles.transferResultHeader}>
             <div>
-              <span className={styles.eyebrow}>{current.status === "complete" ? "Ready for Steward" : "Room transferred"}</span>
+              <span className={styles.eyebrow}>{current.status === "complete" ? "Ready to continue" : "Room transferred"}</span>
               <h3>{current.conversationTitle}</h3>
-              <p>{preserved} message{preserved === 1 ? "" : "s"} preserved · {candidates} durable candidate{candidates === 1 ? "" : "s"} detected · {reviewItems.length} item{reviewItems.length === 1 ? "" : "s"} needs your review</p>
+              <p>
+                {current.stage === "ready_for_steward"
+                  ? `${preserved} message${preserved === 1 ? "" : "s"} preserved. This room is ready to continue.`
+                  : reviewItems.length
+                    ? `${preserved} message${preserved === 1 ? "" : "s"} preserved. Atlas needs your judgment on ${reviewItems.length} item${reviewItems.length === 1 ? "" : "s"}.`
+                    : `${preserved} message${preserved === 1 ? "" : "s"} preserved. Atlas is identifying what should carry forward.`}
+              </p>
             </div>
             <Link href={`/projects/${encodeURIComponent(projectId)}/inspect/transfers/${encodeURIComponent(current.id)}`}>Open in Inspect</Link>
           </div>
           <ol className={styles.transferProgress}>
-            {outcomes.map(([stage, label]) => (
-              <li data-complete={Boolean(current.stageTimestamps[stage])} key={stage}>
-                <span>{current.stageTimestamps[stage] ? "✓" : "·"}</span>{label}
+            {journey.map((step) => (
+              <li data-complete={step.complete} key={step.label}>
+                <span>{step.complete ? "✓" : "·"}</span>{step.label}
               </li>
             ))}
-            <li data-complete={current.stage === "awaiting_review" || current.stage === "ready_for_steward"}>
-              <span>{current.stage === "awaiting_review" || current.stage === "ready_for_steward" ? "✓" : "·"}</span>
-              {current.stage === "ready_for_steward" ? "Ready for Steward" : "Review needed"}
-            </li>
           </ol>
 
           {current.stage === "awaiting_review" && (
             <details className={styles.transferReview} open>
-              <summary>Review {reviewItems.length} item{reviewItems.length === 1 ? "" : "s"}</summary>
+              <summary>Needs review · {reviewItems.length}</summary>
               {reviewItems.map((item) => (
                 <article key={item.findingId}>
-                  <span>{item.candidateType.replaceAll("_", " ")} · proposed {item.proposedTreatment}</span>
+                  <span>Review what Atlas should carry forward</span>
                   <textarea
-                    aria-label={`Reviewed wording for ${item.findingId}`}
+                    aria-label="Reviewed wording"
                     onChange={(event) => setReviewed((value) => ({ ...value, [item.findingId]: event.target.value }))}
                     value={reviewed[item.findingId] || item.statement}
                   />
                   <p>{item.reason}</p>
-                  <dl>
-                    <div><dt>Relationship</dt><dd>{item.relationship.replaceAll("_", " ")}</dd></div>
-                    <div><dt>Authority</dt><dd>{item.authority}</dd></div>
-                    <div><dt>Uncertainty</dt><dd>{item.uncertainty || "None recorded"}</dd></div>
-                    <div><dt>Sensitivity</dt><dd>{item.sensitivity.replaceAll("_", " ")}</dd></div>
-                  </dl>
                   <details>
-                    <summary>View exact supporting source</summary>
+                    <summary>View the supporting conversation</summary>
                     {item.exactSources.map((source) => <pre key={source.eventId}>{source.exactContent}</pre>)}
                   </details>
                   <div className={styles.reviewActions}>
-                    <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Use")} type="button">Use</button>
-                    <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Consider")} type="button">Consider</button>
-                    <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Exclude")} type="button">Exclude</button>
+                    <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Use")} type="button">Accept</button>
+                    <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Consider")} type="button">Decide later</button>
+                    <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Exclude")} type="button">Do not keep</button>
                   </div>
                 </article>
               ))}
@@ -332,12 +338,12 @@ export default function TransferRoom({
 
           {current.stage === "ready_for_steward" && (
             <div className={styles.transferReady}>
-              <strong>Accepted project state is available to Atlas Steward.</strong>
+              <strong>This room is ready to continue.</strong>
               <Link
                 href={`/projects/${encodeURIComponent(projectId)}/ask`}
                 onClick={() => carryTask(projectId, "", current.caseId)}
               >
-                Prepare context in Steward
+                Continue in Steward
               </Link>
             </div>
           )}
@@ -345,8 +351,8 @@ export default function TransferRoom({
             <div className={styles.transferFailure} role="alert">
               <strong>{current.stage === "blocked" ? "Transfer blocked" : "Transfer failed"}</strong>
               <p>{current.blockedReason || current.failureReason}</p>
-              <span>Verified earlier stages remain preserved. Retrying is safe.</span>
-              <button disabled={!canWrite || status === "saving"} onClick={() => resume(current.id)} type="button">Retry transfer</button>
+              <span>Completed steps remain preserved. Retrying is safe.</span>
+              <button disabled={!canWrite || status === "saving"} onClick={() => resume(current.id)} type="button">Try again</button>
             </div>
           )}
         </article>

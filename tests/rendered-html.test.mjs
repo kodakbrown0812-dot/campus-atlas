@@ -2321,19 +2321,19 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   const shell = await readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8");
   for (const expected of [
     "/conversations",
-    "Start Atlas conversation",
-    "Transfer a room into Atlas",
-    "No fixture, decorative project card, or simulated activity was inserted",
+    "Start a new conversation in Atlas",
+    "Transfer a room",
+    "Atlas did not substitute other project data",
   ]) assert.match(work, new RegExp(expected.replaceAll("/", "\\/")));
   for (const expected of [
     "/transfers",
-    "Transfer this room into Atlas",
-    "Bring in a conversation once",
-    "Review",
+    "Transfer room",
+    "Atlas will preserve the conversation",
+    "Needs review",
     "Open in Inspect",
-    "Use",
-    "Consider",
-    "Exclude",
+    "Accept",
+    "Decide later",
+    "Do not keep",
   ]) assert.match(transfer, new RegExp(expected.replaceAll("/", "\\/")));
   assert.match(transfer, /carryTask\(projectId, "", current\.caseId\)/);
   assert.doesNotMatch(transfer, /\/ask\?(?:[^\s"'`]*&)?caseId=/);
@@ -2343,14 +2343,22 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   assert.match(steward, /\.\.\.\(caseId \? \{ caseId \} : \{\}\)/);
   assert.match(steward, /<option value="">Project scope only<\/option>/);
   for (const expected of [
-    "Atlas Steward",
-    "Keep this project coherent",
-    "finds the relevant prior work available to this project",
-    "prepares reviewable context for the work ahead",
+    "Current work",
+    "Continue with Atlas",
+    "Pick up the work without starting over",
     "What are you trying to continue",
     "Prepare context",
-    "Recent context packets",
+    "Bring in existing work",
+    "Project history",
+    "More ways to work",
   ]) assert.match(work, new RegExp(expected));
+  assert.ok(work.indexOf("Current work") < work.indexOf("Continue with Atlas"));
+  assert.ok(work.indexOf("Continue with Atlas") < work.indexOf("Bring in existing work"));
+  assert.doesNotMatch(work, /Recent context packets|Pending findings|Reasoning Health|packet token|canonical_d1|Canonical Work/);
+  assert.match(transfer, /Conversation preserved/);
+  assert.match(transfer, /Project state identified/);
+  assert.match(transfer, /Ready to continue/);
+  assert.doesNotMatch(transfer, /Exact evidence prepared|Project state analyzed|Compared with existing state/);
   for (const expected of [
     "/messages",
     "/active-case",
@@ -2385,6 +2393,43 @@ test("Home carries the exact literal task and optional case scope through projec
   assert.match(steward, /clearTask\(projectId\)/);
   assert.match(steward, /body: JSON\.stringify\(\{/);
   assert.match(steward, /task,/);
+});
+
+test("UI Simplification Slice 1 keeps Home action-led while advanced truth remains discoverable", async () => {
+  const [home, transfer, styles, stewardHistory, inspect] = await Promise.all([
+    readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/work/transfer-room.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/work/work.module.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/ask-history.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/inspect/inspect-workspace.tsx", import.meta.url), "utf8"),
+  ]);
+
+  const hierarchy = ["Current work", "Continue with Atlas", "Bring in existing work", "Project history"];
+  for (let index = 1; index < hierarchy.length; index += 1) {
+    assert.ok(home.indexOf(hierarchy[index - 1]) < home.indexOf(hierarchy[index]), hierarchy.join(" → "));
+  }
+  for (const action of ["Continue", "Prepare context", "Transfer a room"]) {
+    assert.match(home, new RegExp(action));
+  }
+  assert.match(home, /Needs review · \{overview\.project\.pendingFindingCount\}/);
+  assert.match(home, /<details className=\{styles\.historyDisclosure\}>/);
+  assert.match(home, /<details className=\{styles\.moreActions\}>/);
+  assert.match(home, /aria-expanded=\{mode === "transfer"\}/);
+  assert.doesNotMatch(home, /Recent context packets|reasoningHealth|finalTokenCount|tokenBudget|canonical_d1|Canonical Work/);
+
+  for (const label of ["Conversation preserved", "Project state identified", "Ready to continue"]) {
+    assert.match(transfer, new RegExp(label));
+  }
+  assert.match(transfer, /reviewItems\.length \? \[\{/);
+  assert.doesNotMatch(transfer, /Exact evidence prepared|Project state analyzed|Compared with existing state/);
+  assert.match(stewardHistory, /Packets, handoffs, answers, and receipts/);
+  assert.match(inspect, /Reasoning Health/);
+  assert.match(inspect, /Token budget \/ final size/);
+  assert.match(inspect, /"Packets"/);
+  assert.match(styles, /\.currentWork/);
+  assert.match(styles, /\.transferEntry/);
+  assert.match(styles, /@media \(max-width: 760px\)/);
+  assert.match(styles, /\.currentWork \{\s*grid-template-columns: 1fr;/);
 });
 
 test("Native Analyze keeps finding authorship server-side and restores canonical checkpoint detail", async () => {
