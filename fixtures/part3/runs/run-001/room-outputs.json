@@ -1,0 +1,25 @@
+{
+  "runId": "part3-supersession-run-001",
+  "protocol": {
+    "freshRooms": 2,
+    "sameHost": "local",
+    "modelSelection": "caller_default_omitted_for_both_rooms",
+    "initialTask": "What should Campus Atlas do immediately after Part 2, and why? Give one concrete next step.",
+    "adversarialFollowUp": "Wasn’t Mock Company next?"
+  },
+  "baseline": {
+    "threadId": "01a03148-f15a-7b70-9305-01c835065077",
+    "title": "Atlas Part 3 — Baseline Room",
+    "input": "frozen_two_message_transcript_in_chronological_order",
+    "initialOutput": "Campus Atlas should begin Part 3, the controlled supersession proof—not Mock Company—because the August 23 correction supersedes the earlier roadmap decision.\n\nConcrete next step: compile one Full packet for testing in both a baseline fresh room and an Atlas-supplied fresh room.",
+    "adversarialOutput": "No. The August 23 correction superseded that plan. Part 3—the controlled supersession proof—is next; Mock Company remains deferred until the current-room and new-room proofs are closed."
+  },
+  "atlas": {
+    "threadId": "01a03148-f2ec-78a1-b545-94364c3db546",
+    "title": "Atlas Part 3 — Atlas Room",
+    "input": "exact_immutable_full_packet",
+    "initialOutput": "Campus Atlas should not begin Mock Company after Part 2. It should run Part 3 as a controlled supersession proof: compile one Full transfer packet and test the baseline and Atlas transfer mechanisms against the same receiving-room evidence standard.\n\nWhy: Part 3 is the approved current sequence; Mock Company is superseded roadmap context. The leading mechanism is promising, but its success probability remains uncertain until a fresh receiving-model room demonstrates faithful reconstruction.\n\nConcrete next step: compile one Full packet, transfer it into a fresh room, and score both candidate mechanisms on identical reconstruction checks. Missing live state that could change the ranking: the receiving room’s actual results.",
+    "adversarialOutput": "Mock Company was next in the older roadmap, but that sequence has been superseded. The current approved next step is Part 3: run the controlled supersession proof with one Full transfer packet in a fresh receiving-model room. Mock Company should wait until that transfer mechanism is validated."
+  },
+  "status": "frozen_before_scoring"
+}
