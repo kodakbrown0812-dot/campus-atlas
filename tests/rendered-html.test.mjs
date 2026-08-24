@@ -7127,7 +7127,103 @@ test("Part 3 controlled supersession fixture compiles only the current governed 
   }
 });
 
-test("Part 3C noisy Exact room records the first packet-preservation contract failure before destination execution", async () => {
+test("broad project-continuation applicability remains governed, bounded, and scope-safe", async () => {
+  const worker = await builtWorker("part3d-broad-continuation-safety");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Planning Safety");
+  await initializeRoadways(worker, DB, "sports");
+  const active = await seedSlice3Case(
+    worker,
+    DB,
+    "part3d-active",
+    ["correction", "challenge"],
+    [
+      "Correction: the migration transfer proof remains current; do not restore the earlier catalog rollout.",
+      "Challenge: the earlier catalog rollout may look faster, but it does not close the migration continuity proof.",
+    ],
+  );
+  DB.database.prepare("UPDATE events SET actor_id = 'cody' WHERE id = ?").run(active.events[0].id);
+  const outside = await seedSlice3Case(worker, DB, "part3d-outside", ["evidence"]);
+
+  const current = seedSlice4Mechanism(DB, {
+    id: "mechanism:part3d-current",
+    statement: "The migration transfer proof supersedes the earlier catalog rollout because the workflow became too complex and continuity must be proven first.",
+    counterevidenceIds: [active.events[1].id],
+  });
+  const avoidance = seedSlice4Mechanism(DB, {
+    id: "mechanism:part3d-avoid",
+    statement: "For the migration transfer proof, avoid the catalog rollout and defer connector expansion until the proof closes.",
+  });
+  const constraints = seedSlice4Mechanism(DB, {
+    id: "mechanism:part3d-constraints",
+    statement: "The migration transfer proof must preserve source lineage, reuse the governed path, and keep interaction simple.",
+  });
+  const unrelated = seedSlice4Mechanism(DB, {
+    id: "mechanism:part3d-unrelated",
+    statement: "The payroll invoice retention schedule remains seven years after fiscal close.",
+  });
+  const wrongCase = seedSlice4Mechanism(DB, {
+    id: "mechanism:part3d-wrong-case",
+    statement: "For the migration transfer proof, avoid the catalog rollout for this other case only.",
+    authority: "approved_local",
+    supportingCaseIds: [outside.caseId],
+  });
+  const retired = seedSlice4Mechanism(DB, {
+    id: "mechanism:part3d-retired",
+    statement: "The migration transfer proof should resume the retired catalog rollout next.",
+    status: "retired",
+  });
+  const proposed = seedSlice4Mechanism(DB, {
+    id: "mechanism:part3d-proposed",
+    statement: "The migration transfer proof must adopt a proposed automatic connector requirement.",
+    authority: "proposed",
+  });
+
+  const task = "What should we build next for the migration transfer, what should we avoid, and what constraints govern the proof?";
+  const broad = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/candidates", {
+    method: "POST",
+    body: {
+      task,
+      requestedDecisionOrOutput: "Prepare current direction, supersession rationale, proof constraints, and the boundary before expansion.",
+      caseId: active.caseId,
+      roadwayOverride: "broad-lock-finding",
+      tokenBudget: 1600,
+    },
+  });
+  assert.equal(broad.response.status, 200, JSON.stringify(broad.value));
+  const broadTreatments = new Map(Object.values(broad.value.treatmentSummary).flat().map((item) => [item.sourceId, item]));
+  for (const mechanism of [current, avoidance, constraints]) {
+    assert.equal(broadTreatments.get(mechanism.id).treatment, "Use", JSON.stringify(broadTreatments.get(mechanism.id)));
+    assert.match(broadTreatments.get(mechanism.id).reason, /broad project-continuation applicability/i);
+  }
+  assert.notEqual(broadTreatments.get(unrelated.id).treatment, "Use");
+  assert.equal(broadTreatments.get(wrongCase.id).treatment, "Exclude");
+  assert.match(broadTreatments.get(wrongCase.id).reason, /outside the active case/i);
+  assert.equal(broadTreatments.get(retired.id).treatment, "Exclude");
+  assert.match(broadTreatments.get(retired.id).reason, /retired/i);
+  assert.equal(broadTreatments.get(proposed.id).treatment, "Consider");
+  assert.equal(broadTreatments.get(active.events[1].id).treatment, "Use");
+  assert.equal(broadTreatments.get(active.events[1].id).protectedRole, "challenge");
+  assert.match(broadTreatments.get(active.events[1].id).reason, /counterevidence|uncertainty|provenance/i);
+  assert.equal(broadTreatments.get(active.events[0].id).treatment, "Use");
+  assert.equal(broadTreatments.get(active.events[0].id).protectedRole, "correction");
+
+  const narrow = await slice2Request(worker, DB, "/api/v1/projects/sports/reconstruction/candidates", {
+    method: "POST",
+    body: {
+      task: "Summarize the payroll invoice retention schedule.",
+      roadwayOverride: "broad-lock-finding",
+      tokenBudget: 1600,
+    },
+  });
+  assert.equal(narrow.response.status, 200, JSON.stringify(narrow.value));
+  const narrowTreatments = new Map(Object.values(narrow.value.treatmentSummary).flat().map((item) => [item.sourceId, item]));
+  for (const mechanism of [current, avoidance, constraints]) {
+    assert.notEqual(narrowTreatments.get(mechanism.id).treatment, "Use", mechanism.id);
+  }
+});
+
+test("Part 3D rerun records the first remaining strict packet-preservation failure", async () => {
   const fixtureBytes = await readFile(
     new URL("../fixtures/part3/runs/run-002/source-fixture.json", import.meta.url),
   );
@@ -7411,7 +7507,21 @@ test("Part 3C noisy Exact room records the first packet-preservation contract fa
     mechanism.id,
     compiledContent.includes(mechanism.statement),
   ]));
-  const packetPreservationGatePassed = Object.values(preservation).every(Boolean);
+  const semanticCoverage = {
+    currentDirection: /Room Transfer is current|Continue the deterministic[^\n]*Room Transfer proof/i.test(compiledContent),
+    explicitSupersession: /supersedes Mock Company/i.test(compiledContent),
+    rationale: /became too complicated[^\n]*continuity primitive/i.test(compiledContent),
+    simpleInteraction: /keep interaction simple/i.test(compiledContent),
+    smallestUsefulContext: /smallest useful context/i.test(compiledContent),
+    exactSources: /preserve Exact sources/i.test(compiledContent),
+    inspectLineage: /Inspect lineage/i.test(compiledContent),
+    freshRoomComparison: /identical fresh rooms/i.test(compiledContent),
+    frozenBeforeScoring: /outputs frozen before (?:applying )?(?:the )?(?:fixed )?(?:rubric|score|scoring)/i.test(compiledContent),
+    proofClosureBoundary: /larger company trials remain deferred until/i.test(compiledContent),
+    abandonedBranchGuard: /avoid Mock Company, embeddings, learned ranking, broad connectors or ingestion, and dashboard redesign/i.test(compiledContent),
+    expiredStateGuard: /blockers are resolved or expired and must not be presented as curre/i.test(compiledContent),
+  };
+  const packetPreservationGatePassed = Object.values(semanticCoverage).every(Boolean);
   const sourceUtf16 = fixture.transcript.reduce((total, entry) => total + entry.text.length, 0);
   const sourceMetrics = {
     utf8Bytes: fixture.transcript.reduce((total, entry) => total + Buffer.byteLength(entry.text, "utf8"), 0),
@@ -7479,6 +7589,7 @@ test("Part 3C noisy Exact room records the first packet-preservation contract fa
     result: result.value,
     packetItems,
     preservation,
+    semanticCoverage,
     packetPreservationGatePassed,
     sourceMetrics,
     atlasMetrics,
@@ -7524,6 +7635,7 @@ test("Part 3C noisy Exact room records the first packet-preservation contract fa
           ranking,
         })),
       preservation: capture.preservation,
+      semanticCoverage: capture.semanticCoverage,
       packetPreservationGatePassed: capture.packetPreservationGatePassed,
       sourceMetrics: capture.sourceMetrics,
       atlasMetrics: capture.atlasMetrics,
@@ -7536,9 +7648,11 @@ test("Part 3C noisy Exact room records the first packet-preservation contract fa
   }
 
   assert.equal(packetPreservationGatePassed, false);
-  assert.equal(result.value.summary.governingMechanismsSupplied, 0);
+  assert.equal(semanticCoverage.frozenBeforeScoring, false);
+  assert.ok(Object.entries(semanticCoverage).every(([key, value]) => key === "frozenBeforeScoring" || value), JSON.stringify(semanticCoverage));
+  assert.equal(result.value.summary.governingMechanismsSupplied, fixture.governedState.currentMechanisms.length);
   assert.ok(fixture.governedState.currentMechanisms.every((mechanism) => (
-    packetItems.some((item) => item.source_id === mechanism.id && item.treatment !== "Use")
+    packetItems.some((item) => item.source_id === mechanism.id && item.treatment === "Use")
   )));
   assert.equal(tokenReductionPercent >= rubric.compressionAcceptance.minimumEstimatedTokenReductionPercent, true);
   assert.equal(capture.irrelevantNoisePresent, false);

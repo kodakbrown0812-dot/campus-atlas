@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-repair-run-003",
+  "method": {
+    "sourceBoundary": "Exact transcript message-body values aggregated in chronological order without invented separator bytes.",
+    "atlasBoundary": "Exact server-authored compiledContent in engine-output.json.",
+    "bytes": "UTF-8",
+    "characters": "Unicode code points",
+    "words": "Whitespace-tokenized",
+    "tokens": "Estimate only: ceil(total UTF-16 code units / 4), unchanged from Parts 3B and 3C."
+  },
+  "source": {
+    "identity": "fixtures/part3/runs/run-002/source-fixture.json#transcript[].text",
+    "artifactSha256": "c07cdf8848e2504975f9357a118f5118f95da3e64f7c4be0e58ce64f2e1840d2",
+    "messageCount": 43,
+    "utf8Bytes": 16233,
+    "characters": 16227,
+    "whitespaceWords": 2396,
+    "estimatedTokens": 4057
+  },
+  "atlas": {
+    "identity": "fixtures/part3/runs/run-003/engine-output.json#compiledContent",
+    "utf8Bytes": 2848,
+    "characters": 2834,
+    "whitespaceWords": 344,
+    "estimatedTokens": 709
+  },
+  "comparison": {
+    "bytes": {
+      "atlasSizeOverSourceSize": 0.175445,
+      "compressionRatioSourceOverAtlas": 5.699789,
+      "percentageReduction": 82.455492,
+      "absoluteContextSaved": 13385
+    },
+    "characters": {
+      "atlasSizeOverSourceSize": 0.174647,
+      "compressionRatioSourceOverAtlas": 5.725829,
+      "percentageReduction": 82.535281,
+      "absoluteContextSaved": 13393
+    },
+    "words": {
+      "atlasSizeOverSourceSize": 0.143573,
+      "compressionRatioSourceOverAtlas": 6.965116,
+      "percentageReduction": 85.642738,
+      "absoluteContextSaved": 2052
+    },
+    "estimatedTokens": {
+      "atlasSizeOverSourceSize": 0.17476,
+      "compressionRatioSourceOverAtlas": 5.722144,
+      "percentageReduction": 82.524033,
+      "absoluteContextSaved": 3348
+    }
+  },
+  "minimumEstimatedTokenReductionPercent": 50,
+  "reductionThresholdPassed": true,
+  "continuitySuccess": false,
+  "reason": "Compression passed, but one required proof constraint was truncated before the strict packet-preservation gate."
+}

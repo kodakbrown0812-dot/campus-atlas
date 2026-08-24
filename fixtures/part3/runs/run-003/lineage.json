@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-repair-run-003",
+  "summary": {
+    "materialClaimsSupplied": 7,
+    "completeLineageClaims": 7,
+    "governedLineageOnlyClaims": 0,
+    "missingExactSourceLinkClaims": 0,
+    "status": "complete_lineage"
+  },
+  "claims": [
+    {
+      "mechanismId": "mechanism:part3c-current-direction",
+      "mechanismVersionId": "mechanism:part3c-current-direction:version:2",
+      "supersedesVersionId": "mechanism:part3c-current-direction:version:1",
+      "findingId": "finding:part3c:01",
+      "classification": "complete_lineage",
+      "sourceSequences": [2, 25, 27, 28, 39]
+    },
+    {
+      "mechanismId": "mechanism:part3c-simple-small",
+      "mechanismVersionId": "mechanism:part3c-simple-small:version:1",
+      "findingId": "finding:part3c:02",
+      "classification": "complete_lineage",
+      "sourceSequences": [29]
+    },
+    {
+      "mechanismId": "mechanism:part3c-exact-lineage",
+      "mechanismVersionId": "mechanism:part3c-exact-lineage:version:1",
+      "findingId": "finding:part3c:03",
+      "classification": "complete_lineage",
+      "sourceSequences": [30, 41]
+    },
+    {
+      "mechanismId": "mechanism:part3c-fresh-room-protocol",
+      "mechanismVersionId": "mechanism:part3c-fresh-room-protocol:version:1",
+      "findingId": "finding:part3c:04",
+      "classification": "complete_lineage",
+      "sourceSequences": [31]
+    },
+    {
+      "mechanismId": "mechanism:part3c-proof-closure",
+      "mechanismVersionId": "mechanism:part3c-proof-closure:version:1",
+      "findingId": "finding:part3c:05",
+      "classification": "complete_lineage",
+      "sourceSequences": [32, 33, 42]
+    },
+    {
+      "mechanismId": "mechanism:part3c-abandoned-branches",
+      "mechanismVersionId": "mechanism:part3c-abandoned-branches:version:1",
+      "findingId": "finding:part3c:06",
+      "classification": "complete_lineage",
+      "sourceSequences": [19, 21, 22, 40]
+    },
+    {
+      "mechanismId": "mechanism:part3c-expired-status",
+      "mechanismVersionId": "mechanism:part3c-expired-status:version:1",
+      "findingId": "finding:part3c:07",
+      "classification": "complete_lineage",
+      "sourceSequences": [15, 16, 18, 37]
+    }
+  ],
+  "verification": "Each sequence resolves to the same canonical Exact event and exact source message documented by run-002; byte equality was rechecked during the isolated rerun."
+}

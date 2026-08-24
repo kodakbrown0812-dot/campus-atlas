@@ -366,7 +366,75 @@ async function liveStateCandidates(db: D1Database, projectId: string): Promise<R
 
 function matchingContext(interpretation: TaskInterpretation) {
   const caseContext = interpretation.caseContextUsedForMatching ? interpretation.caseObjective || "" : "";
-  return `${interpretation.literalRequest} ${interpretation.requiredReasoningMechanism} ${caseContext}`;
+  return `${interpretation.literalRequest} ${interpretation.requestedDecisionOrOutput} ${interpretation.requiredReasoningMechanism} ${caseContext}`;
+}
+
+type PlanningFacet = "direction" | "avoidance" | "constraints" | "rationale" | "boundary" | "status";
+
+const PLANNING_FACET_PATTERNS: Record<PlanningFacet, RegExp> = {
+  direction: /\b(?:build|continue|current (?:direction|objective|plan|priority)|immediate (?:direction|objective|plan|priority)|next (?:action|step|proof|phase|priority)|roadmap)\b/i,
+  avoidance: /\b(?:avoid|defer(?:red|ral)?|do not|don't|must not|no longer|not current|historical|abandon(?:ed|ment)?|supersed(?:e|ed|es|ing|ure))\b/i,
+  constraints: /\b(?:constraints?|guardrails?|requirements?|must govern|must preserve|preserve|reuse|keep (?:the )?interaction|smallest useful|fixed (?:task|score|rubric)|exact sources?|lineage)\b/i,
+  rationale: /\b(?:why|reason|rationale|because|became|so (?:prove|that)|in order to)\b/i,
+  boundary: /\b(?:acceptance|boundary|proof closure|until|before (?:widen|expan|begin)|remain(?:s|ed)? deferred|larger (?:trial|evaluation|rollout))\b/i,
+  status: /\b(?:current state|status|block(?:ed|er)|waiting|resolved|expired|unblocked|passed|fixed)\b/i,
+};
+
+const PLANNING_ANCHOR_STOP_WORDS = new Set([
+  ...STOP_WORDS,
+  "acceptance", "action", "avoid", "boundary", "build", "constraint", "constraints",
+  "continue", "current", "defer", "deferred", "direction", "doing", "exact", "full",
+  "govern", "governing", "guardrail", "historical", "immediate", "lineage", "must", "next",
+  "plan", "planning", "prepare", "preserve", "rationale", "reason", "requested",
+  "requirement", "requirements", "smallest", "state", "step", "superseded",
+  "useful", "version", "what", "why",
+]);
+
+function planningFacets(value: string) {
+  return (Object.entries(PLANNING_FACET_PATTERNS) as Array<[PlanningFacet, RegExp]>)
+    .filter(([, pattern]) => pattern.test(value))
+    .map(([facet]) => facet);
+}
+
+function planningAnchors(value: string) {
+  return distinct(words(value).filter((word) => (
+    word.length >= 3
+    && !PLANNING_ANCHOR_STOP_WORDS.has(word)
+    && !/^v?\d+(?:-\d+)*$/.test(word)
+  )));
+}
+
+function broadPlanningApplicability(
+  candidate: RawCandidate,
+  interpretation: TaskInterpretation,
+) {
+  if (candidate.sourceType !== "Mechanism") return null;
+  if (interpretation.primaryRoadway?.slug !== "broad-lock-finding") return null;
+  const context = matchingContext(interpretation);
+  const requestedFacets = planningFacets(context);
+  const broadContinuation = requestedFacets.includes("direction")
+    && requestedFacets.some((facet) => ["avoidance", "constraints", "rationale", "boundary"].includes(facet));
+  if (!broadContinuation) return null;
+
+  const candidateFacets = planningFacets(candidate.statement);
+  const coveredFacets = candidateFacets.filter((facet) => requestedFacets.includes(facet));
+  const statusGuard = candidateFacets.includes("status")
+    && (requestedFacets.includes("direction") || requestedFacets.includes("avoidance"));
+  if (!coveredFacets.length && !statusGuard) return null;
+
+  const contextAnchors = new Set(planningAnchors(context));
+  const sharedAnchors = planningAnchors(candidate.statement).filter((word) => contextAnchors.has(word));
+  if (sharedAnchors.length < 1) return null;
+
+  return {
+    score: coveredFacets.length >= 2 ? 4 : 3,
+    requestedFacets,
+    candidateFacets,
+    coveredFacets: statusGuard && !coveredFacets.includes("status")
+      ? [...coveredFacets, "status" as const]
+      : coveredFacets,
+    sharedAnchors,
+  };
 }
 
 function discoverySignals(candidate: RawCandidate, interpretation: TaskInterpretation): DiscoverySignals {
@@ -405,7 +473,12 @@ function taskMatch(signals: DiscoverySignals, candidate: RawCandidate, interpret
     : interpretation.primaryRoadway?.slug === "margin-run-line-value"
       ? semanticFamilies(candidate.statement).some((family) => ["margin", "price"].includes(family))
       : semanticFamilies(candidate.statement).some((family) => ["broad", "price", "margin"].includes(family));
-  return directFamily && roleMatch ? 4 : directFamily ? 3 : lexical || roleMatch ? 2 : signals.entityMatch > 0 ? 1 : 0;
+  const directScore = directFamily && roleMatch ? 4 : directFamily ? 3 : lexical || roleMatch ? 2 : signals.entityMatch > 0 ? 1 : 0;
+  const planning = broadPlanningApplicability(candidate, interpretation);
+  return {
+    score: Math.max(directScore, planning?.score || 0),
+    planning,
+  };
 }
 
 function authorityRank(authority: string, sourceType: string) {
@@ -438,7 +511,8 @@ function isWrongScope(candidate: RawCandidate, interpretation: TaskInterpretatio
 
 function rankCandidate(candidate: RawCandidate, interpretation: TaskInterpretation): RankedCandidate {
   const discovery = discoverySignals(candidate, interpretation);
-  const match = taskMatch(discovery, candidate, interpretation);
+  const applicability = taskMatch(discovery, candidate, interpretation);
+  const match = applicability.score;
   const scope = scopeFit(candidate, interpretation);
   const ranking: RankingDimensions = {
     taskMechanismMatch: match,
@@ -485,7 +559,9 @@ function rankCandidate(candidate: RawCandidate, interpretation: TaskInterpretati
     && scope >= 4
   ) {
     treatment = "Use";
-    reason = "Direct mechanism fit, valid scope, approved authority, and adequate historical freshness permit governing use.";
+    reason = applicability.planning
+      ? `Broad project-continuation applicability covers ${applicability.planning.coveredFacets.join(", ")} with bounded task anchors: ${applicability.planning.sharedAnchors.join(", ")}. Valid scope, approved authority, and current governing status permit Use.`
+      : "Direct mechanism fit, valid scope, approved authority, and adequate historical freshness permit governing use.";
   } else if (candidate.authority === "challenged") {
     treatment = "Consider";
     reason = "Challenged material cannot govern, but its challenge remains relevant.";

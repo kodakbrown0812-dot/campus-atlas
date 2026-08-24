@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-repair-run-003",
+  "rubricSha256": "dd63f39221e45fa47f41ec3df4de127abbd2539f7c7e152c03cc666fff64b6e3",
+  "baselineScore": null,
+  "atlasScore": null,
+  "scoreDelta": null,
+  "status": "not_scored_due_strict_packet_preservation_failure",
+  "reason": "The frozen-output-before-scoring boundary was not explicitly supplied by compiledContent. Scoring the destination behavior would credit model reconstruction rather than Atlas-supplied governed continuity."
+}

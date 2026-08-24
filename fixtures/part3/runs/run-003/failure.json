@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "runId": "part3-noisy-room-repair-run-003",
+  "failureNumber": 1,
+  "stage": "strict_packet_preservation_gate_before_behavioral_scoring",
+  "classification": "required_governed_context_truncated_in_compiled_content",
+  "rankingRepairResult": {
+    "status": "passed",
+    "governingMechanismsSupplied": 7,
+    "unrelatedMechanismsPromoted": false,
+    "part2FridayLightRegression": "passed"
+  },
+  "exactRequiredClaim": "The V1.8 Room Transfer proof must use identical fresh rooms, the fixed task and challenges, and destination outputs frozen before applying the fixed score.",
+  "exactCompiledText": "The V1.8 Room Transfer proof must use identical fresh rooms, the fixed task and challenges, and destination outputs frozen before applying…",
+  "expected": "compiledContent explicitly says destination outputs must be frozen before scoring",
+  "actual": "the fixed-score object was removed by deterministic item compaction, so compiledContent does not state the scoring boundary",
+  "packetPreservationGatePassed": false,
+  "compression": {
+    "sourceEstimatedTokens": 4057,
+    "packetEstimatedTokens": 709,
+    "estimatedTokenReductionPercent": 82.524033,
+    "thresholdPassed": true
+  },
+  "lineage": {
+    "materialClaims": 7,
+    "completeLineageClaims": 7,
+    "missingExactSourceLinkClaims": 0
+  },
+  "destinationProtocolDeviation": {
+    "occurred": true,
+    "reason": "The first automated gate used an overly permissive check for 'outputs frozen before applying' and incorrectly classified the truncated claim as sufficient.",
+    "result": "Two fresh destinations were created and all outputs were frozen, but no rubric score was applied after strict review found this packet failure.",
+    "outputsStatus": "unscored_diagnostic_only"
+  },
+  "smallestLikelyCorrectiveSlice": "Preserve complete meaning for required governed constraints during deterministic packet compaction, without including Consider material or widening the token budget; then rerun the same frozen fixture.",
+  "runtimeRepairAttemptedAfterFailure": false,
+  "productionChanged": false,
+  "status": "frozen_failure"
+}
