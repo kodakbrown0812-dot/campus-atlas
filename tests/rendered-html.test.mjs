@@ -1221,6 +1221,19 @@ test("Transfer Room performs one exact import through review into one governed L
   assert.equal(inspectValue.governedProjectState.length, 1);
   assert.equal(inspectValue.stewardArtifacts.length, 0);
 
+  const mechanismInspection = await ownerRequest(
+    `/api/v1/projects/sports/inspect/mechanisms/${encodeURIComponent(resumed.value.reconciliation[0].mechanismId)}`,
+  );
+  assert.equal(mechanismInspection.response.status, 200, JSON.stringify(mechanismInspection.value));
+  assert.equal(mechanismInspection.value.sourceEvents.length, 1);
+  assert.equal(mechanismInspection.value.sourceEvents[0].representation, "Exact");
+  assert.equal(mechanismInspection.value.sourceEvents[0].conversationTitle, "Slice 2 Light Proof");
+  assert.ok(mechanismInspection.value.sourceEvents[0].sourceLinks[0].href.includes("/conversations/"));
+  const crossProjectMechanism = await ownerRequest(
+    `/api/v1/projects/hockey/inspect/mechanisms/${encodeURIComponent(resumed.value.reconciliation[0].mechanismId)}`,
+  );
+  assert.equal(crossProjectMechanism.response.status, 404);
+
   const crossProject = await worker.fetch(new Request(
     `http://localhost/api/v1/projects/hockey/transfers/${encodeURIComponent(started.value.id)}`,
   ), ownerEnv, ctx);
@@ -2423,8 +2436,8 @@ test("UI Simplification Slice 1 keeps Home action-led while advanced truth remai
   assert.match(transfer, /reviewItems\.length \? \[\{/);
   assert.doesNotMatch(transfer, /Exact evidence prepared|Project state analyzed|Compared with existing state/);
   assert.match(stewardHistory, /Packets, handoffs, answers, and receipts/);
-  assert.match(inspect, /Reasoning Health/);
-  assert.match(inspect, /Token budget \/ final size/);
+  assert.match(inspect, /Project truth and proof/);
+  assert.match(inspect, /Canonical record anatomy/);
   assert.match(inspect, /"Packets"/);
   assert.match(styles, /\.currentWork/);
   assert.match(styles, /\.transferEntry/);
@@ -2486,6 +2499,66 @@ test("UI Simplification Slice 2 makes Steward outcome-first while preserving tec
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /\.resultMetadata,/);
   assert.match(styles, /max-height: 180px/);
+});
+
+test("UI Simplification Slice 3 makes Inspect truth-first without hiding delivery or canonical anatomy", async () => {
+  const [inspect, detail, styles, taskContext, steward, service] = await Promise.all([
+    readFile(new URL("../app/projects/[projectId]/inspect/inspect-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/inspect/[recordType]/[recordId]/inspect-detail.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/inspect/inspect.module.css", import.meta.url), "utf8"),
+    readFile(new URL("../app/components/steward-task.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../worker/inspect-service.ts", import.meta.url), "utf8"),
+  ]);
+
+  for (const label of [
+    "Project truth and proof",
+    "Current state",
+    "Current direction",
+    "Important constraints",
+    "Open questions",
+    "Next action",
+    "What changed",
+    "What Atlas supplied",
+    "Readable lineage",
+  ]) assert.match(inspect, new RegExp(label));
+  assert.match(inspect, /No governed current decision recorded for this case/);
+  assert.match(inspect, /Atlas has not yet governed/);
+  assert.match(inspect, /Previous/);
+  assert.match(inspect, /Changed to/);
+  assert.match(inspect, /Atlas records the supersession relationship, but no human-readable reason is attached/);
+  assert.match(inspect, /Uncertainty:/);
+  assert.match(inspect, /Governing|Proposed|Challenged|Superseded|Excluded/);
+
+  assert.match(taskContext, /recentDelivery: ReconstructionRunResult \| null/);
+  assert.match(taskContext, /setRecentDelivery\(delivery\)/);
+  assert.match(steward, /rememberDelivery\(projectId, complete\)/);
+  assert.doesNotMatch(taskContext, /localStorage|sessionStorage/);
+  assert.match(inspect, /Compact context · current session/);
+  assert.match(inspect, /No context supplied · current session/);
+  assert.match(inspect, /No packet or receipt was created/);
+  assert.match(inspect, /delivery\.capsule\.compiledContent/);
+  assert.match(inspect, /Full context · saved delivery/);
+  assert.match(inspect, /This packet is a task-specific selection from State Truth/);
+
+  assert.match(detail, /Governing truth selected/);
+  assert.match(detail, /Trace to governed truth/);
+  assert.match(detail, /Current governing statement/);
+  assert.match(detail, /Why Atlas believes this/);
+  assert.match(detail, /View exact evidence/);
+  assert.match(detail, /Raw canonical mechanism, versions, governance, and source records/);
+  assert.match(service, /c\.title AS conversation_title/);
+  assert.match(service, /sourceEvents: sourceEvents\.map\(\(row\) => eventView\(projectId, row\)\)/);
+
+  for (const view of ["Overview", "State", "Deliveries", "Advanced"]) assert.match(inspect, new RegExp(`"${view}"`));
+  for (const recordView of ["Cases", "Reasoning", "Mechanisms", "Principles", "Blueprint", "Packets", "Transfers", "Governance", "Roadways", "Live state", "Evaluations", "Relationships", "Handoffs"]) {
+    assert.match(inspect, new RegExp(`"${recordView}"`));
+  }
+  assert.match(inspect, /Raw canonical anatomy|Raw case anatomy|Raw canonical record/);
+  assert.match(styles, /\.mobileSelector/);
+  assert.match(styles, /@media \(max-width: 760px\)/);
+  assert.match(styles, /\.tabs \{\s*display: none;/);
+  assert.doesNotMatch(`${inspect}\n${taskContext}`, /indexedDB|localStorage|sessionStorage/);
 });
 
 test("Native Analyze keeps finding authorship server-side and restores canonical checkpoint detail", async () => {
@@ -5942,7 +6015,7 @@ test("Slice 6B interface remains canonical and explicit beneath the Slice 6C Ask
   ]) {
     assert.match(review, new RegExp(text.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")));
   }
-  for (const tab of ["Cases", "Reasoning", "Mechanisms", "Principles", "Blueprint", "Packets", "Advanced"]) {
+  for (const tab of ["Overview", "State", "Deliveries", "Advanced", "Cases", "Reasoning", "Mechanisms", "Principles", "Blueprint", "Packets"]) {
     assert.match(inspect, new RegExp(`"${tab}"`));
   }
   for (const action of ["Mark event chat-only", "Leave event unassigned", "Propose split", "Propose merge"]) {
@@ -7221,6 +7294,7 @@ test("Part 3 controlled supersession fixture compiles only the current governed 
   assert.equal(inspect.value.governance.length, 2);
   assert.equal(inspect.value.packetUsage.length, 1);
   assert.equal(inspect.value.packetUsage[0].packet_id, result.value.packet.id);
+  assert.ok(Array.isArray(inspect.value.sourceEvents));
 
   if (process.env.PART3_CAPTURE === "1") {
     console.log(`PART3_ENGINE_OUTPUT=${JSON.stringify({

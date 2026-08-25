@@ -22,6 +22,7 @@ function eventView(projectId: string, row: Row) {
       : row.compressed_representation ? "Compressed" : "Exact",
     assignmentState: row.assignment_state,
     authority: row.authority_state,
+    conversationTitle: typeof row.conversation_title === "string" ? row.conversation_title : null,
     observedAt: row.observed_at,
     ingestedAt: row.ingested_at,
     sourceLinks: sourceMessageIds.map((messageId) => ({
@@ -563,7 +564,7 @@ export async function inspectMechanism(db: D1Database, projectId: string, mechan
     "SELECT * FROM mechanisms WHERE id = ? AND project_id = ? LIMIT 1",
   ).bind(mechanismId, projectId));
   if (!mechanism) throw new Error("Mechanism not found.");
-  const [versions, governance, packets, sourceFinding, reconstructedSource] = await Promise.all([
+  const [versions, governance, packets, sourceFinding, sourceEvents, reconstructedSource] = await Promise.all([
     all<Row>(db.prepare(
       "SELECT * FROM mechanism_versions WHERE project_id = ? AND mechanism_id = ? ORDER BY created_at ASC, rowid ASC",
     ).bind(projectId, mechanismId)),
@@ -583,6 +584,18 @@ export async function inspectMechanism(db: D1Database, projectId: string, mechan
          WHERE f.project_id = ? AND f.id = ? LIMIT 1`,
       ).bind(projectId, mechanism.source_finding_id))
       : Promise.resolve(null),
+    mechanism.source_finding_id
+      ? all<Row>(db.prepare(
+        `SELECT e.*, c.title AS conversation_title
+         FROM findings f
+         JOIN events e
+           ON e.project_id = f.project_id AND f.source_event_ids LIKE '%' || e.id || '%'
+         LEFT JOIN conversations c
+           ON c.project_id = e.project_id AND c.id = e.conversation_id
+         WHERE f.project_id = ? AND f.id = ?
+         ORDER BY e.ingested_at ASC, e.id ASC`,
+      ).bind(projectId, mechanism.source_finding_id))
+      : Promise.resolve([]),
     mechanism.source_finding_id
       ? first<Row>(db.prepare(
         `SELECT ci.id, ci.representation_type, ci.source_type
@@ -624,6 +637,7 @@ export async function inspectMechanism(db: D1Database, projectId: string, mechan
     sourceFinding: sourceFinding
       ? { ...sourceFinding, counterevidence: parseJson(sourceFinding.counterevidence, []) }
       : null,
+    sourceEvents: sourceEvents.map((row) => eventView(projectId, row)),
     packetUsage: packets,
     historicalLimitations: reconstructedSource
       ? ["Brewers historical raw transcript unavailable; reconstructed source is not Exact."]

@@ -33,8 +33,31 @@ function readableValue(item: unknown) {
   return String(item);
 }
 
+function selectedItemLabel(item: Record<string, unknown>) {
+  const metadata = item.metadata && typeof item.metadata === "object"
+    ? item.metadata as Record<string, unknown>
+    : null;
+  if (typeof metadata?.statement === "string" && metadata.statement.trim()) return metadata.statement;
+  if (String(item.sourceId || "").includes(":check:")) return "Required proof constraint";
+  if (typeof item.sourceType === "string" && item.sourceType.trim()) {
+    const words = item.sourceType.replaceAll("_", " ");
+    return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+  }
+  return "Selected governed context";
+}
+
+function humanLabel(item: unknown) {
+  const raw = readableValue(item).replaceAll("_", " ");
+  return `${raw.charAt(0).toUpperCase()}${raw.slice(1)}`;
+}
+
 function DetailRow({ label, value: item }: { label: string; value: unknown }) {
   return <div><dt>{label}</dt><dd>{readableValue(item)}</dd></div>;
+}
+
+function DetailList({ label, value: item }: { label: string; value: unknown }) {
+  const items = Array.isArray(item) ? item : [];
+  return <div><dt>{label}</dt><dd>{items.length ? <ul>{items.map((entry) => <li key={String(entry)}>{String(entry)}</li>)}</ul> : "None recorded"}</dd></div>;
 }
 
 export default function InspectDetail({
@@ -139,38 +162,149 @@ export default function InspectDetail({
   const transfer = recordType === "transfers" && detail.transfer && typeof detail.transfer === "object"
     ? detail.transfer as Record<string, unknown>
     : null;
+  const mechanism = recordType === "mechanisms" && detail.mechanism && typeof detail.mechanism === "object"
+    ? detail.mechanism as Record<string, unknown>
+    : null;
+  const mechanismVersions = mechanism && Array.isArray(detail.versions)
+    ? detail.versions as Array<Record<string, unknown>>
+    : [];
+  const currentMechanismVersion = mechanismVersions.find((item) => item.id === mechanism?.currentVersionId)
+    || mechanismVersions.at(-1)
+    || null;
+  const previousMechanismVersion = currentMechanismVersion?.supersedesVersionId
+    ? mechanismVersions.find((item) => item.id === currentMechanismVersion.supersedesVersionId) || null
+    : null;
+  const mechanismGovernance = mechanism && Array.isArray(detail.governance)
+    ? detail.governance as Array<Record<string, unknown>>
+    : [];
+  const governingEvent = currentMechanismVersion
+    ? mechanismGovernance.find((item) => item.resultingVersionId === currentMechanismVersion.id) || mechanismGovernance.at(-1)
+    : null;
+  const sourceFinding = mechanism && detail.sourceFinding && typeof detail.sourceFinding === "object"
+    ? detail.sourceFinding as Record<string, unknown>
+    : null;
+  const sourceEvents = mechanism && Array.isArray(detail.sourceEvents)
+    ? detail.sourceEvents as Array<Record<string, unknown>>
+    : [];
+  const exactSource = sourceEvents.find((item) => item.representation === "Exact") || sourceEvents[0] || null;
+  const exactSourceLinks = exactSource && Array.isArray(exactSource.sourceLinks)
+    ? exactSource.sourceLinks as Array<Record<string, unknown>>
+    : [];
+  const mechanismPacketUsage = mechanism && Array.isArray(detail.packetUsage)
+    ? detail.packetUsage as Array<Record<string, unknown>>
+    : [];
+  const packetItems = packet && Array.isArray(detail.items)
+    ? detail.items as Array<Record<string, unknown>>
+    : [];
+  const usedPacketItems = packetItems.filter((item) => item.treatment === "Use");
 
   return (
     <main className={styles.page}>
       <Link href={`/projects/${encodeURIComponent(projectId)}/inspect`}>← Inspect</Link>
-      <header className={styles.header}>
+      <header className={`${styles.header} ${styles.detailHeader}`}>
         <div><span>{recordType} · immutable lineage</span><h1>{titleFor(recordType, detail)}</h1></div>
-        <p>{recordId}</p>
+        <details className={styles.headerIdentity}><summary>Technical identity</summary><p>{recordId}</p></details>
       </header>
       {packet ? (
         <>
           <section className={styles.record}>
             <header><strong>Prepared context</strong><span>{readableValue(packet.status)}</span></header>
+            <p>This is the task-specific Context Delivery Atlas selected from governed State Truth.</p>
             <dl>
-              <DetailRow label="Project" value={packet.projectId} />
               <DetailRow label="Literal task" value={packet.task} />
-              <DetailRow label="Estimated tokens" value={`${readableValue(packet.finalTokenCount)} / ${readableValue(packet.tokenBudget)}`} />
               <DetailRow label="Created" value={packet.createdAt} />
             </dl>
             <pre>{readableValue(packet.compiledContent)}</pre>
+            <details>
+              <summary>Delivery technical summary</summary>
+              <dl>
+                <DetailRow label="Project" value={packet.projectId} />
+                <DetailRow label="Estimated tokens" value={`${readableValue(packet.finalTokenCount)} / ${readableValue(packet.tokenBudget)}`} />
+              </dl>
+            </details>
           </section>
           <section className={styles.record}>
-            <header><strong>Packet receipt</strong><span>{readableValue(packetReceipt?.id)}</span></header>
+            <header><strong>Governing truth selected</strong><span>{usedPacketItems.length} supplied</span></header>
+            {usedPacketItems.length ? usedPacketItems.map((item) => (
+              <div key={String(item.id || `${item.sourceType}:${item.sourceId}`)}>
+                <strong>{selectedItemLabel(item)}</strong>
+                <p>{readableValue(item.reason)}</p>
+                {item.sourceType === "mechanism" && item.sourceId ? (
+                  <Link href={`/projects/${encodeURIComponent(projectId)}/inspect/mechanisms/${encodeURIComponent(String(item.sourceId))}`}>
+                    Trace to governed truth
+                  </Link>
+                ) : null}
+              </div>
+            )) : <p>No governing Use item is recorded in this packet.</p>}
+          </section>
+          <section className={styles.record}>
+            <header><strong>Delivery receipt</strong><span>Saved</span></header>
             <dl>
               <DetailRow label="Used" value={treatmentCount("Use")} />
               <DetailRow label="Considered" value={treatmentCount("Consider")} />
               <DetailRow label="Excluded" value={treatmentCount("Exclude")} />
-              <DetailRow label="Inference disclosure" value={packetReceipt?.inferenceDisclosure} />
-              <DetailRow label="Unresolved conflicts" value={packetReceipt?.unresolvedConflicts} />
             </dl>
+            <details>
+              <summary>Why this selection was safe</summary>
+              <dl>
+                <DetailRow label="Inference disclosure" value={packetReceipt?.inferenceDisclosure} />
+                <DetailRow label="Unresolved conflicts" value={packetReceipt?.unresolvedConflicts} />
+              </dl>
+            </details>
           </section>
           <details className={styles.record}>
             <summary>Raw canonical packet and receipt</summary>
+            <pre>{JSON.stringify(detail, null, 2)}</pre>
+          </details>
+        </>
+      ) : null}
+      {mechanism ? (
+        <>
+          <section className={styles.record}>
+            <header><strong>Current governing statement</strong><span>{readableValue(currentMechanismVersion?.status || mechanism.status)}</span></header>
+            <h2>{readableValue(currentMechanismVersion?.statement)}</h2>
+            <dl>
+              <DetailRow label="Authority" value={humanLabel(currentMechanismVersion?.authority)} />
+              <DetailList label="Scope conditions" value={currentMechanismVersion?.scopeConditions} />
+              <DetailList label="Exclusions" value={currentMechanismVersion?.exclusions} />
+            </dl>
+          </section>
+          {previousMechanismVersion ? (
+            <section className={styles.record}>
+              <header><strong>What changed</strong><span>Supersession</span></header>
+              <dl>
+                <DetailRow label="Previously" value={previousMechanismVersion.statement} />
+                <DetailRow label="Changed to" value={currentMechanismVersion?.statement} />
+                <DetailRow label="Changed because" value={governingEvent?.reason || "A canonical supersession is recorded, but no human-readable reason is attached."} />
+              </dl>
+            </section>
+          ) : null}
+          <section className={styles.record}>
+            <header><strong>Why Atlas believes this</strong><span>Readable lineage</span></header>
+            <div className={styles.lineageCard}>
+              <div><span>Current governing statement</span><strong>{readableValue(currentMechanismVersion?.statement)}</strong></div>
+              <i aria-hidden="true">↓</i>
+              <div><span>Approved or corrected</span><strong>{readableValue(currentMechanismVersion?.authority)} · {readableValue(currentMechanismVersion?.status)}</strong></div>
+              <i aria-hidden="true">↓</i>
+              <div><span>Finding or observation</span><strong>{readableValue(sourceFinding?.proposal_statement)}</strong></div>
+              <i aria-hidden="true">↓</i>
+              <div>
+                <span>Exact conversation evidence</span>
+                <strong>{exactSource?.conversationTitle ? String(exactSource.conversationTitle) : exactSource ? "Source event recorded without a conversation label" : "No exact source event is linked"}</strong>
+                {exactSourceLinks[0]?.href ? <Link href={String(exactSourceLinks[0].href)}>View exact evidence</Link> : null}
+              </div>
+            </div>
+          </section>
+          <section className={styles.record}>
+            <header><strong>Context Delivery use</strong><span>{mechanismPacketUsage.length} saved uses</span></header>
+            {mechanismPacketUsage.length ? mechanismPacketUsage.map((usage) => (
+              <Link href={`/projects/${encodeURIComponent(projectId)}/inspect/packets/${encodeURIComponent(String(usage.packet_id))}`} key={String(usage.packet_id)}>
+                {readableValue(usage.treatment)} · {readableValue(usage.inclusion_reason || usage.exclusion_reason)}
+              </Link>
+            )) : <p>No saved Full packet has supplied this statement. Light delivery may still occur without creating a packet or receipt.</p>}
+          </section>
+          <details className={styles.record}>
+            <summary>Raw canonical mechanism, versions, governance, and source records</summary>
             <pre>{JSON.stringify(detail, null, 2)}</pre>
           </details>
         </>
@@ -215,7 +349,7 @@ export default function InspectDetail({
           <pre>{JSON.stringify(result, null, 2)}</pre>
         </section>
       )}
-      {!packet && !transfer ? <section className={styles.stack}>
+      {!packet && !transfer && !mechanism ? <section className={styles.stack}>
         {Object.entries(detail).map(([key, item]) => (
           <article className={styles.record} key={key}>
             <header><strong>{key}</strong><span>canonical</span></header>

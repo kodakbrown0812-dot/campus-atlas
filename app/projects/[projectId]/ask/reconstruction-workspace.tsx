@@ -98,7 +98,7 @@ function RunTechnicalDetails({
 
 export default function ReconstructionWorkspace({ projectId }: { projectId: string }) {
   const { session, authorizationHeaders } = useWriteSession();
-  const { pendingTask, clearTask } = useStewardTask();
+  const { pendingTask, clearTask, rememberDelivery } = useStewardTask();
   const [roadways, setRoadways] = useState<Roadway[]>([]);
   const [cases, setCases] = useState<CaseChoice[]>([]);
   const [models, setModels] = useState<ReceivingModel[]>([]);
@@ -246,6 +246,7 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
           raw: complete,
         };
         setRun(complete);
+        rememberDelivery(projectId, complete);
         setPrepared(context);
         setSelectedPacketId(context.packet.id);
         setView("ready");
@@ -259,12 +260,16 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
         return;
       }
       if (value.status === "atlas_not_needed") {
-        setRun(value as ReconstructionRunResult);
+        const complete = value as ReconstructionRunResult;
+        setRun(complete);
+        rememberDelivery(projectId, complete);
         setView("not_needed");
         return;
       }
       if (value.status === "light_continuity_only") {
-        setRun(value as ReconstructionRunResult);
+        const complete = value as ReconstructionRunResult;
+        setRun(complete);
+        rememberDelivery(projectId, complete);
         setView("light");
         return;
       }
