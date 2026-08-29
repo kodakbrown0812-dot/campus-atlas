@@ -1379,6 +1379,11 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   assert.equal(checkpoint.response.status, 200, JSON.stringify(checkpoint.value));
   assert.equal(checkpoint.value.result.checkpoint.extractionVersion, "slice3-mature-coverage-v1");
   const selection = checkpoint.value.result.checkpoint.metadata.eventSelection;
+  assert.deepEqual(
+    selection.selectedSourceSequences,
+    [1, 3, 7, 9, 10, 11, 12, 13, 14, 17, 18, 19, 20, 21, 22, 23, 24],
+    "proposition classifiers must not change the frozen discovery identities",
+  );
   const candidateConstruction = checkpoint.value.result.checkpoint.metadata.candidateConstruction;
   assert.equal(selection.strategy, "mature_room_chronology_signal_coverage_v1");
   assert.deepEqual(selection.chronologySpan, { first: 1, last: messages.length });
@@ -1391,7 +1396,7 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   for (const category of ["correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty", "shared_term"]) {
     assert.ok(selection.signalCategoriesRepresented.includes(category), category);
   }
-  assert.equal(candidateConstruction.version, "slice3-mature-propositions-v3");
+  assert.equal(candidateConstruction.version, "slice3-mature-propositions-v3-discovery-boundary-v1");
   assert.equal(candidateConstruction.strategy, "mature_room_complete_current_propositions_v1");
   assert.equal(candidateConstruction.budget, 12);
   assert.ok(candidateConstruction.candidateCount <= 12);

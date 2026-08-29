@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "status": "stopped_at_next_genuine_failure",
+  "failurePhase": "pre_governance_semantic_gate_after_exact_discovery_restoration",
+  "failureCode": "current_checkpoint_exposes_only_one_stale_ui_candidate",
+  "repairUnderTest": {
+    "evidenceExtractionVersion": "slice3-mature-coverage-v1",
+    "discoveryClassifierVersion": "mature_room_discovery_signals_v1",
+    "candidateConstructionVersion": "slice3-mature-propositions-v3-discovery-boundary-v1",
+    "selectionStrategy": "mature_room_chronology_signal_coverage_v1",
+    "candidateStrategy": "mature_room_complete_current_propositions_v1",
+    "candidateBudget": 12
+  },
+  "frozenInputs": {
+    "acceptedCoverageRepairCommit": "0b17d3a402e654703059df9c3e1022d2471642e9",
+    "acceptedCandidateRepairCommit": "83491f116acbf9037d9307db3ff73726b34438be",
+    "propositionRepairFailureCommit": "eac4f7794b80cba1e87ea59906b14a0a9a69e627",
+    "protocolFreezeCommit": "638627f592ec3edeff7b90cba821cf570341c554",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "structuredImportSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "baselineInputSha256": "293b54fa862de99e904e559b49e9feea18c1b20c5b879e8fef0d9a5cbc3483ef"
+  },
+  "localEvidence": {
+    "exactResumeResponseSha256": "c31719fb1f399b660a1b28b0f1632a2d3858094b8c5d4004c24875ae18e7de88",
+    "exactResumeResponseBytes": 221323,
+    "canonicalDatabaseSha256AtStop": "c240a96bbb1f2c6bbcafbb1e82c251a8f708b359b7e94e11bb87bf6363d0ad88",
+    "canonicalDatabaseBytes": 2871296,
+    "canonicalDatabaseBeforeRepairSha256": "7d1c6d12a7d419f5f9a95eddb4bcd198a9d73ff77e915c1b59134f7904e5f79e",
+    "privacy": "The exact authentic transcript, exact resume response, and local canonical databases remain in the user's local proof workspace. Only hashes, counts, identifiers, selected sequences, and bounded diagnostic facts are committed here."
+  },
+  "identifiers": {
+    "projectId": "campus-atlas-v18-authentic",
+    "conversationId": "conversation:cb949752-1049-4637-9c35-19d7769d6d5d",
+    "caseId": "case:transfer:e492a415a31f8cb63fd6fb5b2f36",
+    "transferId": "transfer-room:c480dbbf1d71dd9b1195e03d3ef32547",
+    "checkpointId": "checkpoint:9b1345a0-2147-4b02-a107-50ee4394c4b7"
+  },
+  "discoveryBoundary": {
+    "exactIdentityEqualityPassed": true,
+    "sourceItemsConsidered": 117,
+    "selectedEventCount": 21,
+    "acceptedSourceSequences": [32, 35, 42, 49, 61, 78, 83, 88, 89, 93, 97, 102, 103, 104, 105, 109, 110, 113, 115, 116, 117],
+    "actualSourceSequences": [32, 35, 42, 49, 61, 78, 83, 88, 89, 93, 97, 102, 103, 104, 105, 109, 110, 113, 115, 116, 117],
+    "selectedFinalThirdEventCount": 15,
+    "selectedFinalThirdEventsWithDisposition": 15
+  },
+  "candidateMaterialization": {
+    "candidateUnitsGenerated": 12,
+    "equivalentCandidatesSuppressed": 11,
+    "newDurableFindings": 1,
+    "reviewItems": 1,
+    "candidateCeilingUnchanged": true,
+    "onlyNewCandidate": {
+      "findingId": "finding:db4e7dfc-80ab-48ef-88d6-90ea201dd5f0",
+      "sourceSequence": 103,
+      "proposalSha256": "9218c84441f87dcd1aa9cc9d68d9fa7cc8f9e9dab87df991bbd6003bf1ad74b3",
+      "proposalUtf8Bytes": 426,
+      "classification": "completed historical Inspect/UI workflow instruction presented as a proposed current constraint"
+    }
+  },
+  "preGovernanceSemanticGate": {
+    "passed": false,
+    "currentAuthenticFullTransferDirection": false,
+    "currentNextAction": false,
+    "completeStoppingRule": false,
+    "noRepairDuringProofBoundary": false,
+    "uiFreezeBoundary": false,
+    "taskAndRubricFreeze": false,
+    "completeSupersessionGuard": false,
+    "causalProofFirstRationale": false,
+    "materialUncertaintyOrOpenWork": false,
+    "staleCompletedInstructionLeakage": true,
+    "irrelevantChatterPromoted": false,
+    "diagnosis": "Exact discovery is restored, but the checkpoint's governable candidate set is not a semantically complete projection of the generated proposition set. Eleven generated candidates were suppressed as equivalent to findings from prior failed checkpoints, and the only newly surfaced finding is completed UI work. The result cannot enter governance."
+  },
+  "exactLineage": {
+    "candidateFindings": 1,
+    "sourceEventLinks": 1,
+    "sourceEventLinksResolvingToImmutableMessages": 1,
+    "missingExactMessageLinks": 0,
+    "status": "complete"
+  },
+  "canonicalCountsAtStop": {
+    "conversations": 1,
+    "conversationImports": 1,
+    "messages": 117,
+    "events": 117,
+    "cases": 1,
+    "caseEventAttachments": 117,
+    "checkpoints": 5,
+    "checkpointReasoningNodes": 91,
+    "findings": 36,
+    "findingVersions": 36,
+    "mechanisms": 0,
+    "mechanismVersions": 0,
+    "governanceEvents": 0,
+    "packets": 0,
+    "packetItems": 0,
+    "receipts": 0,
+    "transferRuns": 1
+  },
+  "executionStopped": {
+    "preGovernanceSemanticGateEvaluated": true,
+    "governancePerformed": false,
+    "stewardCalled": false,
+    "compiledContentCreated": false,
+    "destinationRoomsCreated": false,
+    "runtimeRepairOfNextFailureAttempted": false,
+    "productionChanged": false
+  },
+  "smallestLikelyNextSlice": "Repair only mature candidate materialization/reuse and state validity after the frozen selector: a new checkpoint must expose the complete current candidate set even when equivalent proposal hashes already exist from prior stopped analyses, and completed UI instructions must not be the sole review item. Preserve the exact 21 discovery identities, proposition-completeness rules, twelve-candidate ceiling, governance boundary, and all downstream Context Delivery behavior."
+}

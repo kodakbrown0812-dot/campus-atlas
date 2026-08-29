@@ -46,7 +46,7 @@ const MAX_SELECTED_NODES = 7;
 const MAX_MATURE_SELECTED_NODES = 21;
 const MAX_MATURE_FINDINGS = 12;
 export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
-export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-propositions-v3";
+export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-propositions-v3-discovery-boundary-v1";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -413,6 +413,40 @@ function continuitySignals(value: string): ContinuitySignal[] {
   return signals;
 }
 
+// Mature evidence discovery is a frozen, deterministic boundary. Candidate
+// construction may refine its semantic classifiers without changing which
+// Exact events the accepted discovery version selects.
+function discoveryContinuitySignals(value: string): ContinuitySignal[] {
+  const signals: ContinuitySignal[] = [];
+  if (/\b(?:correction|corrected|incorrect|misunderstood|instead|rather than|not the right|no longer applies)\b/i.test(value)) {
+    signals.push("correction");
+  }
+  if (/\b(?:supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|previously|earlier (?:plan|decision|direction)|historical rather than current|no longer (?:current|governing))\b/i.test(value)) {
+    signals.push("supersession");
+  }
+  if (/\b(?:must(?: not)?|do not|don't|never|avoid|preserve|required|requires|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/i.test(value)) {
+    signals.push("constraint");
+  }
+  if (/\b(?:current (?:direction|plan|work|state|objective|phase|surface)|is now|are now|begins now|prioriti[sz]e|proceed with|the next task is)\b/i.test(value)) {
+    signals.push("current_direction");
+  }
+  if (/\b(?:next action|next step|next task|do next|build next|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after|choose and (?:freeze|continue|begin|start))\b/i.test(value)) {
+    signals.push("next_action");
+  }
+  if (/\b(?:uncertain|uncertainty|unresolved|open question|open loop|unknown|missing state|not yet|provisional|pending evidence|remains to be)\b/i.test(value)
+    || /^(?:can|could|whether|will)\b[^?]{12,}\?$/i.test(value.trim())) {
+    signals.push("uncertainty");
+  }
+  if (/^[A-Z][A-Za-z0-9 /+_-]{2,48}\s+(?:means|refers to|answers|is defined as)\b/m.test(value)
+    || /\b(?:we call this|the term .{1,48} means|local meaning|shared term)\b/i.test(value)) {
+    signals.push("shared_term");
+  }
+  if (/\b(?:because|therefore|so that|depends on|affects|changes how|materially alters|in order to|the reason)\b/i.test(value)) {
+    signals.push("connection");
+  }
+  return signals;
+}
+
 function cleanAtomicUnit(value: string) {
   return value
     .trim()
@@ -437,6 +471,42 @@ function atomicUnits(event: Row) {
         index += 1;
         value = `${value}\n${dependentBody}`;
       }
+      while (index + 1 < paragraphs.length
+        && /^(?:[-*+] |\d+[.)] )/u.test(paragraphs[index + 1])
+        && `${value}\n${paragraphs[index + 1]}`.length <= 700) {
+        index += 1;
+        value = `${value}\n${paragraphs[index]}`;
+      }
+    }
+    grouped.push(value);
+  }
+
+  const units: string[] = [];
+  for (const block of grouped) {
+    const cleanedBlock = cleanAtomicUnit(block);
+    if (cleanedBlock.length <= 700) {
+      units.push(cleanedBlock);
+      continue;
+    }
+    const lines = block.split(/\n+/gu).map(cleanAtomicUnit).filter(Boolean);
+    for (const line of lines) {
+      if (line.length <= 700) {
+        units.push(line);
+        continue;
+      }
+      units.push(...line.split(/(?<=[.!?])\s+/gu).map(cleanAtomicUnit).filter(Boolean));
+    }
+  }
+  return units.filter((value) => value.length >= 24 && value.length <= 700);
+}
+
+function discoveryAtomicUnits(event: Row) {
+  const raw = eventStatement(event).replace(/\r\n?/gu, "\n");
+  const paragraphs = raw.split(/\n\s*\n/gu).map((value) => value.trim()).filter(Boolean);
+  const grouped: string[] = [];
+  for (let index = 0; index < paragraphs.length; index += 1) {
+    let value = paragraphs[index];
+    if (value.endsWith(":")) {
       while (index + 1 < paragraphs.length
         && /^(?:[-*+] |\d+[.)] )/u.test(paragraphs[index + 1])
         && `${value}\n${paragraphs[index + 1]}`.length <= 700) {
@@ -550,6 +620,22 @@ function matureUnits(events: Row[]) {
     }
     return atomic;
   });
+}
+
+function discoveryMatureUnits(events: Row[]) {
+  const maximumSequence = Math.max(0, ...events.map((event) => sourceSequence(event) || 0));
+  return events.flatMap((event) => discoveryAtomicUnits(event).flatMap((statement) => {
+    const signals = discoveryContinuitySignals(statement);
+    if (!signals.length) return [];
+    return [{
+      event,
+      statement,
+      sequence: sourceSequence(event) || 0,
+      signals,
+      score: matureUnitScore(event, statement, signals, maximumSequence),
+      clusterKind: "atomic" as const,
+    } satisfies MatureUnit];
+  }));
 }
 
 function compareMatureUnits(left: MatureUnit, right: MatureUnit) {
@@ -720,7 +806,7 @@ function selectEventsForAnalysis(events: Row[]): EventSelection {
     };
   }
 
-  const units = matureUnits(sourceEvents);
+  const units = discoveryMatureUnits(sourceEvents);
   const eventUnits = new Map<string, MatureUnit[]>();
   for (const unit of units) {
     const id = String(unit.event.id);
@@ -772,6 +858,7 @@ function selectEventsForAnalysis(events: Row[]): EventSelection {
     mature: true,
     metadata: {
       strategy: "mature_room_chronology_signal_coverage_v1",
+      classifierVersion: "mature_room_discovery_signals_v1",
       totalEvents: events.length,
       totalSourceMessageEvents: sourceEvents.length,
       selectedSourceSequences: selectedSequences,
