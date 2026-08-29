@@ -226,6 +226,13 @@
   padding-left: 18px;
 }
 
+.stateColumns .wideState {
+  grid-column: 1 / -1;
+  min-height: auto;
+  padding-right: 0;
+  border-right: 0;
+}
+
 .stateColumns p,
 .stateColumns ul,
 .governingSummary ul,
@@ -255,6 +262,50 @@
   margin: 0;
   color: #8297b8;
   font-size: 13px;
+  line-height: 1.5;
+}
+
+.signalGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.signalCard {
+  display: grid;
+  gap: 10px;
+  min-height: 150px;
+  padding: 18px;
+  border: 1px solid rgba(140, 166, 207, .16);
+  border-radius: 14px;
+  background: rgba(7, 20, 41, .72);
+}
+
+.signalCard > span,
+.itemRole {
+  width: fit-content;
+  color: #81a0ed;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.signalCard p,
+.signalCard ul {
+  margin: 0;
+  color: #bdc9da;
+  line-height: 1.55;
+}
+
+.signalCard ul {
+  padding-left: 18px;
+}
+
+.signalCard small,
+.scaffoldingRecord small {
+  align-self: end;
+  color: #8297b8;
   line-height: 1.5;
 }
 
@@ -310,6 +361,56 @@
 
 .deliveryCard small {
   color: #8297b8;
+}
+
+.deliveryCard .scaffoldingNotice {
+  margin: 0;
+  padding: 11px 13px;
+  border-left: 2px solid #e1be7d;
+  color: #d4c29d;
+  background: rgba(224, 173, 75, .06);
+}
+
+.scaffoldingRecord {
+  border-color: rgba(224, 173, 75, .24);
+  background: linear-gradient(155deg, rgba(37, 32, 29, .94), rgba(18, 23, 35, .92));
+}
+
+.scaffoldingList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+  color: #d5c8ad;
+  line-height: 1.5;
+}
+
+.itemRole {
+  display: inline-block;
+  margin: 5px 0 0 8px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  color: #9ed8d2;
+  background: rgba(39, 212, 199, .08);
+}
+
+.exclusionGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+  margin-top: 14px;
+}
+
+.exclusionGrid > div {
+  padding: 14px;
+  border-radius: 10px;
+  background: rgba(3, 12, 26, .38);
+}
+
+.exclusionGrid p {
+  color: #9cabc0;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .lineageCard {
@@ -559,6 +660,8 @@
   }
 
   .stateColumns,
+  .signalGrid,
+  .exclusionGrid,
   .record dl {
     grid-template-columns: 1fr;
   }

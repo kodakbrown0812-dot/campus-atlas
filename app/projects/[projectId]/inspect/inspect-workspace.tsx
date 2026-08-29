@@ -20,6 +20,7 @@ type CaseRecord = Record<string, unknown> & {
 
 type ReasoningRecord = Record<string, unknown> & {
   id: string;
+  type?: string;
   statement: string;
   authority?: string;
   status?: string;
@@ -89,13 +90,19 @@ type MechanismDetail = {
 };
 
 type PacketDetail = {
-  packet: Record<string, unknown> & { id: string; task: string; compiledContent: string };
+  packet: Record<string, unknown> & {
+    id: string;
+    task: string;
+    compiledContent: string;
+    finalTokenCount?: number;
+  };
   items: Array<Record<string, unknown> & {
     sourceType?: string;
     sourceId?: string;
     treatment?: string;
     authority?: string;
     reason?: string;
+    protectedRole?: string | null;
   }>;
   receipt: Record<string, unknown> & { id: string };
 };
@@ -134,13 +141,15 @@ function humanize(item: unknown) {
 }
 
 function authorityLabel(authority: unknown, status: unknown) {
-  const combined = `${String(authority || "")} ${String(status || "")}`.toLowerCase();
+  const authorityText = String(authority || "").toLowerCase();
+  const combined = `${authorityText} ${String(status || "")}`.toLowerCase();
   if (combined.includes("supersed") || combined.includes("historical")) return "Superseded";
   if (combined.includes("challeng")) return "Challenged";
   if (combined.includes("reject") || combined.includes("exclude")) return "Excluded";
   if (combined.includes("propos") || combined.includes("pending")) return "Proposed";
   if (combined.includes("consider")) return "Consider";
-  if (combined.includes("approved") || combined.includes("active")) return "Governing";
+  if (authorityText.includes("observed") || authorityText.includes("inferred")) return "Observed";
+  if (authorityText.includes("approved") || authorityText.includes("governing")) return "Governing";
   return "Observed";
 }
 
@@ -286,12 +295,22 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
           </section>
 
           <section className={styles.section}>
-            <SectionHeading eyebrow="Context Delivery" title="What Atlas supplied" />
+            <SectionHeading eyebrow="Continuity signals" title="Collaboration signals" />
+            <CollaborationSignals
+              activeCase={activeCase}
+              changes={changes}
+              projectId={projectId}
+              reasoning={overview.reasoning}
+            />
+          </section>
+
+          <section className={styles.section}>
+            <SectionHeading eyebrow="Context Delivery" title="Recent context delivery" />
             <DeliverySummary delivery={projectDelivery} latestPacket={latestPacket} projectId={projectId} />
           </section>
 
           <section className={styles.section}>
-            <SectionHeading eyebrow="Source confidence" title="Readable lineage" />
+            <SectionHeading eyebrow="Source confidence" title="Source lineage" />
             <LineageSummary detail={lineageDetail} projectId={projectId} record={lineageRecord} />
           </section>
         </div>
@@ -378,8 +397,9 @@ function OverviewState({ activeCase, governing, projectId, unresolved }: { activ
         <div className={styles.stateColumns}>
           <article><span>Current direction</span><p>{hasValue(decision) ? decision : "No governed current decision recorded for this case."}</p></article>
           <article><span>Important constraints</span>{constraints.length ? <ul>{constraints.map((item) => <li key={item}>{item}</li>)}</ul> : <p>No active constraints are recorded on this case.</p>}</article>
-          <article><span>Open questions</span><p>{pending ? `${pending} finding${pending === 1 ? "" : "s"} need review.` : unresolved.length ? `${unresolved.length} observed or uncertain item${unresolved.length === 1 ? "" : "s"} remain non-governing.` : "No unresolved governed conflict is visible here."}</p></article>
+          <article><span>Open / unresolved</span><p>{pending ? `${pending} finding${pending === 1 ? " needs" : "s need"} review.` : unresolved.length ? `${unresolved.length} observed or uncertain item${unresolved.length === 1 ? " remains" : "s remain"} non-governing.` : "No unresolved governed conflict is visible here."}</p></article>
           <article><span>Next action</span><p>{hasValue(nextAction) ? `Atlas recommends: ${nextAction}` : "No governed next action is recorded."}</p></article>
+          {unresolved.length ? <article className={styles.wideState}><span>Material uncertainty</span><ul>{unresolved.slice(0, 3).map((record) => <li key={record.id}>{record.uncertainty || record.statement}</li>)}</ul>{unresolved.length > 3 ? <p>{unresolved.length - 3} more unresolved items are available in State.</p> : null}</article> : null}
         </div>
         {governing.length ? (
           <div className={styles.governingSummary}>
@@ -391,6 +411,54 @@ function OverviewState({ activeCase, governing, projectId, unresolved }: { activ
         {(!hasValue(thesis) || !hasValue(outcome)) ? <p className={styles.honestNote}>Atlas has not yet governed {![thesis, outcome].some(hasValue) ? "a thesis or final outcome" : !hasValue(thesis) ? "a thesis" : "a final outcome"} for this case.</p> : null}
       </div>
     </section>
+  );
+}
+
+function CollaborationSignals({
+  activeCase,
+  changes,
+  projectId,
+  reasoning,
+}: {
+  activeCase: CaseRecord | null;
+  changes: Array<{ detail: MechanismDetail; current: MechanismVersion; previous: MechanismVersion; reason: unknown }>;
+  projectId: string;
+  reasoning: ReasoningRecord[];
+}) {
+  const corrections = reasoning.filter((record) => String(record.type || "").toLowerCase() === "correction");
+  const constraints = Array.isArray(activeCase?.activeConstraints) ? activeCase.activeConstraints : [];
+  const connections = reasoning.filter((record) => String(record.type || "").toLowerCase() === "proposed_connection");
+  const hasSignals = corrections.length || constraints.length || changes.length || connections.length;
+
+  if (!hasSignals) {
+    return <Empty text="No material collaboration signal is safely derivable from current canonical records." detail="Atlas does not invent corrections, constraints, shared terms, or governing connections to fill this view." />;
+  }
+
+  return (
+    <div className={styles.signalGrid}>
+      {corrections.length || changes.length ? (
+        <article className={styles.signalCard}>
+          <span>Corrections</span>
+          {changes.slice(0, 2).map((change) => <p key={change.current.id}>{change.current.statement}</p>)}
+          {corrections.slice(0, 2).map((record) => <p key={record.id}><strong>{authorityLabel(record.authority, record.status)}:</strong> {record.statement}</p>)}
+          <small>Governed supersessions and explicit correction records remain distinct.</small>
+        </article>
+      ) : null}
+      {constraints.length ? (
+        <article className={styles.signalCard}>
+          <span>Constraints</span>
+          <ul>{constraints.map((constraint) => <li key={constraint}>{constraint}</li>)}</ul>
+          {activeCase ? <Link href={detailHref(projectId, "cases", activeCase.id)}>Inspect governing work</Link> : null}
+        </article>
+      ) : null}
+      {connections.length ? (
+        <article className={styles.signalCard}>
+          <span>Connections</span>
+          {connections.slice(0, 3).map((record) => <p key={record.id}><strong>{authorityLabel(record.authority, record.status)}:</strong> {record.statement}</p>)}
+          <small>Only canonical connection records appear here; proposed relationships are not presented as governing.</small>
+        </article>
+      ) : null}
+    </div>
   );
 }
 
@@ -414,8 +482,9 @@ function DeliverySummary({ delivery, latestPacket, projectId }: { delivery: Retu
     }
   }
   if (latestPacket) {
-    const used = latestPacket.items.filter((item) => item.treatment === "Use");
-    return <article className={styles.deliveryCard}><span>Full context · saved delivery</span><h3>{latestPacket.packet.task}</h3><p>Atlas supplied {used.length} governing project {used.length === 1 ? "item" : "items"} because they materially affected the requested continuation.</p><Link href={detailHref(projectId, "packets", latestPacket.packet.id)}>Inspect this delivery</Link><small>This packet is a task-specific selection from State Truth, not a replacement for it.</small></article>;
+    const governingUsed = latestPacket.items.filter((item) => item.treatment === "Use" && item.sourceType === "Mechanism");
+    const scaffoldingUsed = latestPacket.items.filter((item) => item.treatment === "Use" && item.sourceType === "RoadwayCheck");
+    return <article className={styles.deliveryCard}><span>Full context · saved delivery</span><h3>{latestPacket.packet.task}</h3><p>Atlas supplied {governingUsed.length} governing project {governingUsed.length === 1 ? "item" : "items"} for this task.</p>{scaffoldingUsed.length ? <p className={styles.scaffoldingNotice}>The delivery also carried {scaffoldingUsed.length} generic Roadway / Blueprint {scaffoldingUsed.length === 1 ? "check" : "checks"}. Inspect the delivery to distinguish that scaffolding from State Truth.</p> : null}<Link href={detailHref(projectId, "packets", latestPacket.packet.id)}>Inspect this delivery</Link><small>This packet is a task-specific selection from State Truth, not a replacement for it.{latestPacket.packet.finalTokenCount ? ` Total packet estimate: ${latestPacket.packet.finalTokenCount} tokens.` : ""}</small></article>;
   }
   return <Empty text="No Context Delivery is available to inspect." detail="A Full preparation will create a saved packet. Light and None remain mutation-free and are visible here only during the current app session." />;
 }
@@ -425,12 +494,17 @@ function LineageSummary({ detail, projectId, record }: { detail: MechanismDetail
   const current = detail.versions.find((item) => item.id === detail.mechanism.currentVersionId);
   const event = detail.sourceEvents[0];
   const source = event?.sourceLinks?.[0];
+  const previous = current?.supersedesVersionId
+    ? detail.versions.find((item) => item.id === current.supersedesVersionId)
+    : null;
   return (
     <article className={styles.lineageCard}>
       <div><span>Current governing statement</span><strong>{current?.statement || record.statement}</strong></div><i aria-hidden="true">↓</i>
       <div><span>Approved or corrected</span><strong>{humanize(current?.authority || record.authority)} · {humanize(current?.status || record.status)}</strong></div><i aria-hidden="true">↓</i>
+      <div><span>Correction or supersession</span><strong>{previous ? `Replaced: ${previous.statement}` : "No canonical correction or supersession relationship is recorded for this statement."}</strong></div><i aria-hidden="true">↓</i>
       <div><span>Finding or observation</span><strong>{detail.sourceFinding?.proposal_statement || "No readable source finding statement is available."}</strong></div><i aria-hidden="true">↓</i>
-      <div><span>Exact conversation evidence</span>{event?.representation === "Exact" && source ? <><strong>{event.conversationTitle || "Exact source conversation"}</strong><Link href={source.href}>View exact evidence</Link></> : <strong>Complete Exact-message linkage is not available for this statement.</strong>}</div>
+      <div><span>Exact source event</span><strong>{event?.representation === "Exact" ? "Exact conversation evidence is preserved." : "Complete Exact-event linkage is not available for this statement."}</strong></div><i aria-hidden="true">↓</i>
+      <div><span>Original message</span>{event?.representation === "Exact" && source ? <><strong>{event.conversationTitle || "Exact source conversation"}</strong><Link href={source.href}>View exact evidence</Link></> : <strong>Complete Exact-message linkage is not available for this statement.</strong>}</div>
       {detail.historicalLimitations.length ? <p className={styles.honestNote}>{detail.historicalLimitations.join(" ")}</p> : null}
       <Link href={detailHref(projectId, "mechanisms", detail.mechanism.id)}>Open complete lineage</Link>
     </article>

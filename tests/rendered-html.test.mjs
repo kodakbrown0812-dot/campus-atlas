@@ -2501,7 +2501,7 @@ test("UI Simplification Slice 2 makes Steward outcome-first while preserving tec
   assert.match(styles, /max-height: 180px/);
 });
 
-test("UI Simplification Slice 3 makes Inspect truth-first without hiding delivery or canonical anatomy", async () => {
+test("Final pre-authentic-test trim makes Inspect truth-first and exposes delivery scaffolding honestly", async () => {
   const [inspect, detail, styles, taskContext, steward, service] = await Promise.all([
     readFile(new URL("../app/projects/[projectId]/inspect/inspect-workspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/projects/[projectId]/inspect/[recordType]/[recordId]/inspect-detail.tsx", import.meta.url), "utf8"),
@@ -2516,11 +2516,12 @@ test("UI Simplification Slice 3 makes Inspect truth-first without hiding deliver
     "Current state",
     "Current direction",
     "Important constraints",
-    "Open questions",
+    "Open / unresolved",
     "Next action",
     "What changed",
-    "What Atlas supplied",
-    "Readable lineage",
+    "Collaboration signals",
+    "Recent context delivery",
+    "Source lineage",
   ]) assert.match(inspect, new RegExp(label));
   assert.match(inspect, /No governed current decision recorded for this case/);
   assert.match(inspect, /Atlas has not yet governed/);
@@ -2528,7 +2529,13 @@ test("UI Simplification Slice 3 makes Inspect truth-first without hiding deliver
   assert.match(inspect, /Changed to/);
   assert.match(inspect, /Atlas records the supersession relationship, but no human-readable reason is attached/);
   assert.match(inspect, /Uncertainty:/);
+  assert.match(inspect, /Material uncertainty/);
   assert.match(inspect, /Governing|Proposed|Challenged|Superseded|Excluded/);
+  assert.match(inspect, /Corrections/);
+  assert.match(inspect, /Constraints/);
+  assert.match(inspect, /Connections/);
+  assert.match(inspect, /No material collaboration signal is safely derivable/);
+  assert.doesNotMatch(inspect, /local glossary from conversational phrasing/);
 
   assert.match(taskContext, /recentDelivery: ReconstructionRunResult \| null/);
   assert.match(taskContext, /setRecentDelivery\(delivery\)/);
@@ -2540,11 +2547,21 @@ test("UI Simplification Slice 3 makes Inspect truth-first without hiding deliver
   assert.match(inspect, /delivery\.capsule\.compiledContent/);
   assert.match(inspect, /Full context · saved delivery/);
   assert.match(inspect, /This packet is a task-specific selection from State Truth/);
+  assert.match(inspect, /generic Roadway \/ Blueprint/);
 
   assert.match(detail, /Governing truth selected/);
+  assert.match(detail, /Roadway \/ Blueprint scaffolding/);
+  assert.match(detail, /not governed project State Truth/);
+  assert.match(detail, /Primary roadway/);
+  assert.match(detail, /Generic required checks supplied/);
+  assert.match(detail, /No separate canonical token cost is stored/);
+  assert.match(detail, /Context considered or excluded/);
   assert.match(detail, /Trace to governed truth/);
   assert.match(detail, /Current governing statement/);
   assert.match(detail, /Why Atlas believes this/);
+  assert.match(detail, /Correction or supersession/);
+  assert.match(detail, /Exact source event/);
+  assert.match(detail, /Original message/);
   assert.match(detail, /View exact evidence/);
   assert.match(detail, /Raw canonical mechanism, versions, governance, and source records/);
   assert.match(service, /c\.title AS conversation_title/);
@@ -2556,6 +2573,8 @@ test("UI Simplification Slice 3 makes Inspect truth-first without hiding deliver
   }
   assert.match(inspect, /Raw canonical anatomy|Raw case anatomy|Raw canonical record/);
   assert.match(styles, /\.mobileSelector/);
+  assert.match(styles, /\.signalGrid/);
+  assert.match(styles, /\.scaffoldingRecord/);
   assert.match(styles, /@media \(max-width: 760px\)/);
   assert.match(styles, /\.tabs \{\s*display: none;/);
   assert.doesNotMatch(`${inspect}\n${taskContext}`, /indexedDB|localStorage|sessionStorage/);

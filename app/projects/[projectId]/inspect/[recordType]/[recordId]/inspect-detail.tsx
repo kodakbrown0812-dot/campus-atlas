@@ -197,6 +197,23 @@ export default function InspectDetail({
     ? detail.items as Array<Record<string, unknown>>
     : [];
   const usedPacketItems = packetItems.filter((item) => item.treatment === "Use");
+  const governedPacketItems = usedPacketItems.filter((item) => item.sourceType !== "RoadwayCheck");
+  const receiptUseItems = Array.isArray(treatments.Use)
+    ? treatments.Use as Array<Record<string, unknown>>
+    : [];
+  const scaffoldingItems = receiptUseItems.filter((item) => item.sourceType === "RoadwayCheck");
+  const consideredItems = Array.isArray(treatments.Consider)
+    ? treatments.Consider as Array<Record<string, unknown>>
+    : [];
+  const excludedItems = Array.isArray(treatments.Exclude)
+    ? treatments.Exclude as Array<Record<string, unknown>>
+    : [];
+  const packetInterpretation = packet?.interpretation && typeof packet.interpretation === "object"
+    ? packet.interpretation as Record<string, unknown>
+    : {};
+  const selectedRoadway = packetInterpretation.primaryRoadway && typeof packetInterpretation.primaryRoadway === "object"
+    ? packetInterpretation.primaryRoadway as Record<string, unknown>
+    : null;
 
   return (
     <main className={styles.page}>
@@ -224,18 +241,37 @@ export default function InspectDetail({
             </details>
           </section>
           <section className={styles.record}>
-            <header><strong>Governing truth selected</strong><span>{usedPacketItems.length} supplied</span></header>
-            {usedPacketItems.length ? usedPacketItems.map((item) => (
+            <header><strong>Governing truth selected</strong><span>{governedPacketItems.length} supplied</span></header>
+            <p>These are task-specific selections from canonical State Truth. Generic Roadway / Blueprint checks are shown separately below.</p>
+            {governedPacketItems.length ? governedPacketItems.map((item) => (
               <div key={String(item.id || `${item.sourceType}:${item.sourceId}`)}>
                 <strong>{selectedItemLabel(item)}</strong>
+                {item.protectedRole ? <span className={styles.itemRole}>{humanLabel(item.protectedRole)}</span> : null}
                 <p>{readableValue(item.reason)}</p>
-                {item.sourceType === "mechanism" && item.sourceId ? (
+                {String(item.sourceType || "").toLowerCase() === "mechanism" && item.sourceId ? (
                   <Link href={`/projects/${encodeURIComponent(projectId)}/inspect/mechanisms/${encodeURIComponent(String(item.sourceId))}`}>
                     Trace to governed truth
                   </Link>
                 ) : null}
               </div>
             )) : <p>No governing Use item is recorded in this packet.</p>}
+          </section>
+          <section className={`${styles.record} ${styles.scaffoldingRecord}`}>
+            <header><strong>Roadway / Blueprint scaffolding</strong><span>Delivery machinery</span></header>
+            <p>This is generic packet-construction scaffolding, not governed project State Truth. It is shown so an authentic proof can detect irrelevant or costly delivery structure rather than hiding it.</p>
+            <dl>
+              <DetailRow label="Primary roadway" value={selectedRoadway?.name || packet.primaryRoadwayId} />
+              <DetailRow label="Roadway version" value={selectedRoadway?.version || packet.primaryRoadwayVersionId} />
+              <DetailRow label="Why selected" value={packetReceipt?.selectedRoadwayReason} />
+              <DetailRow label="Generic required checks supplied" value={scaffoldingItems.length} />
+              <DetailRow label="Total packet estimate" value={`${readableValue(packet.finalTokenCount)} tokens`} />
+            </dl>
+            {scaffoldingItems.length ? (
+              <ol className={styles.scaffoldingList}>
+                {scaffoldingItems.map((item, index) => <li key={String(item.sourceId || index)}>{readableValue(item.statement)}</li>)}
+              </ol>
+            ) : <p>No generic Roadway check was supplied.</p>}
+            <small>No separate canonical token cost is stored for individual checks; the total packet estimate above is the available measurement.</small>
           </section>
           <section className={styles.record}>
             <header><strong>Delivery receipt</strong><span>Saved</span></header>
@@ -250,6 +286,13 @@ export default function InspectDetail({
                 <DetailRow label="Inference disclosure" value={packetReceipt?.inferenceDisclosure} />
                 <DetailRow label="Unresolved conflicts" value={packetReceipt?.unresolvedConflicts} />
               </dl>
+            </details>
+            <details>
+              <summary>Context considered or excluded</summary>
+              <div className={styles.exclusionGrid}>
+                <div><strong>Consider · {consideredItems.length}</strong>{consideredItems.length ? consideredItems.map((item, index) => <p key={String(item.sourceId || index)}>{readableValue(item.statement || item.reason)}</p>) : <p>None</p>}</div>
+                <div><strong>Excluded · {excludedItems.length}</strong>{excludedItems.length ? excludedItems.map((item, index) => <p key={String(item.sourceId || index)}>{readableValue(item.statement || item.reason)}</p>) : <p>None</p>}</div>
+              </div>
             </details>
           </section>
           <details className={styles.record}>
@@ -286,10 +329,17 @@ export default function InspectDetail({
               <i aria-hidden="true">↓</i>
               <div><span>Approved or corrected</span><strong>{readableValue(currentMechanismVersion?.authority)} · {readableValue(currentMechanismVersion?.status)}</strong></div>
               <i aria-hidden="true">↓</i>
+              <div><span>Correction or supersession</span><strong>{previousMechanismVersion ? `Replaced: ${readableValue(previousMechanismVersion.statement)}` : "No canonical correction or supersession relationship is recorded for this statement."}</strong></div>
+              <i aria-hidden="true">↓</i>
               <div><span>Finding or observation</span><strong>{readableValue(sourceFinding?.proposal_statement)}</strong></div>
               <i aria-hidden="true">↓</i>
               <div>
-                <span>Exact conversation evidence</span>
+                <span>Exact source event</span>
+                <strong>{exactSource?.representation === "Exact" ? "Exact conversation evidence is preserved." : "No complete Exact source event is linked."}</strong>
+              </div>
+              <i aria-hidden="true">↓</i>
+              <div>
+                <span>Original message</span>
                 <strong>{exactSource?.conversationTitle ? String(exactSource.conversationTitle) : exactSource ? "Source event recorded without a conversation label" : "No exact source event is linked"}</strong>
                 {exactSourceLinks[0]?.href ? <Link href={String(exactSourceLinks[0].href)}>View exact evidence</Link> : null}
               </div>
