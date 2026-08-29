@@ -46,7 +46,7 @@ const MAX_SELECTED_NODES = 7;
 const MAX_MATURE_SELECTED_NODES = 21;
 const MAX_MATURE_FINDINGS = 12;
 export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
-export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-candidates-v2";
+export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-propositions-v3";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -384,10 +384,10 @@ const CONTINUITY_SIGNAL_ORDER: ContinuitySignal[] = [
 
 function continuitySignals(value: string): ContinuitySignal[] {
   const signals: ContinuitySignal[] = [];
-  if (/\b(?:correction|corrected|incorrect|misunderstood|instead|rather than|not the right|no longer applies)\b/i.test(value)) {
+  if (/\b(?:correction|corrected|incorrect|misunderstood|not the right|no longer applies)\b/i.test(value)) {
     signals.push("correction");
   }
-  if (/\b(?:supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|previously|earlier (?:plan|decision|direction)|historical rather than current|no longer (?:current|governing))\b/i.test(value)) {
+  if (/\b(?:supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|previously (?:planned|decided|current|governing)|earlier (?:plan|decision|direction)|historical rather than current|no longer (?:current|governing))\b/i.test(value)) {
     signals.push("supersession");
   }
   if (/\b(?:must(?: not)?|do not|don't|never|avoid|preserve|required|requires|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/i.test(value)) {
@@ -407,7 +407,7 @@ function continuitySignals(value: string): ContinuitySignal[] {
     || /\b(?:we call this|the term .{1,48} means|local meaning|shared term)\b/i.test(value)) {
     signals.push("shared_term");
   }
-  if (/\b(?:because|therefore|so that|depends on|affects|changes how|materially alters|in order to|the reason)\b/i.test(value)) {
+  if (/\b(?:because|therefore|so that|depends on|affects|changes how|materially alters|in order to|the reason|required rationale|rationale|before widening|proof[^.]{0,100}first)\b/i.test(value)) {
     signals.push("connection");
   }
   return signals;
@@ -427,7 +427,16 @@ function atomicUnits(event: Row) {
   const grouped: string[] = [];
   for (let index = 0; index < paragraphs.length; index += 1) {
     let value = paragraphs[index];
-    if (value.endsWith(":")) {
+    const heading = value.length <= 160 && /:\s*$/u.test(value) && !/[.!?]\s*$/u.test(value);
+    if (heading && index + 1 < paragraphs.length) {
+      const dependentBody = paragraphs[index + 1];
+      const bodyIsAnotherHeading = dependentBody.length <= 160
+        && /:\s*$/u.test(dependentBody)
+        && !/[.!?]\s*$/u.test(dependentBody);
+      if (!bodyIsAnotherHeading && `${value}\n${dependentBody}`.length <= 700) {
+        index += 1;
+        value = `${value}\n${dependentBody}`;
+      }
       while (index + 1 < paragraphs.length
         && /^(?:[-*+] |\d+[.)] )/u.test(paragraphs[index + 1])
         && `${value}\n${paragraphs[index + 1]}`.length <= 700) {
@@ -463,6 +472,7 @@ type MatureUnit = {
   sequence: number;
   signals: ContinuitySignal[];
   score: number;
+  clusterKind: "atomic" | "supersession_cluster";
 };
 
 type CandidateRole =
@@ -505,17 +515,41 @@ function matureUnitScore(event: Row, statement: string, signals: ContinuitySigna
 
 function matureUnits(events: Row[]) {
   const maximumSequence = Math.max(0, ...events.map((event) => sourceSequence(event) || 0));
-  return events.flatMap((event) => atomicUnits(event).flatMap((statement) => {
-    const signals = continuitySignals(statement);
-    if (!signals.length) return [];
-    return [{
-      event,
-      statement,
-      sequence: sourceSequence(event) || 0,
-      signals,
-      score: matureUnitScore(event, statement, signals, maximumSequence),
-    } satisfies MatureUnit];
-  }));
+  return events.flatMap((event) => {
+    const statements = atomicUnits(event);
+    const atomic: MatureUnit[] = statements.flatMap((statement) => {
+      const signals = continuitySignals(statement);
+      if (!signals.length) return [];
+      return [{
+        event,
+        statement,
+        sequence: sourceSequence(event) || 0,
+        signals,
+        score: matureUnitScore(event, statement, signals, maximumSequence),
+        clusterKind: "atomic" as const,
+      } satisfies MatureUnit];
+    });
+    const historical = statements.find((statement) => /\b(?:earlier|previous|historical|original)\b[\s\S]{0,100}\b(?:direction|plan|decision|state)\b/i.test(statement));
+    const replacement = statements.find((statement) => /\b(?:explicit correction|do not[\s\S]{0,160}(?:prioriti[sz]e|instead|rather)|replaced by|superseded by|changed to)\b/i.test(statement));
+    const rationale = statements.find((statement) => /\b(?:required rationale|rationale|because|before widening|proof[^.]{0,100}first)\b/i.test(statement));
+    const clusterParts = [historical, replacement, rationale]
+      .filter((statement, index, values): statement is string => Boolean(statement) && values.indexOf(statement) === index);
+    const clusterStatement = historical && replacement
+      ? clusterParts.join("\n")
+      : null;
+    if (clusterStatement && clusterStatement.length <= 1000) {
+      const signals = [...new Set([...continuitySignals(clusterStatement), "correction", "supersession"])] as ContinuitySignal[];
+      atomic.push({
+        event,
+        statement: clusterStatement,
+        sequence: sourceSequence(event) || 0,
+        signals,
+        score: matureUnitScore(event, clusterStatement, signals, maximumSequence) + 8,
+        clusterKind: "supersession_cluster",
+      });
+    }
+    return atomic;
+  });
 }
 
 function compareMatureUnits(left: MatureUnit, right: MatureUnit) {
@@ -570,6 +604,9 @@ function termOverlap(left: string, right: string) {
 }
 
 function functionallyRedundant(left: CandidateSeed, right: CandidateSeed) {
+  for (const protectedRole of ["correction_guard", "uncertainty", "shared_term"] satisfies CandidateRole[]) {
+    if (left.roles.includes(protectedRole) !== right.roles.includes(protectedRole)) return false;
+  }
   const sharedRole = left.roles.some((role) => right.roles.includes(role));
   const overlap = termOverlap(left.unit.statement, right.unit.statement);
   return sharedRole && overlap.count >= 5 && overlap.ratio >= 0.68;
@@ -590,6 +627,74 @@ function compareForRole(left: MatureUnit, right: MatureUnit, role: CandidateRole
     || Number(sourceActorType(right.event) === "user") - Number(sourceActorType(left.event) === "user")
     || right.sequence - left.sequence
     || compareMatureUnits(left, right);
+}
+
+function nakedStructuralFragment(value: string) {
+  const trimmed = value.trim();
+  return /(?:→|↓|->|=>)\s*(?:superseded|corrected|replaced)?\s*$/iu.test(trimmed)
+    || /:\s*$/u.test(trimmed)
+    || /\b(?:because|before|after|until|unless|only if|only after|if|when)\s*$/iu.test(trimmed)
+    || /^(?:current|previous|previously|why|rationale|stopping rule|next action|context delivery answers|state truth answers)\s*$/iu.test(trimmed);
+}
+
+function completeSupersession(unit: MatureUnit) {
+  if (unit.clusterKind === "supersession_cluster") return true;
+  return /\b(?:explicit correction|correction)\b/iu.test(unit.statement)
+    && /\bdo not\b/iu.test(unit.statement)
+    && unit.signals.includes("supersession");
+}
+
+function completeConstraint(value: string) {
+  const directive = value.match(/\b(?:must(?: not)?|do not|don't|never|avoid|preserve|required|requires|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/iu);
+  if (!directive) return true;
+  const remainder = value.slice((directive.index || 0) + directive[0].length).match(/[A-Za-z0-9][A-Za-z0-9_-]*/gu) || [];
+  return remainder.length >= 3 && !nakedStructuralFragment(value);
+}
+
+function completeProposition(unit: MatureUnit) {
+  if (nakedStructuralFragment(unit.statement)) return false;
+  if (unit.statement.trim().length < 32) return false;
+  const roles = candidateRoles(unit);
+  if (roles.includes("correction_guard") && !completeSupersession(unit)) return false;
+  if (roles.includes("constraint") && !completeConstraint(unit.statement)) return false;
+  if (roles.includes("shared_term") && !/[\n:][\s\S]{12,}/u.test(unit.statement)
+    && !/\b(?:means|refers to|is defined as)\b[\s\S]{12,}/iu.test(unit.statement)) return false;
+  return true;
+}
+
+function completionEvidence(event: Row) {
+  return sourceActorType(event) === "assistant"
+    && /\b(?:is complete|completed|committed|accepted|passed|now verified|successfully simplified|ready for)\b/iu.test(eventStatement(event));
+}
+
+function completedSourceEvents(events: Row[]) {
+  const completed = new Set<string>();
+  const completions = events.filter(completionEvidence);
+  for (const event of events) {
+    if (sourceActorType(event) !== "user") continue;
+    const eventSequence = sourceSequence(event) || 0;
+    const terms = normalizedTerms(eventStatement(event));
+    for (const completion of completions) {
+      if ((sourceSequence(completion) || 0) <= eventSequence) continue;
+      let overlap = 0;
+      for (const term of normalizedTerms(eventStatement(completion))) if (terms.has(term)) overlap += 1;
+      if (overlap >= 3) {
+        completed.add(String(event.id));
+        break;
+      }
+    }
+  }
+  return completed;
+}
+
+function imperativeInstruction(unit: MatureUnit) {
+  return /^(?:do not|don't|must|never|avoid|preserve|show|keep|move|make|use|run|create|add|remove|ensure|prefer)\b/iu.test(unit.statement.trim())
+    || /\bthis slice\b/iu.test(unit.statement);
+}
+
+function criticalConstraint(unit: MatureUnit) {
+  return unit.signals.includes("constraint")
+    && /\b(?:stopping rule|stop at|do not repair|only after|only if|until|unless)\b/iu.test(unit.statement);
 }
 
 type EventSelection = {
@@ -686,8 +791,36 @@ function matureFindingType(signals: ContinuitySignal[]) {
 }
 
 async function matureFindingCandidates(selectedEvents: Row[]): Promise<CandidateConstruction> {
-  const units = matureUnits(selectedEvents).sort(compareMatureUnits);
-  const boundary = currentBoundarySequence(units);
+  const discoveredUnits = matureUnits(selectedEvents).sort(compareMatureUnits);
+  const boundary = currentBoundarySequence(discoveredUnits);
+  const completedEvents = completedSourceEvents(selectedEvents);
+  const incompleteUnits = new Set(discoveredUnits.filter((unit) => !completeProposition(unit)));
+  const staleUnits = new Set(discoveredUnits.filter((unit) =>
+    unit.sequence < boundary
+    && completedEvents.has(String(unit.event.id))
+    && (imperativeInstruction(unit)
+      || candidateRoles(unit).includes("current_direction")
+      || candidateRoles(unit).includes("next_action"))
+    && !unit.signals.includes("shared_term")
+    && unit.clusterKind !== "supersession_cluster",
+  ));
+  const completeUnits = discoveredUnits.filter((unit) => !incompleteUnits.has(unit) && !staleUnits.has(unit));
+  const currentTerms = new Set(completeUnits
+    .filter((unit) => unit.sequence >= boundary)
+    .flatMap((unit) => [...normalizedTerms(unit.statement)]));
+  const relationshipCount = (unit: MatureUnit) => {
+    let count = 0;
+    for (const term of normalizedTerms(unit.statement)) if (currentTerms.has(term)) count += 1;
+    return count;
+  };
+  const directlyRelevant = (unit: MatureUnit) => unit.sequence >= boundary
+    || unit.clusterKind === "supersession_cluster"
+    || candidateRoles(unit).includes("correction_guard")
+    || criticalConstraint(unit)
+    || unit.signals.includes("shared_term")
+    || unit.signals.includes("uncertainty")
+    || relationshipCount(unit) >= 3;
+  const units = completeUnits.filter(directlyRelevant);
   const selected: CandidateSeed[] = [];
   const redundantUnits = new Set<MatureUnit>();
   const add = (unit: MatureUnit | undefined) => {
@@ -704,43 +837,38 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
   };
   const rankedForRole = (role: CandidateRole) => units
     .filter((unit) => candidateRoles(unit).includes(role))
-    .sort((left, right) => compareForRole(left, right, role, boundary));
+    .sort((left, right) => {
+      const dependencyRole = ["correction_guard", "rationale", "connection", "constraint"].includes(role);
+      return (role === "constraint" ? Number(criticalConstraint(right)) - Number(criticalConstraint(left)) : 0)
+        || (dependencyRole ? relationshipCount(right) - relationshipCount(left) : 0)
+        || compareForRole(left, right, role, boundary);
+    });
 
-  const requiredRoles: CandidateRole[] = [
-    "current_direction",
-    "next_action",
-    "constraint",
-    "correction_guard",
-    "uncertainty",
-    "shared_term",
-    "rationale",
-    "connection",
-  ];
-  for (const role of requiredRoles) add(rankedForRole(role)[0]);
+  for (const role of ["current_direction", "next_action"] satisfies CandidateRole[]) add(rankedForRole(role)[0]);
 
-  const selectedCurrentConstraints = () => selected.filter((seed) =>
-    seed.roles.includes("constraint") && seed.unit.sequence >= boundary,
-  ).length;
   for (const unit of rankedForRole("constraint")) {
-    if (selectedCurrentConstraints() >= 3 || selected.length >= MAX_MATURE_FINDINGS) break;
+    if (selected.length >= MAX_MATURE_FINDINGS) break;
     if (unit.sequence >= boundary) add(unit);
+  }
+
+  for (const role of ["correction_guard", "rationale", "uncertainty"] satisfies CandidateRole[]) {
+    add(rankedForRole(role)[0]);
+  }
+
+  let sharedTerms = 0;
+  for (const unit of rankedForRole("shared_term")) {
+    if (sharedTerms >= 2 || selected.length >= MAX_MATURE_FINDINGS) break;
+    if (add(unit)) sharedTerms += 1;
   }
 
   let persistentEarlierConstraints = 0;
   for (const unit of rankedForRole("constraint")) {
-    if (persistentEarlierConstraints >= 2 || selected.length >= MAX_MATURE_FINDINGS) break;
+    if (persistentEarlierConstraints >= 3 || selected.length >= MAX_MATURE_FINDINGS) break;
     if (unit.sequence >= boundary
       || unit.signals.includes("correction")
       || unit.signals.includes("supersession")
-      || (!unit.signals.includes("connection") && !unit.signals.includes("shared_term"))) continue;
+      || (relationshipCount(unit) < 3 && !criticalConstraint(unit))) continue;
     if (add(unit)) persistentEarlierConstraints += 1;
-  }
-
-  for (const unit of units
-    .filter((candidate) => candidate.sequence >= boundary)
-    .sort(compareMatureUnits)) {
-    if (selected.length >= MAX_MATURE_FINDINGS) break;
-    add(unit);
   }
 
   for (const unit of units) {
@@ -757,7 +885,7 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
   }
   const supportingByCandidate = new Map<CandidateSeed, MatureUnit[]>();
   for (const seed of selected) {
-    const supporting = units
+    const supporting = completeUnits
       .filter((unit) => unit.event !== seed.unit.event && functionallyRedundant(
         { unit, roles: candidateRoles(unit) },
         seed,
@@ -800,7 +928,7 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
   const supportingEventIds = new Set([...supportingByCandidate.values()].flat().map((unit) => String(unit.event.id)));
   const redundantEventIds = new Set([...redundantUnits].map((unit) => String(unit.event.id)));
   const unitsByEvent = new Map<string, MatureUnit[]>();
-  for (const unit of units) {
+  for (const unit of discoveredUnits) {
     const id = String(unit.event.id);
     unitsByEvent.set(id, [...(unitsByEvent.get(id) || []), unit]);
   }
@@ -814,7 +942,9 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
       else if (supportingEventIds.has(eventId)) disposition = "supported_another_candidate";
       else if (redundantEventIds.has(eventId)) disposition = "redundant_with_stronger_candidate";
       else if (!eventUnits.length) disposition = "source_only_non_durable";
-      else if ((sourceSequence(event) || 0) < boundary) disposition = "rejected_as_non_governing";
+      else if (eventUnits.every((unit) => incompleteUnits.has(unit))) disposition = "insufficiently_complete";
+      else if (eventUnits.some((unit) => staleUnits.has(unit))) disposition = "stale_or_completed";
+      else if ((sourceSequence(event) || 0) < boundary) disposition = "excluded_as_optional";
       return {
         eventId,
         sourceSequence: sourceSequence(event),
@@ -826,12 +956,31 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     candidates,
     metadata: {
       version: CHECKPOINT_CANDIDATE_VERSION,
-      strategy: "mature_room_current_state_role_coverage_v1",
+      strategy: "mature_room_complete_current_propositions_v1",
       budget: MAX_MATURE_FINDINGS,
       candidateCount: candidates.length,
       currentBoundarySequence: boundary || null,
       rolesRepresented: [...new Set(selected.flatMap((seed) => seed.roles))],
       historicalDuplicateUnitsCollapsed: redundantUnits.size,
+      incompleteUnitsRejected: incompleteUnits.size,
+      incompleteUnitDiagnostics: [...incompleteUnits].map((unit) => ({
+        sourceSequence: unit.sequence,
+        clusterKind: unit.clusterKind,
+        roles: candidateRoles(unit),
+        statementHashInputLength: unit.statement.length,
+      })),
+      correctionUnitDiagnostics: discoveredUnits
+        .filter((unit) => candidateRoles(unit).includes("correction_guard"))
+        .map((unit) => ({
+          sourceSequence: unit.sequence,
+          clusterKind: unit.clusterKind,
+          complete: !incompleteUnits.has(unit),
+          staleOrCompleted: staleUnits.has(unit),
+          directlyRelevant: directlyRelevant(unit),
+          statementHashInputLength: unit.statement.length,
+        })),
+      staleOrCompletedUnitsRejected: staleUnits.size,
+      completedSourceEventIds: [...completedEvents].sort(),
       selectedFinalThirdStartSequence: finalThirdStart,
       selectedTailEvidenceDisposition,
       constructionStoppedBecause: selected.length >= MAX_MATURE_FINDINGS

@@ -1315,7 +1315,7 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
     { role: "assistant", text: "Naming brainstorm: North Star, Archive, or Relay." },
     { role: "user", text: "Earlier direction: build the broad dashboard next.\n\nCorrection: the earlier broad dashboard direction is superseded and no longer governing.\n\nCorrection repeated: the earlier broad dashboard direction remains superseded and no longer governing.\n\nThe earlier broad dashboard direction was replaced and is historical rather than current." },
     { role: "assistant", text: "The coffee order changed, which has no bearing on project state." },
-    { role: "user", text: "Correction: do not build the broad dashboard next. The deterministic continuity proof supersedes that earlier direction." },
+    { role: "user", text: "Earlier direction: build the broad dashboard next.\n\nExplicit correction:\nDo not build the broad dashboard next. The deterministic continuity proof supersedes that earlier direction because continuity must be proven before scope widens." },
     { role: "user", text: "State Truth means the governed project facts, constraints, corrections, and uncertainty that are actually authoritative now." },
     { role: "user", text: "Context Delivery means the task-specific subset of State Truth supplied to a fresh computation." },
     { role: "user", text: "Open question: whether every selected claim reaches the original Exact message remains unresolved until lineage is inspected." },
@@ -1324,8 +1324,8 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
     { role: "user", text: "A compact mobile layout was considered and then left outside this proof." },
     { role: "assistant", text: "One repeated explanation of the dashboard added no new authority." },
     { role: "user", text: "The connector idea remains an abandoned branch rather than current work." },
-    { role: "assistant", text: "This sentence is ordinary chatter with no durable project consequence." },
-    { role: "user", text: "The scoring notes can stay private until both outputs are frozen." },
+    { role: "assistant", text: "Earlier direction was replaced by:" },
+    { role: "user", text: "Stopping rule:\n\nStop at the first genuine failure and do not repair it during the same proof run." },
     { role: "user", text: "Current direction: run the deterministic Room Transfer continuity proof now because the primitive must be proven before scope widens." },
     { role: "user", text: "The next action is to freeze both destination outputs before applying the fixed rubric score." },
     { role: "user", text: "Do not begin broad connectors or a larger company trial until the deterministic transfer proof closes." },
@@ -1391,13 +1391,13 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   for (const category of ["correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty", "shared_term"]) {
     assert.ok(selection.signalCategoriesRepresented.includes(category), category);
   }
-  assert.equal(candidateConstruction.version, "slice3-mature-candidates-v2");
-  assert.equal(candidateConstruction.strategy, "mature_room_current_state_role_coverage_v1");
+  assert.equal(candidateConstruction.version, "slice3-mature-propositions-v3");
+  assert.equal(candidateConstruction.strategy, "mature_room_complete_current_propositions_v1");
   assert.equal(candidateConstruction.budget, 12);
   assert.ok(candidateConstruction.candidateCount <= 12);
   assert.equal(candidateConstruction.currentBoundarySequence, 20);
   for (const role of ["current_direction", "next_action", "constraint", "correction_guard", "uncertainty", "shared_term"]) {
-    assert.ok(candidateConstruction.rolesRepresented.includes(role), role);
+    assert.ok(candidateConstruction.rolesRepresented.includes(role), JSON.stringify({ role, candidateConstruction, proposals: firstRun.value.reconciliation.map((item) => item.statement) }));
   }
   assert.ok(candidateConstruction.historicalDuplicateUnitsCollapsed > 0);
   assert.deepEqual(
@@ -1409,7 +1409,9 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
     "supported_another_candidate",
     "redundant_with_stronger_candidate",
     "source_only_non_durable",
-    "rejected_as_non_governing",
+    "stale_or_completed",
+    "insufficiently_complete",
+    "excluded_as_optional",
     "could_not_be_safely_interpreted",
   ].includes(item.disposition)));
 
@@ -1418,11 +1420,13 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
     proposals,
     candidateConstruction: checkpoint.value.result.checkpoint.metadata.candidateConstruction,
   }));
-  assert.ok(proposals.some((statement) => /Correction: do not build the broad dashboard next/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Earlier direction:[\s\S]*Explicit correction:[\s\S]*continuity proof supersedes/i.test(statement)));
   assert.ok(proposals.some((statement) => /Current direction: run the deterministic Room Transfer/i.test(statement)));
   assert.ok(proposals.some((statement) => /next action is to freeze both destination outputs/i.test(statement)));
   assert.ok(proposals.some((statement) => /Do not begin broad connectors/i.test(statement)));
   assert.ok(proposals.some((statement) => /Preserve the fixed rubric before scoring/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Stopping rule:[\s\S]*Stop at the first genuine failure and do not repair/i.test(statement)));
+  assert.ok(proposals.every((statement) => !/Earlier direction was replaced by:\s*$/i.test(statement)));
   assert.ok(proposals.some((statement) => /Open question:.*remains unresolved/i.test(statement)));
   assert.ok(proposals.filter((statement) => /earlier broad dashboard direction/i.test(statement)).length <= 1);
   assert.ok(firstRun.value.reconciliation.some((item) => item.candidateType === "supersession"));
@@ -1446,6 +1450,65 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
     firstRun.value.reconciliation.map(({ statement, candidateType, sourceEventIds }) => ({ statement, candidateType, sourceEventIds })),
   );
   assert.deepEqual(canonicalMutationCounts(DB), beforeReplay);
+});
+
+test("mature proposition construction rejects completed state and leaves unused candidate capacity", async () => {
+  const worker = await builtWorker("mature-proposition-state-validity");
+  const DB = await sqliteD1();
+  const projectId = "validity";
+  await seedCanonicalProject(worker, DB, projectId, "State Validity");
+  const messages = [
+    "Current direction: build the legacy dashboard next.",
+    "Airport timing does not affect the project.",
+    "A color option was discussed without becoming a decision.",
+    "Preserve Exact source lineage because the current proof depends on traceable evidence.",
+    "A temporary meeting was moved and then forgotten.",
+    "The legacy dashboard slice is complete and committed. It is no longer current.",
+    "Naming discussion remains source-only chatter.",
+    "The deployment blocker was resolved and is not current.",
+    "Current direction: run the bounded continuity proof now because it must close before scope widens.",
+    "The next action is to freeze the output before applying the fixed score.",
+    "Stopping rule:\n\nStop at the first genuine failure and do not repair it during this proof run.",
+    "Open question: whether the complete proposition remains traceable to Exact evidence is unresolved.",
+  ];
+  const transcript = JSON.stringify({
+    messages: messages.map((text, index) => ({
+      id: `validity-message-${String(index + 1).padStart(2, "0")}`,
+      role: [2, 6, 8].includes(index + 1) ? "assistant" : "user",
+      timestamp: `2026-08-02T12:${String(index).padStart(2, "0")}:00.000Z`,
+      text,
+    })),
+  });
+  const env = {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "validity-server-key",
+    CAMPUS_ATLAS_OWNER_USER_ID: "validity-owner",
+  };
+  const response = await worker.fetch(new Request(`http://localhost/api/v1/projects/${projectId}/transfers`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "validity-first-run",
+      "oai-authenticated-user-id": "validity-owner",
+    },
+    body: JSON.stringify({ title: "Completed state validity", format: "json", transcript }),
+  }), env, ctx);
+  const value = await response.json();
+  assert.equal(response.status, 201, JSON.stringify(value));
+  assert.equal(value.stage, "awaiting_review");
+  assert.ok(value.actualCounts.durableCandidates > 0);
+  assert.ok(value.actualCounts.durableCandidates < 12, "the candidate ceiling must not become a fill target");
+  const proposals = value.reconciliation.map((item) => item.statement);
+  assert.ok(proposals.some((statement) => /run the bounded continuity proof now/i.test(statement)));
+  assert.ok(proposals.some((statement) => /next action is to freeze the output/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Stopping rule:[\s\S]*do not repair/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Preserve Exact source lineage/i.test(statement)));
+  assert.ok(proposals.every((statement) => !/build the legacy dashboard next/i.test(statement)));
+  assert.ok(value.reconciliation.every((item) => item.status === "proposed"));
+  assert.ok(value.reconciliation.every((item) => item.exactSources.every((source) => source.messageIds.length > 0)));
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 0);
 });
 
 test("Transfer Room resumes after a controlled stage failure and treats sensitive proposed state as non-authoritative", async () => {

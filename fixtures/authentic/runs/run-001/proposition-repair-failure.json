@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "status": "stopped_at_first_genuine_failure",
+  "failurePhase": "frozen_mature_evidence_selection_regression_before_pre_governance_gate",
+  "failureCode": "accepted_21_event_selection_identities_changed",
+  "repairUnderTest": {
+    "evidenceExtractionVersion": "slice3-mature-coverage-v1",
+    "candidateConstructionVersion": "slice3-mature-propositions-v3",
+    "selectionStrategy": "mature_room_chronology_signal_coverage_v1",
+    "candidateStrategy": "mature_room_complete_current_propositions_v1",
+    "candidateBudget": 12
+  },
+  "frozenInputs": {
+    "acceptedCoverageRepairCommit": "0b17d3a402e654703059df9c3e1022d2471642e9",
+    "acceptedCandidateRepairCommit": "83491f116acbf9037d9307db3ff73726b34438be",
+    "acceptedUiCommitInRepository": "2764bed97db4e02e8684c05b36b103620f0bb042",
+    "protocolFreezeCommit": "638627f592ec3edeff7b90cba821cf570341c554",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "structuredImportSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "baselineInputSha256": "293b54fa862de99e904e559b49e9feea18c1b20c5b879e8fef0d9a5cbc3483ef"
+  },
+  "localEvidence": {
+    "exactResumeResponseSha256": "2927e3767e5fa6006dd8d0bef349c93fbe06b5d001c157d0fa7d936d70f09133",
+    "exactResumeResponseBytes": 357071,
+    "canonicalDatabaseSha256AtStop": "7d1c6d12a7d419f5f9a95eddb4bcd198a9d73ff77e915c1b59134f7904e5f79e",
+    "canonicalDatabaseBytes": 2871296,
+    "canonicalDatabaseBeforePropositionRepairSha256": "5802d51ee4898f8c37b215a3c92caa47d39d985aa3dc5f6548b7ac99b228ff60",
+    "privacy": "The exact authentic transcript, exact resume response, and local canonical databases remain in the user's local proof workspace. Only hashes, counts, identifiers, selected sequences, dispositions, and bounded diagnostic facts are committed here."
+  },
+  "identifiers": {
+    "projectId": "campus-atlas-v18-authentic",
+    "conversationId": "conversation:cb949752-1049-4637-9c35-19d7769d6d5d",
+    "caseId": "case:transfer:e492a415a31f8cb63fd6fb5b2f36",
+    "transferId": "transfer-room:c480dbbf1d71dd9b1195e03d3ef32547",
+    "checkpointId": "checkpoint:17757b9b-91e5-491b-abc3-d4de03ad4044"
+  },
+  "expectedFrozenEvidenceSelection": {
+    "sourceItemsConsidered": 117,
+    "selectedEventCount": 21,
+    "selectedSourceSequences": [32, 35, 42, 49, 61, 78, 83, 88, 89, 93, 97, 102, 103, 104, 105, 109, 110, 113, 115, 116, 117],
+    "selectedFinalThirdEventCount": 15
+  },
+  "actualEvidenceSelection": {
+    "sourceItemsConsidered": 117,
+    "selectedEventCount": 21,
+    "selectedSourceSequences": [14, 32, 35, 42, 49, 61, 63, 67, 73, 78, 83, 88, 89, 93, 102, 106, 109, 110, 115, 116, 117],
+    "missingAcceptedSourceSequences": [97, 103, 104, 105, 113],
+    "newlySelectedSourceSequences": [14, 63, 67, 73, 106],
+    "selectedFinalThirdEventCount": 11,
+    "selectedFinalThirdEventsWithDisposition": 11
+  },
+  "diagnosis": {
+    "expected": "The proposition-only repair must preserve the accepted 21 selected source events exactly.",
+    "actual": "Candidate-construction signal changes also affected evidence-selection scoring because the selector and constructor share signal classifiers. The count and strategy label stayed fixed, but five accepted event identities were replaced and final-third coverage changed.",
+    "classification": "Direct regression of the frozen mature-room evidence-selection boundary, before the semantic pre-governance gate.",
+    "stopReason": "The authentic protocol requires an immediate stop whenever the accepted selected-event identities change. Candidate semantic results from this checkpoint are diagnostic only and are not eligible for governance."
+  },
+  "diagnosticCandidateResultNotAccepted": {
+    "constructedCandidateUnits": 12,
+    "durableReviewFindings": 10,
+    "completeCurrentDirection": true,
+    "completeCurrentNextAction": true,
+    "completeStoppingAndNoRepairConstraint": true,
+    "uiFreezeBoundary": true,
+    "taskAndRubricFreeze": false,
+    "completeSupersessionGuard": false,
+    "causalRationale": false,
+    "materialUncertaintyOrOpenWork": false,
+    "staleCompletedInstructionLeakage": true,
+    "examples": {
+      "staleCurrentStateSourceSequences": [93, 110],
+      "incompleteSupersessionSourceSequence": 102
+    }
+  },
+  "exactLineage": {
+    "candidateFindings": 10,
+    "sourceEventLinks": 10,
+    "sourceEventLinksResolvingToImmutableMessages": 10,
+    "missingExactMessageLinks": 0,
+    "status": "complete"
+  },
+  "canonicalCountsAtStop": {
+    "conversations": 1,
+    "conversationImports": 1,
+    "messages": 117,
+    "events": 117,
+    "cases": 1,
+    "caseEventAttachments": 117,
+    "checkpoints": 4,
+    "checkpointReasoningNodes": 70,
+    "findings": 35,
+    "findingVersions": 35,
+    "mechanisms": 0,
+    "mechanismVersions": 0,
+    "governanceEvents": 0,
+    "packets": 0,
+    "packetItems": 0,
+    "receipts": 0,
+    "transferRuns": 1
+  },
+  "executionStopped": {
+    "preGovernanceSemanticGateEvaluated": false,
+    "governancePerformed": false,
+    "stewardCalled": false,
+    "compiledContentCreated": false,
+    "destinationRoomsCreated": false,
+    "runtimeRepairOfNextFailureAttempted": false,
+    "productionChanged": false
+  },
+  "smallestLikelyNextSlice": "Decouple or snapshot the accepted mature-room evidence-selection signal semantics so proposition completeness and state-validity classification cannot change the frozen 21-event discovery set. Restore the exact accepted event identities first, then rerun this same proposition repair and evaluate the semantic gate without changing the selector, candidate budget, governance, or downstream Context Delivery."
+}
