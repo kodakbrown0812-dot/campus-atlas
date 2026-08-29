@@ -5,13 +5,14 @@ import { DatabaseSync } from "node:sqlite";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [sourcePath, outputDir] = process.argv.slice(2);
+const [sourcePath, outputDir, databaseName = "canonical-local.db"] = process.argv.slice(2);
 assert.ok(sourcePath, "frozen source-room.json path is required");
 assert.ok(outputDir, "frozen output directory is required");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const sourceBytes = await readFile(sourcePath);
 assert.equal(sha256(sourceBytes), "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0");
-const databasePath = path.join(outputDir, "canonical-local.db");
+assert.match(databaseName, /^[a-z0-9._-]+$/iu, "database filename must remain inside the frozen output directory");
+const databasePath = path.join(outputDir, databaseName);
 const database = new DatabaseSync(databasePath);
 
 function prepare(sql) {
@@ -43,7 +44,7 @@ const DB = {
   },
 };
 const workerUrl = pathToFileURL(path.resolve("dist/server/index.js"));
-workerUrl.searchParams.set("authentic-relationship-state-resume", `${process.pid}-${Date.now()}`);
+workerUrl.searchParams.set("authentic-roadway-applicability-resume", `${process.pid}-${Date.now()}`);
 const worker = (await import(workerUrl.href)).default;
 const ctx = { waitUntil() {}, passThroughOnException() {} };
 const env = {
@@ -51,8 +52,8 @@ const env = {
   ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
   CAMPUS_ATLAS_ACTION_KEY: "local-proof-action-key",
   CAMPUS_ATLAS_OWNER_USER_ID: "local-proof-owner",
-  CAMPUS_ATLAS_DEPLOYMENT_VERSION: "local-authentic-relationship-state-repair",
-  CAMPUS_ATLAS_SOURCE_COMMIT: "working-tree-authentic-relationship-state-repair",
+  CAMPUS_ATLAS_DEPLOYMENT_VERSION: "local-authentic-roadway-applicability-repair",
+  CAMPUS_ATLAS_SOURCE_COMMIT: "working-tree-authentic-roadway-applicability-repair",
 };
 const ownerHeaders = { "oai-authenticated-user-id": "local-proof-owner" };
 async function request(route, { method = "GET", idempotencyKey } = {}) {
@@ -70,7 +71,7 @@ const projectId = "campus-atlas-v18-authentic";
 const transferId = "transfer-room:c480dbbf1d71dd9b1195e03d3ef32547";
 const transfer = await request(
   `/api/v1/projects/${projectId}/transfers/${encodeURIComponent(transferId)}/resume`,
-  { method: "POST", idempotencyKey: "authentic-full-transfer-run-001-relationship-state-repair-resume" },
+  { method: "POST", idempotencyKey: "authentic-full-transfer-run-001-roadway-applicability-repair-resume" },
 );
 const checkpoint = transfer.value?.conversationId && transfer.value?.caseId
   ? await request(`/api/v1/projects/${projectId}/checkpoints/latest?conversationId=${encodeURIComponent(transfer.value.conversationId)}&caseId=${encodeURIComponent(transfer.value.caseId)}`)
@@ -83,14 +84,14 @@ const counts = Object.fromEntries([
 const evidence = {
   schemaVersion: 1,
   runId: "authentic-full-transfer-run-001",
-  phase: "pre_governance_after_mature_room_relationship_state_repair",
+  phase: "pre_governance_after_roadway_applicability_repair",
   sourceSha256: sha256(sourceBytes),
   transfer,
   checkpoint,
   canonicalCounts: counts,
   productionChanged: false,
 };
-const evidencePath = path.join(outputDir, "transfer-result-after-relationship-state-repair.json");
+const evidencePath = path.join(outputDir, "transfer-result-after-roadway-applicability-repair.json");
 await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify({
   runId: evidence.runId,

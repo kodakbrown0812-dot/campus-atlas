@@ -331,6 +331,11 @@ export type TaskInterpretation = {
   requiredLiveState: string[];
   selectionReason: string;
   userSelectedOverride: boolean;
+  applicability: {
+    applicableRoadwayIds: string[];
+    excludedRoadways: Array<{ roadwayId: string; versionId: string; name: string; reason: string }>;
+    governedRelationshipEvidenceUsed: boolean;
+  };
 };
 
 const MARGIN_TERMS = [
@@ -353,7 +358,7 @@ function matches(text: string, terms: string[]) {
 
 const CASE_CONTEXT_STOP_WORDS = new Set([
   "and", "are", "for", "from", "into", "that", "the", "this", "when", "with",
-  "compare", "develop", "identify", "option", "options", "rule", "strongest",
+  "compare", "develop", "find", "identify", "option", "options", "rule", "strongest",
 ]);
 
 function boundedCaseContextApplies(task: string, objective: string | null) {
@@ -390,6 +395,69 @@ function interpretationScores(task: string) {
   } satisfies Record<RoadwaySlug, { score: number; matched: string[] }>;
 }
 
+function patternTerms(value: string) {
+  return new Set((value.toLowerCase().match(/[a-z0-9]+/gu) || [])
+    .filter((term) => term.length >= 4 && !CASE_CONTEXT_STOP_WORDS.has(term))
+    .map((term) => term.length > 6 && term.endsWith("s") ? term.slice(0, -1) : term));
+}
+
+function materiallyMatchesPattern(text: string, pattern: string) {
+  const textTerms = patternTerms(text);
+  const expected = patternTerms(pattern);
+  if (expected.size < 2) return false;
+  let overlap = 0;
+  for (const term of expected) if (textTerms.has(term)) overlap += 1;
+  return overlap >= 2 && overlap / expected.size >= 0.8;
+}
+
+function supportsApplicablePattern(text: string, patterns: string[]) {
+  const textTerms = patternTerms(text);
+  const supportedByOnePattern = patterns.some((pattern) => {
+    const expected = patternTerms(pattern);
+    if (expected.size < 2) return false;
+    let overlap = 0;
+    for (const term of expected) if (textTerms.has(term)) overlap += 1;
+    return overlap >= 2 && overlap / expected.size >= 0.35;
+  });
+  if (supportedByOnePattern) return true;
+  const allExpectedTerms = new Set(patterns.flatMap((pattern) => [...patternTerms(pattern)]));
+  let aggregateOverlap = 0;
+  for (const term of allExpectedTerms) if (textTerms.has(term)) aggregateOverlap += 1;
+  return aggregateOverlap >= 2;
+}
+
+function hasPositiveApplicabilitySignal(text: string, matched: string[], roadway: RoadwayRecord) {
+  return matched.length >= 2
+    || matched.some((signal) => /[\s+./-]/u.test(signal) || signal.length >= 9)
+    || matched.includes("lesson")
+    || (matched.length > 0 && supportsApplicablePattern(text, roadway.applicableTaskPatterns));
+}
+
+async function governedRelationshipContext(
+  db: D1Database,
+  projectId: string,
+  task: string,
+  caseId: string | null,
+  caseContextUsedForMatching: boolean,
+) {
+  const rows = await all<Row>(db.prepare(
+    `SELECT mv.statement, mv.supporting_case_ids
+     FROM mechanisms m
+     JOIN mechanism_versions mv
+       ON mv.id = m.current_governing_version_id AND mv.project_id = m.project_id
+     WHERE m.project_id = ?
+       AND m.status = 'active'
+       AND mv.authority_state IN ('approved_project_wide', 'approved_local')
+     ORDER BY m.id ASC`,
+  ).bind(projectId));
+  return rows.flatMap((row) => {
+    const statement = String(row.statement);
+    const supportingCaseIds = JSON.parse(String(row.supporting_case_ids || "[]")) as string[];
+    const caseLinked = Boolean(caseId && caseContextUsedForMatching && supportingCaseIds.includes(caseId));
+    return caseLinked || boundedCaseContextApplies(task, statement) ? [statement] : [];
+  });
+}
+
 export async function interpretTask(
   db: D1Database,
   projectId: string,
@@ -414,7 +482,46 @@ export async function interpretTask(
     throw new Error("Canonical roadway registry is unavailable for a read-only continuity check.");
   }
   const bySlug = new Map(registry.map((roadway) => [roadway.slug, roadway]));
-  const scores = interpretationScores(task);
+  const caseContextUsedForMatching = boundedCaseContextApplies(task, caseObjective);
+  const relatedGovernedStatements = await governedRelationshipContext(
+    db,
+    projectId,
+    task,
+    caseId,
+    caseContextUsedForMatching,
+  );
+  const directScores = interpretationScores(task);
+  const relationshipScores = interpretationScores(relatedGovernedStatements.join("\n"));
+  const scores = Object.fromEntries((Object.keys(directScores) as RoadwaySlug[]).map((slug) => {
+    const roadway = bySlug.get(slug)!;
+    const nonApplicable = roadway.nonApplicableTaskPatterns.some((pattern) => materiallyMatchesPattern(task, pattern));
+    const direct = directScores[slug];
+    const relationship = relationshipScores[slug];
+    const directApplies = hasPositiveApplicabilitySignal(task, direct.matched, roadway);
+    const relationshipText = relatedGovernedStatements.join("\n");
+    const relationshipApplies = hasPositiveApplicabilitySignal(relationshipText, relationship.matched, roadway);
+    const applicableScore = (directApplies ? direct.score : 0) + (relationshipApplies ? relationship.score : 0);
+    return [slug, {
+      score: nonApplicable ? 0 : applicableScore,
+      matched: [...new Set([
+        ...(directApplies ? direct.matched : []),
+        ...(relationshipApplies ? relationship.matched : []),
+      ])],
+      directMatched: directApplies ? direct.matched : [],
+      relationshipMatched: relationshipApplies ? relationship.matched : [],
+      excludedReason: nonApplicable
+        ? "A declared non-applicable task pattern matched the current request."
+        : applicableScore === 0
+          ? "No positive task, scope, domain, semantic, or governed-relationship evidence established applicability."
+          : null,
+    }];
+  })) as Record<RoadwaySlug, {
+    score: number;
+    matched: string[];
+    directMatched: string[];
+    relationshipMatched: string[];
+    excludedReason: string | null;
+  }>;
   const explicitOverride = optionalString(input.roadwayOverride);
   let primary: RoadwayRecord | null = null;
   let override = false;
@@ -424,22 +531,21 @@ export async function interpretTask(
     override = true;
   }
 
-  const ranked = (Object.entries(scores) as Array<[RoadwaySlug, { score: number; matched: string[] }]>)
+  const ranked = (Object.entries(scores) as Array<[RoadwaySlug, typeof scores[RoadwaySlug]]>)
     .sort((left, right) => right[1].score - left[1].score);
   const positive = ranked.filter(([, value]) => value.score > 0);
   const competing = positive.filter(([, value]) => value.score === positive[0]?.[1].score);
   const materialAmbiguity = !override && (
     competing.length > 1
-    || positive.length === 0
     || (
       positive.length > 1
       && positive[0][1].score - positive[1][1].score <= 3
       && positive[0][0] !== "broad-lock-finding"
     )
   );
-  if (!primary && !materialAmbiguity) primary = bySlug.get(ranked[0][0]) || null;
+  if (!primary && !materialAmbiguity && positive.length) primary = bySlug.get(positive[0][0]) || null;
 
-  const candidates = (materialAmbiguity ? (positive.length ? positive : ranked) : ranked.slice(1))
+  const candidates = (materialAmbiguity ? positive : positive.filter(([slug]) => slug !== primary?.slug))
     .slice(0, materialAmbiguity ? 3 : 2)
     .map(([slug, value]) => {
       const roadway = bySlug.get(slug)!;
@@ -447,9 +553,9 @@ export async function interpretTask(
         roadwayId: roadway.id,
         versionId: roadway.versionId,
         name: roadway.name,
-        reason: value.matched.length
-          ? `Matched task signals: ${value.matched.join(", ")}.`
-          : "The request does not contain enough mechanism-specific signals to select this roadway safely.",
+        reason: value.directMatched.length
+          ? `Matched direct task signals: ${value.directMatched.join(", ")}.`
+          : `Matched governed relationship signals: ${value.relationshipMatched.join(", ")}.`,
       };
     });
 
@@ -469,14 +575,14 @@ export async function interpretTask(
       ? "outcome_postmortem"
       : primary?.slug === "broad-lock-finding"
         ? "broad_candidate_comparison"
-        : "ambiguous";
+        : "no_applicable_roadway";
   const requiredReasoningMechanism = primary?.slug === "margin-run-line-value"
     ? "separate outright strength, cover mechanics, distribution, and price"
     : primary?.slug === "outcome-postmortem"
       ? "reconstruct the reasoning path against observed reality"
       : primary?.slug === "broad-lock-finding"
         ? "compare candidate mechanisms under a common evidence standard"
-        : "requires user clarification";
+        : materialAmbiguity ? "requires user clarification" : "task-specific governed continuity";
   const relevantSharedMeanings = [
     ...(text.includes("cover") ? ["coverage means meeting the margin, not merely winning"] : []),
     ...(text.includes("lock") ? ["lock means a requested high-confidence comparison, not guaranteed truth"] : []),
@@ -486,8 +592,20 @@ export async function interpretTask(
     ? "The user selected this roadway for the current run; the permanent registry was not changed."
     : primary
       ? `Selected from explicit intent and mechanism signals: ${selectedSignals.join(", ")}.`
-      : "Materially different roadway interpretations remain; compilation requires clarification or an explicit current-run override.";
-  const caseContextUsedForMatching = boundedCaseContextApplies(task, caseObjective);
+      : materialAmbiguity
+        ? "Materially different positively applicable roadway interpretations remain; compilation requires clarification or an explicit current-run override."
+        : "No Roadway had positive task, scope, domain, semantic, or governed-relationship applicability evidence; unrelated Roadways were pruned.";
+  const excludedRoadways = ranked
+    .filter(([slug, value]) => value.score === 0 && slug !== primary?.slug)
+    .map(([slug, value]) => {
+      const roadway = bySlug.get(slug)!;
+      return {
+        roadwayId: roadway.id,
+        versionId: roadway.versionId,
+        name: roadway.name,
+        reason: value.excludedReason || "No positive applicability evidence was established.",
+      };
+    });
 
   return {
     literalRequest: task,
@@ -505,7 +623,7 @@ export async function interpretTask(
     materialAmbiguity,
     clarificationRequired: materialAmbiguity,
     ambiguityReason: materialAmbiguity
-      ? "Two or more roadway interpretations could materially change the packet, or the request lacks a mechanism-specific signal."
+      ? "Two or more positively applicable roadway interpretations could materially change the packet."
       : null,
     primaryRoadway: primary,
     candidateInterpretations: candidates,
@@ -513,5 +631,13 @@ export async function interpretTask(
     requiredLiveState,
     selectionReason,
     userSelectedOverride: override,
+    applicability: {
+      applicableRoadwayIds: [...new Set([
+        ...positive.map(([slug]) => bySlug.get(slug)!.id),
+        ...(override && primary ? [primary.id] : []),
+      ])],
+      excludedRoadways,
+      governedRelationshipEvidenceUsed: Boolean(primary && scores[primary.slug].relationshipMatched.length),
+    },
   };
 }

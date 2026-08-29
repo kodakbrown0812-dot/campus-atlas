@@ -194,8 +194,8 @@ async function assessRoadwayConvergence(
         ? "Linked counterevidence requires full governed treatment."
         : hasProtectedSensitivity(mechanism)
           ? "Protected sensitivity requirements prevent compact delivery."
-          : plausibleRoadwayIds.length < 2
-            ? "There are not multiple plausible roadway interpretations to collapse."
+          : plausibleRoadwayIds.length === 1
+            ? "There is one applicable roadway, so outcome-equivalence collapse is unnecessary."
             : null;
   if (unsafeReason) {
     return {
@@ -216,7 +216,7 @@ async function assessRoadwayConvergence(
       ...normalizedInput,
       roadwayOverride: roadwayId,
     }, { registryMode: "read_only" });
-    const taskActivatedRoadwayRequirements = plausible?.reason.startsWith("Matched task signals:") === true;
+    const taskActivatedRoadwayRequirements = plausible?.reason.startsWith("Matched direct task signals:") === true;
     return JSON.stringify({
       mechanismId: mechanism.id,
       mechanismVersionId: mechanism.versionId,
@@ -239,7 +239,9 @@ async function assessRoadwayConvergence(
     plausibleRoadwayIds,
     mechanismIds: [mechanism.id],
     reason: converged
-      ? "Every safe plausible roadway produces the same single governed Use mechanism and equivalent compact delivery."
+      ? plausibleRoadwayIds.length === 0
+        ? "No positively applicable roadway changes the single safe governed mechanism or compact delivery."
+        : "Every safe plausible roadway produces the same single governed Use mechanism and equivalent compact delivery."
       : "Plausible roadways materially change governed constraints or compact delivery.",
   };
 }
@@ -468,15 +470,20 @@ export async function checkContinuity(
     registryMode: "read_only",
   });
   const interpretationLatency = Date.now() - interpretationStarted;
-  const convergence = interpretation.materialAmbiguity
+  const convergence = (interpretation.materialAmbiguity || !interpretation.primaryRoadway)
     && !need.reasonCodes.includes("explicit_full_room_transfer")
     ? await assessRoadwayConvergence(db, projectId, request, context, interpretation)
     : null;
   if (convergence?.converged) {
     const collapsedNeed = {
       level: "light" as const,
-      reasonCodes: ["single_governed_mechanism", "roadway_outcomes_equivalent"],
-      explanation: "Every safe task interpretation converges on one governed mechanism, so a compact context aid is sufficient.",
+      reasonCodes: [
+        "single_governed_mechanism",
+        ...(convergence.plausibleRoadwayIds.length ? ["roadway_outcomes_equivalent"] : ["no_applicable_roadway"]),
+      ],
+      explanation: convergence.plausibleRoadwayIds.length
+        ? "Every safe task interpretation converges on one governed mechanism, so a compact context aid is sufficient."
+        : "No Roadway is applicable, and one safe governed mechanism is sufficient for compact delivery.",
     };
     const status = "light_context_available";
     return {
@@ -485,7 +492,7 @@ export async function checkContinuity(
       status,
       interpretation: {
         ...interpretation,
-        rawInterpretiveAmbiguity: true,
+        rawInterpretiveAmbiguity: convergence.rawInterpretiveAmbiguity,
         materialAmbiguity: false,
         clarificationRequired: false,
         ambiguityReason: null,
@@ -494,7 +501,7 @@ export async function checkContinuity(
       roadway: {
         primary: null,
         candidates: interpretation.candidateInterpretations,
-        interpretiveAmbiguity: true,
+        interpretiveAmbiguity: convergence.rawInterpretiveAmbiguity,
         materialAmbiguity: false,
         outcomeEquivalent: true,
         convergedMechanismIds: convergence.mechanismIds,
