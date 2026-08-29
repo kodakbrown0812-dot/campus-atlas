@@ -1313,14 +1313,14 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
     { role: "assistant", text: "A blue header was one visual styling idea, not a project decision." },
     { role: "user", text: "The deployment is temporarily blocked while local authentication is checked." },
     { role: "assistant", text: "Naming brainstorm: North Star, Archive, or Relay." },
-    { role: "user", text: "Earlier direction: build the broad dashboard next." },
+    { role: "user", text: "Earlier direction: build the broad dashboard next.\n\nCorrection: the earlier broad dashboard direction is superseded and no longer governing.\n\nCorrection repeated: the earlier broad dashboard direction remains superseded and no longer governing.\n\nThe earlier broad dashboard direction was replaced and is historical rather than current." },
     { role: "assistant", text: "The coffee order changed, which has no bearing on project state." },
     { role: "user", text: "Correction: do not build the broad dashboard next. The deterministic continuity proof supersedes that earlier direction." },
     { role: "user", text: "State Truth means the governed project facts, constraints, corrections, and uncertainty that are actually authoritative now." },
     { role: "user", text: "Context Delivery means the task-specific subset of State Truth supplied to a fresh computation." },
     { role: "user", text: "Open question: whether every selected claim reaches the original Exact message remains unresolved until lineage is inspected." },
     { role: "assistant", text: "The temporary deployment blocker is resolved and must not return as current." },
-    { role: "assistant", text: "Tuesday was discussed for scheduling but no longer constrains the proof." },
+    { role: "user", text: "Preserve the fixed rubric before scoring because changing it after outputs exist would invalidate the proof." },
     { role: "user", text: "A compact mobile layout was considered and then left outside this proof." },
     { role: "assistant", text: "One repeated explanation of the dashboard added no new authority." },
     { role: "user", text: "The connector idea remains an abandoned branch rather than current work." },
@@ -1379,6 +1379,7 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   assert.equal(checkpoint.response.status, 200, JSON.stringify(checkpoint.value));
   assert.equal(checkpoint.value.result.checkpoint.extractionVersion, "slice3-mature-coverage-v1");
   const selection = checkpoint.value.result.checkpoint.metadata.eventSelection;
+  const candidateConstruction = checkpoint.value.result.checkpoint.metadata.candidateConstruction;
   assert.equal(selection.strategy, "mature_room_chronology_signal_coverage_v1");
   assert.deepEqual(selection.chronologySpan, { first: 1, last: messages.length });
   assert.ok(selection.selectedSourceSequences.includes(1), "still-governing early constraint must remain discoverable");
@@ -1390,14 +1391,40 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   for (const category of ["correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty", "shared_term"]) {
     assert.ok(selection.signalCategoriesRepresented.includes(category), category);
   }
+  assert.equal(candidateConstruction.version, "slice3-mature-candidates-v2");
+  assert.equal(candidateConstruction.strategy, "mature_room_current_state_role_coverage_v1");
+  assert.equal(candidateConstruction.budget, 12);
+  assert.ok(candidateConstruction.candidateCount <= 12);
+  assert.equal(candidateConstruction.currentBoundarySequence, 20);
+  for (const role of ["current_direction", "next_action", "constraint", "correction_guard", "uncertainty", "shared_term"]) {
+    assert.ok(candidateConstruction.rolesRepresented.includes(role), role);
+  }
+  assert.ok(candidateConstruction.historicalDuplicateUnitsCollapsed > 0);
+  assert.deepEqual(
+    candidateConstruction.selectedTailEvidenceDisposition.map((item) => item.sourceSequence),
+    selection.selectedSourceSequences.filter((sequence) => sequence >= candidateConstruction.selectedFinalThirdStartSequence),
+  );
+  assert.ok(candidateConstruction.selectedTailEvidenceDisposition.every((item) => [
+    "produced_candidate",
+    "supported_another_candidate",
+    "redundant_with_stronger_candidate",
+    "source_only_non_durable",
+    "rejected_as_non_governing",
+    "could_not_be_safely_interpreted",
+  ].includes(item.disposition)));
 
   const proposals = firstRun.value.reconciliation.map((item) => item.statement);
-  assert.ok(proposals.some((statement) => /Exact lineage means/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Exact lineage means/i.test(statement)), JSON.stringify({
+    proposals,
+    candidateConstruction: checkpoint.value.result.checkpoint.metadata.candidateConstruction,
+  }));
   assert.ok(proposals.some((statement) => /Correction: do not build the broad dashboard next/i.test(statement)));
   assert.ok(proposals.some((statement) => /Current direction: run the deterministic Room Transfer/i.test(statement)));
   assert.ok(proposals.some((statement) => /next action is to freeze both destination outputs/i.test(statement)));
   assert.ok(proposals.some((statement) => /Do not begin broad connectors/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Preserve the fixed rubric before scoring/i.test(statement)));
   assert.ok(proposals.some((statement) => /Open question:.*remains unresolved/i.test(statement)));
+  assert.ok(proposals.filter((statement) => /earlier broad dashboard direction/i.test(statement)).length <= 1);
   assert.ok(firstRun.value.reconciliation.some((item) => item.candidateType === "supersession"));
   assert.ok(firstRun.value.reconciliation.every((item) => item.status === "proposed"));
   assert.ok(firstRun.value.reconciliation.every((item) => item.exactSources.length > 0));

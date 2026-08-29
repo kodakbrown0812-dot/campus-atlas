@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "status": "stopped_at_next_first_genuine_failure",
+  "failurePhase": "candidate_construction_pre_governance_gate",
+  "failureCode": "role_coverage_admitted_stale_and_fragmentary_candidates_before_required_current_state",
+  "repairUnderTest": {
+    "evidenceExtractionVersion": "slice3-mature-coverage-v1",
+    "candidateConstructionVersion": "slice3-mature-candidates-v2",
+    "selectionStrategy": "mature_room_chronology_signal_coverage_v1",
+    "candidateStrategy": "mature_room_current_state_role_coverage_v1",
+    "candidateBudget": 12
+  },
+  "frozenInputs": {
+    "acceptedCoverageRepairCommit": "0b17d3a402e654703059df9c3e1022d2471642e9",
+    "acceptedUiCommit": "2764bed97db4e02e8684c05b36b103620f0bb042",
+    "protocolFreezeCommit": "638627f592ec3edeff7b90cba821cf570341c554",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "structuredImportSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "baselineInputSha256": "293b54fa862de99e904e559b49e9feea18c1b20c5b879e8fef0d9a5cbc3483ef"
+  },
+  "localEvidence": {
+    "exactResumeResponseSha256": "1c756ac288c67c822d51eb7b0a022b7ffd8e7b599e5fe5804d26fea4c7b0d030",
+    "exactResumeResponseBytes": 302691,
+    "canonicalDatabaseSha256AtStop": "5802d51ee4898f8c37b215a3c92caa47d39d985aa3dc5f6548b7ac99b228ff60",
+    "canonicalDatabaseBytes": 2871296,
+    "canonicalDatabaseBeforeCandidateRepairSha256": "b5a81455287c6ae48e7a18949466cf606f5d55347814430a5a1c4abcac0a9140",
+    "privacy": "The exact authentic transcript, exact resume response, and local canonical databases remain in the user's local proof workspace. Only hashes, counts, identifiers, selected sequences, dispositions, and bounded diagnostic facts are committed here."
+  },
+  "identifiers": {
+    "projectId": "campus-atlas-v18-authentic",
+    "conversationId": "conversation:cb949752-1049-4637-9c35-19d7769d6d5d",
+    "caseId": "case:transfer:e492a415a31f8cb63fd6fb5b2f36",
+    "transferId": "transfer-room:c480dbbf1d71dd9b1195e03d3ef32547",
+    "checkpointId": "checkpoint:d6399b96-18b1-4adb-a8e9-7b163297a8df"
+  },
+  "evidenceSelectionRegression": {
+    "unchanged": true,
+    "sourceItemsConsidered": 117,
+    "selectedEventCount": 21,
+    "selectedSourceSequences": [32, 35, 42, 49, 61, 78, 83, 88, 89, 93, 97, 102, 103, 104, 105, 109, 110, 113, 115, 116, 117],
+    "distribution": {
+      "earlyThird": 2,
+      "middleThird": 4,
+      "finalThird": 15
+    }
+  },
+  "candidateConstruction": {
+    "currentBoundarySequence": 117,
+    "candidateCount": 12,
+    "budgetUnchanged": true,
+    "candidateCategories": {
+      "supersession": 2,
+      "correction": 1,
+      "mechanismRecognition": 3,
+      "scopeRevision": 6
+    },
+    "rolesRepresented": [
+      "current_direction",
+      "next_action",
+      "correction_guard",
+      "constraint",
+      "uncertainty",
+      "shared_term",
+      "rationale",
+      "connection"
+    ],
+    "historicalDuplicateUnitsCollapsed": 5,
+    "selectedTailEvents": 15,
+    "selectedTailEventsWithDisposition": 15,
+    "selectedTailDispositionCoverageComplete": true,
+    "authorityCreatedAutomatically": false
+  },
+  "preGovernanceCoverage": {
+    "passed": false,
+    "currentAuthenticFullTransferDirection": true,
+    "currentNextAction": true,
+    "uiFrozenNoNewUiSlice": true,
+    "genericScaffoldingMustRemainVisibleAndScored": true,
+    "frozenTaskAndRubricBoundary": true,
+    "stateTruthContextDeliveryDiscipline": "incomplete: a heading was proposed without its local definition",
+    "stopAtFirstGenuineFailureRule": false,
+    "doNotRepairDuringRunRule": false,
+    "coherentCorrectionOrSupersessionGuard": false,
+    "causalRationaleForCurrentDirection": false,
+    "materialUncertaintyOrOpenWork": true,
+    "staleOnlyCandidateLeakage": true,
+    "fragmentaryCandidateLeakage": true,
+    "irrelevantChatterPromoted": false
+  },
+  "failureEvidence": {
+    "staleCandidateSourceSequences": [78, 89, 110],
+    "fragmentaryExamples": [
+      "a standalone supersession arrow label without the previous/current statements",
+      "a local-term heading without its definition",
+      "conditional UI instructions from completed Steward and Inspect slices"
+    ],
+    "requiredCurrentStateOmitted": [
+      "Do not repair anything during the authentic run",
+      "Stop at the first genuine failure and preserve the evidence",
+      "a complete State Truth versus Context Delivery definition",
+      "a coherent current-versus-historical correction or supersession guard",
+      "the causal rationale supporting the current proof direction"
+    ],
+    "diagnosis": "Role presence alone is not sufficient semantic coverage. Fragmentary headings and stale instructions satisfied role labels, and optional current-boundary fill consumed the remaining budget before complete required propositions were represented."
+  },
+  "exactLineage": {
+    "candidateFindings": 12,
+    "sourceEventLinks": 12,
+    "sourceEventLinksResolvingToImmutableMessages": 12,
+    "missingExactMessageLinks": 0,
+    "status": "complete"
+  },
+  "canonicalCountsAtStop": {
+    "conversations": 1,
+    "conversationImports": 1,
+    "messages": 117,
+    "events": 117,
+    "cases": 1,
+    "caseEventAttachments": 117,
+    "checkpoints": 3,
+    "checkpointReasoningNodes": 49,
+    "findings": 25,
+    "findingVersions": 25,
+    "mechanisms": 0,
+    "mechanismVersions": 0,
+    "governanceEvents": 0,
+    "packets": 0,
+    "packetItems": 0,
+    "receipts": 0,
+    "transferRuns": 1
+  },
+  "executionStopped": {
+    "governancePerformed": false,
+    "stewardCalled": false,
+    "compiledContentCreated": false,
+    "destinationRoomsCreated": false,
+    "runtimeRepairOfNextFailureAttempted": false,
+    "productionChanged": false
+  },
+  "smallestLikelyNextSlice": "Repair only proposition completeness and stale-state rejection inside mature candidate construction: headings must retain their governed body, required current constraints must outrank optional fill, and role labels must not count as coverage unless the proposal itself contains the complete material meaning. Preserve the accepted 21-event selector, twelve-candidate budget, lineage, authority boundary, and all downstream Context Delivery behavior."
+}

@@ -46,6 +46,7 @@ const MAX_SELECTED_NODES = 7;
 const MAX_MATURE_SELECTED_NODES = 21;
 const MAX_MATURE_FINDINGS = 12;
 export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
+export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-candidates-v2";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -395,10 +396,11 @@ function continuitySignals(value: string): ContinuitySignal[] {
   if (/\b(?:current (?:direction|plan|work|state|objective|phase|surface)|is now|are now|begins now|prioriti[sz]e|proceed with|the next task is)\b/i.test(value)) {
     signals.push("current_direction");
   }
-  if (/\b(?:next action|next step|do next|build next|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after)\b/i.test(value)) {
+  if (/\b(?:next action|next step|next task|do next|build next|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after|choose and (?:freeze|continue|begin|start))\b/i.test(value)) {
     signals.push("next_action");
   }
-  if (/\b(?:uncertain|uncertainty|unresolved|open question|open loop|unknown|missing state|not yet|provisional|pending evidence|remains to be)\b/i.test(value)) {
+  if (/\b(?:uncertain|uncertainty|unresolved|open question|open loop|unknown|missing state|not yet|provisional|pending evidence|remains to be)\b/i.test(value)
+    || /^(?:can|could|whether|will)\b[^?]{12,}\?$/i.test(value.trim())) {
     signals.push("uncertainty");
   }
   if (/^[A-Z][A-Za-z0-9 /+_-]{2,48}\s+(?:means|refers to|answers|is defined as)\b/m.test(value)
@@ -463,6 +465,26 @@ type MatureUnit = {
   score: number;
 };
 
+type CandidateRole =
+  | "current_direction"
+  | "next_action"
+  | "constraint"
+  | "correction_guard"
+  | "rationale"
+  | "uncertainty"
+  | "shared_term"
+  | "connection";
+
+type CandidateSeed = {
+  unit: MatureUnit;
+  roles: CandidateRole[];
+};
+
+type CandidateConstruction = {
+  candidates: FindingCandidate[];
+  metadata: Record<string, unknown>;
+};
+
 function matureUnitScore(event: Row, statement: string, signals: ContinuitySignal[], maximumSequence: number) {
   const weights: Record<ContinuitySignal, number> = {
     correction: 13,
@@ -502,6 +524,72 @@ function compareMatureUnits(left: MatureUnit, right: MatureUnit) {
     || right.sequence - left.sequence
     || left.statement.localeCompare(right.statement)
     || String(left.event.id).localeCompare(String(right.event.id));
+}
+
+function candidateRoles(unit: MatureUnit): CandidateRole[] {
+  const roles: CandidateRole[] = [];
+  if (unit.signals.includes("current_direction")) roles.push("current_direction");
+  if (unit.signals.includes("next_action")) roles.push("next_action");
+  if (unit.signals.includes("constraint")) roles.push("constraint");
+  if (unit.signals.includes("correction") || unit.signals.includes("supersession")) roles.push("correction_guard");
+  if (unit.signals.includes("connection")) roles.push("rationale", "connection");
+  if (unit.signals.includes("uncertainty")) roles.push("uncertainty");
+  if (unit.signals.includes("shared_term")) roles.push("shared_term");
+  return roles;
+}
+
+function explicitCurrentOrientation(unit: MatureUnit) {
+  return /\b(?:begins now|current (?:direction|plan|work|state|objective|phase|surface)|the next (?:task|action|step) is|prioriti[sz]e|proceed with|continue now|start now)\b/i.test(unit.statement);
+}
+
+function currentBoundarySequence(units: MatureUnit[]) {
+  const explicitUserDirections = units.filter((unit) =>
+    sourceActorType(unit.event) === "user"
+    && unit.signals.includes("current_direction")
+    && explicitCurrentOrientation(unit),
+  );
+  if (explicitUserDirections.length) return Math.max(...explicitUserDirections.map((unit) => unit.sequence));
+  const explicitUserActions = units.filter((unit) =>
+    sourceActorType(unit.event) === "user"
+    && unit.signals.includes("next_action")
+    && explicitCurrentOrientation(unit),
+  );
+  return explicitUserActions.length
+    ? Math.max(...explicitUserActions.map((unit) => unit.sequence))
+    : Math.max(0, ...units.filter((unit) => sourceActorType(unit.event) === "user").map((unit) => unit.sequence));
+}
+
+function termOverlap(left: string, right: string) {
+  const leftTerms = normalizedTerms(left);
+  const rightTerms = normalizedTerms(right);
+  const smaller = Math.min(leftTerms.size, rightTerms.size);
+  if (!smaller) return { count: 0, ratio: 0 };
+  let overlap = 0;
+  for (const term of leftTerms) if (rightTerms.has(term)) overlap += 1;
+  return { count: overlap, ratio: overlap / smaller };
+}
+
+function functionallyRedundant(left: CandidateSeed, right: CandidateSeed) {
+  const sharedRole = left.roles.some((role) => right.roles.includes(role));
+  const overlap = termOverlap(left.unit.statement, right.unit.statement);
+  return sharedRole && overlap.count >= 5 && overlap.ratio >= 0.68;
+}
+
+function compareForRole(left: MatureUnit, right: MatureUnit, role: CandidateRole, boundary: number) {
+  const currentRole = ["current_direction", "next_action", "constraint", "rationale"].includes(role);
+  const currentTier = (unit: MatureUnit) => currentRole
+    ? Number(unit.sequence >= boundary) * 3 + Number(explicitCurrentOrientation(unit)) * 2
+    : 0;
+  const correctionGuardQuality = (unit: MatureUnit) => role === "correction_guard"
+    ? Number(unit.signals.includes("correction"))
+      + Number(unit.signals.includes("supersession"))
+      + Number(/^correction\b/i.test(unit.statement.trim()))
+    : 0;
+  return currentTier(right) - currentTier(left)
+    || correctionGuardQuality(right) - correctionGuardQuality(left)
+    || Number(sourceActorType(right.event) === "user") - Number(sourceActorType(left.event) === "user")
+    || right.sequence - left.sequence
+    || compareMatureUnits(left, right);
 }
 
 type EventSelection = {
@@ -597,67 +685,163 @@ function matureFindingType(signals: ContinuitySignal[]) {
   return "mechanism_recognition";
 }
 
-async function matureFindingCandidates(selectedEvents: Row[]): Promise<FindingCandidate[]> {
+async function matureFindingCandidates(selectedEvents: Row[]): Promise<CandidateConstruction> {
   const units = matureUnits(selectedEvents).sort(compareMatureUnits);
-  const selected: MatureUnit[] = [];
-  const seen = new Set<string>();
-  const quotas: Record<ContinuitySignal, number> = {
-    correction: 2,
-    supersession: 2,
-    current_direction: 2,
-    next_action: 2,
-    constraint: 4,
-    uncertainty: 1,
-    shared_term: 2,
-    connection: 1,
-  };
-  for (const signal of CONTINUITY_SIGNAL_ORDER) {
-    for (const unit of units) {
-      if (selected.length >= MAX_MATURE_FINDINGS || quotas[signal] <= 0) break;
-      const normalized = [...normalizedTerms(unit.statement)].sort().join(" ");
-      if (!unit.signals.includes(signal) || seen.has(normalized)) continue;
-      selected.push(unit);
-      seen.add(normalized);
-      quotas[signal] -= 1;
+  const boundary = currentBoundarySequence(units);
+  const selected: CandidateSeed[] = [];
+  const redundantUnits = new Set<MatureUnit>();
+  const add = (unit: MatureUnit | undefined) => {
+    if (!unit || selected.length >= MAX_MATURE_FINDINGS) return false;
+    const seed = { unit, roles: candidateRoles(unit) };
+    if (!seed.roles.length) return false;
+    const duplicate = selected.find((candidate) => functionallyRedundant(seed, candidate));
+    if (duplicate) {
+      redundantUnits.add(unit);
+      return false;
     }
-  }
-  for (const unit of units) {
-    if (selected.length >= MAX_MATURE_FINDINGS) break;
-    const normalized = [...normalizedTerms(unit.statement)].sort().join(" ");
-    if (seen.has(normalized)) continue;
-    selected.push(unit);
-    seen.add(normalized);
+    selected.push(seed);
+    return true;
+  };
+  const rankedForRole = (role: CandidateRole) => units
+    .filter((unit) => candidateRoles(unit).includes(role))
+    .sort((left, right) => compareForRole(left, right, role, boundary));
+
+  const requiredRoles: CandidateRole[] = [
+    "current_direction",
+    "next_action",
+    "constraint",
+    "correction_guard",
+    "uncertainty",
+    "shared_term",
+    "rationale",
+    "connection",
+  ];
+  for (const role of requiredRoles) add(rankedForRole(role)[0]);
+
+  const selectedCurrentConstraints = () => selected.filter((seed) =>
+    seed.roles.includes("constraint") && seed.unit.sequence >= boundary,
+  ).length;
+  for (const unit of rankedForRole("constraint")) {
+    if (selectedCurrentConstraints() >= 3 || selected.length >= MAX_MATURE_FINDINGS) break;
+    if (unit.sequence >= boundary) add(unit);
   }
 
-  return Promise.all(selected.map(async (unit) => {
-    const relatedEvents = selectedEvents
-      .filter((event) => event === unit.event || related(unit.event, event))
-      .sort(chronologicalEventOrder)
-      .slice(0, 4);
-    const sourceEventIds = relatedEvents.map((event) => String(event.id));
-    const primaryId = String(unit.event.id);
-    if (!sourceEventIds.includes(primaryId)) sourceEventIds.push(primaryId);
-    const category = CONTINUITY_SIGNAL_ORDER.find((signal) => unit.signals.includes(signal)) || "connection";
+  let persistentEarlierConstraints = 0;
+  for (const unit of rankedForRole("constraint")) {
+    if (persistentEarlierConstraints >= 2 || selected.length >= MAX_MATURE_FINDINGS) break;
+    if (unit.sequence >= boundary
+      || unit.signals.includes("correction")
+      || unit.signals.includes("supersession")
+      || (!unit.signals.includes("connection") && !unit.signals.includes("shared_term"))) continue;
+    if (add(unit)) persistentEarlierConstraints += 1;
+  }
+
+  for (const unit of units
+    .filter((candidate) => candidate.sequence >= boundary)
+    .sort(compareMatureUnits)) {
+    if (selected.length >= MAX_MATURE_FINDINGS) break;
+    add(unit);
+  }
+
+  for (const unit of units) {
+    if (selected.some((seed) => seed.unit === unit)) continue;
+    if (selected.some((seed) => functionallyRedundant({ unit, roles: candidateRoles(unit) }, seed))) {
+      redundantUnits.add(unit);
+    }
+  }
+
+  const selectedByEvent = new Map<string, CandidateSeed[]>();
+  for (const seed of selected) {
+    const id = String(seed.unit.event.id);
+    selectedByEvent.set(id, [...(selectedByEvent.get(id) || []), seed]);
+  }
+  const supportingByCandidate = new Map<CandidateSeed, MatureUnit[]>();
+  for (const seed of selected) {
+    const supporting = units
+      .filter((unit) => unit.event !== seed.unit.event && functionallyRedundant(
+        { unit, roles: candidateRoles(unit) },
+        seed,
+      ))
+      .sort(compareMatureUnits)
+      .slice(0, 3);
+    supportingByCandidate.set(seed, supporting);
+    for (const unit of supporting) redundantUnits.add(unit);
+  }
+
+  const candidates = await Promise.all(selected.map(async (seed) => {
+    const primaryId = String(seed.unit.event.id);
+    const supportingEventIds = [...new Set((supportingByCandidate.get(seed) || []).map((unit) => String(unit.event.id)))];
+    const sourceEventIds = [...supportingEventIds, primaryId].sort((left, right) => {
+      const leftEvent = selectedEvents.find((event) => String(event.id) === left);
+      const rightEvent = selectedEvents.find((event) => String(event.id) === right);
+      return leftEvent && rightEvent ? chronologicalEventOrder(leftEvent, rightEvent) : left.localeCompare(right);
+    });
     const candidate = {
-      findingType: matureFindingType(unit.signals),
+      findingType: matureFindingType(seed.unit.signals),
       sourceEventIds,
-      proposalStatement: unit.statement,
+      proposalStatement: seed.unit.statement,
       proposedScope: "local",
       conditions: [],
       exclusions: [],
-      supportingEvidence: sourceEventIds.filter((id) => id !== primaryId),
+      supportingEvidence: supportingEventIds,
       counterevidence: [],
-      uncertainty: unit.signals.includes("uncertainty")
+      uncertainty: seed.roles.includes("uncertainty")
         ? "The Exact source explicitly marks this project state as unresolved or uncertain."
         : null,
-      reasonForSurfacing: `Exact source sequence ${unit.sequence} contains a material ${category.replaceAll("_", " ")} continuity signal selected by bounded mature-room coverage.`,
+      reasonForSurfacing: `Exact source sequence ${seed.unit.sequence} was selected to cover the mature-room ${seed.roles.join(", ").replaceAll("_", " ")} State Truth role${seed.roles.length === 1 ? "" : "s"}.`,
       expectedRetrievalEffect: "No retrieval change unless Cody governs this atomic project-state proposal.",
     };
     return { ...candidate, proposalHash: await sha256(JSON.stringify(candidate)) };
   }));
+
+  const maximumSequence = Math.max(0, ...selectedEvents.map((event) => sourceSequence(event) || 0));
+  const finalThirdStart = Math.floor((maximumSequence * 2) / 3) + 1;
+  const candidateEventIds = new Set(selected.map((seed) => String(seed.unit.event.id)));
+  const supportingEventIds = new Set([...supportingByCandidate.values()].flat().map((unit) => String(unit.event.id)));
+  const redundantEventIds = new Set([...redundantUnits].map((unit) => String(unit.event.id)));
+  const unitsByEvent = new Map<string, MatureUnit[]>();
+  for (const unit of units) {
+    const id = String(unit.event.id);
+    unitsByEvent.set(id, [...(unitsByEvent.get(id) || []), unit]);
+  }
+  const selectedTailEvidenceDisposition = selectedEvents
+    .filter((event) => (sourceSequence(event) || 0) >= finalThirdStart)
+    .map((event) => {
+      const eventId = String(event.id);
+      const eventUnits = unitsByEvent.get(eventId) || [];
+      let disposition = "could_not_be_safely_interpreted";
+      if (candidateEventIds.has(eventId)) disposition = "produced_candidate";
+      else if (supportingEventIds.has(eventId)) disposition = "supported_another_candidate";
+      else if (redundantEventIds.has(eventId)) disposition = "redundant_with_stronger_candidate";
+      else if (!eventUnits.length) disposition = "source_only_non_durable";
+      else if ((sourceSequence(event) || 0) < boundary) disposition = "rejected_as_non_governing";
+      return {
+        eventId,
+        sourceSequence: sourceSequence(event),
+        disposition,
+        candidateRoles: [...new Set((selectedByEvent.get(eventId) || []).flatMap((seed) => seed.roles))],
+      };
+    });
+  return {
+    candidates,
+    metadata: {
+      version: CHECKPOINT_CANDIDATE_VERSION,
+      strategy: "mature_room_current_state_role_coverage_v1",
+      budget: MAX_MATURE_FINDINGS,
+      candidateCount: candidates.length,
+      currentBoundarySequence: boundary || null,
+      rolesRepresented: [...new Set(selected.flatMap((seed) => seed.roles))],
+      historicalDuplicateUnitsCollapsed: redundantUnits.size,
+      selectedFinalThirdStartSequence: finalThirdStart,
+      selectedTailEvidenceDisposition,
+      constructionStoppedBecause: selected.length >= MAX_MATURE_FINDINGS
+        ? `The deterministic candidate bound of ${MAX_MATURE_FINDINGS} was reached after current-state role coverage and redundancy collapse.`
+        : "Every supported current-state role and distinct current-boundary unit was covered before the candidate bound.",
+    },
+  };
 }
 
-async function serverFindingCandidates(selectedEvents: Row[], mature: boolean): Promise<FindingCandidate[]> {
+async function serverFindingCandidates(selectedEvents: Row[], mature: boolean): Promise<CandidateConstruction> {
   if (mature) return matureFindingCandidates(selectedEvents);
   const primary = selectedEvents.find((event) => {
     const type = String(event.event_type).toLowerCase();
@@ -666,7 +850,15 @@ async function serverFindingCandidates(selectedEvents: Row[], mature: boolean): 
       && mechanismLanguage(statement)
       && atomicEnough(statement);
   });
-  if (!primary) return [];
+  if (!primary) return {
+    candidates: [],
+    metadata: {
+      version: CHECKPOINT_CANDIDATE_VERSION,
+      strategy: "small_room_sparse_candidate_v1",
+      budget: 1,
+      candidateCount: 0,
+    },
+  };
 
   const relatedEvents = selectedEvents.filter((event) => event === primary || related(primary, event));
   const supportingEvents = relatedEvents.filter((event) =>
@@ -691,10 +883,18 @@ async function serverFindingCandidates(selectedEvents: Row[], mature: boolean): 
     reasonForSurfacing: "Selected canonical sources express one consequential proposal for Cody to review.",
     expectedRetrievalEffect: "No retrieval change unless Cody governs the final reviewed wording and scope.",
   };
-  return [{
-    ...candidate,
-    proposalHash: await sha256(JSON.stringify(candidate)),
-  }];
+  return {
+    candidates: [{
+      ...candidate,
+      proposalHash: await sha256(JSON.stringify(candidate)),
+    }],
+    metadata: {
+      version: CHECKPOINT_CANDIDATE_VERSION,
+      strategy: "small_room_sparse_candidate_v1",
+      budget: 1,
+      candidateCount: 1,
+    },
+  };
 }
 
 async function preparationStoppedCheckpoint(
@@ -894,9 +1094,17 @@ async function analyzeCheckpoint(
     ? null
     : body.findingCandidates === undefined ? [] : body.findingCandidates;
   if (rawFindings !== null && !Array.isArray(rawFindings)) throw new Error("Finding candidates must be an array.");
-  const findingCandidates = rawFindings === null
+  const candidateConstruction = rawFindings === null
     ? await serverFindingCandidates(selectedEvents, selection.mature)
-    : await Promise.all(rawFindings.map((candidate) => validateFindingCandidate(candidate, allowedEventIds)));
+    : {
+      candidates: await Promise.all(rawFindings.map((candidate) => validateFindingCandidate(candidate, allowedEventIds))),
+      metadata: {
+        version: CHECKPOINT_CANDIDATE_VERSION,
+        strategy: "explicit_analyzer_candidates",
+        candidateCount: rawFindings.length,
+      },
+    };
+  const findingCandidates = candidateConstruction.candidates;
   const statements: D1PreparedStatement[] = [];
   const selectedNodeIds: string[] = [];
 
@@ -1069,6 +1277,7 @@ async function analyzeCheckpoint(
       suppressedFindingCount,
       selectedNodeIds,
       eventSelection: selection.metadata,
+      candidateConstruction: candidateConstruction.metadata,
       authorityCreated: false,
       sourceEventPreparation,
     }),
