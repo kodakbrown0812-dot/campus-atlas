@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "status": "frozen_before_steward_output",
+  "source": {
+    "threadId": "01a02cca-f76c-7330-950c-82640956a65c",
+    "title": "Continue Campus Atlas",
+    "cutoffTimestamp": "2026-08-29T19:53:34.743Z",
+    "boundary": "Visible user and assistant room messages through the prospective proof request, plus exact pasted-text attachment bytes at first reference. Hidden instructions, reasoning, tool calls, command output, and the active proof response are excluded."
+  },
+  "counts": {
+    "messages": 117,
+    "userMessages": 21,
+    "assistantMessages": 93,
+    "attachments": 3,
+    "utf8Bytes": 188534,
+    "characters": 187532,
+    "whitespaceWords": 25423,
+    "estimatedTokens": 46883
+  },
+  "hashes": {
+    "structuredImportSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "baselineInputSha256": "293b54fa862de99e904e559b49e9feea18c1b20c5b879e8fef0d9a5cbc3483ef",
+    "contentSequenceSha256": "5f4ba292b87ac0ad7ada1ca6a97cf092306d93a80603f5c1d5d7a5ace86e58fc"
+  },
+  "attachments": [
+    {
+      "sha256": "44f876fb63c6d0a38f2a87a96c7fd4d62bc008b465df20944b2647386fabc3fc",
+      "byteLength": 11461
+    },
+    {
+      "sha256": "4bb007402b60b2ecc0c802d24632b37ddb749ac5817e3ce08f9ddc3c73d8476a",
+      "byteLength": 10921
+    },
+    {
+      "sha256": "dd8c93951282c90556f6dcad0ddd1e7b86ad0a5fd9a80d5644388f6e894cd0a3",
+      "byteLength": 12613
+    }
+  ],
+  "privacy": "Exact authentic source is frozen in the user's local proof workspace and intentionally excluded from the public repository. This branch contains only hashes and aggregate measurements until the user explicitly authorizes otherwise."
+}

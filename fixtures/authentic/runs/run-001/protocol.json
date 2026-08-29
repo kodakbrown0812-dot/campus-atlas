@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "status": "frozen_before_steward_output",
+  "acceptedUiCommit": "2764bed97db4e02e8684c05b36b103620f0bb042",
+  "sourceProspect": {
+    "title": "Continue Campus Atlas",
+    "threadId": "01a02cca-f76c-7330-950c-82640956a65c",
+    "cutoffTimestamp": "2026-08-29T19:53:34.743Z",
+    "selectionReason": "This is a real multi-day Atlas development room spanning the accepted Part 2 proof, Part 3B-3E failures and repairs, proof preservation, and three UI simplification slices. It contains corrections, supersessions, rationale, hard boundaries, unresolved proof work, shared terminology, and explicit next actions.",
+    "exclusions": "Hidden system/developer instructions, private model reasoning, tool calls, command output, and the active proof response are not source-room conversation. Exact pasted-text attachments are included as source evidence at first reference."
+  },
+  "literalTask": "Continue Campus Atlas V1.8 from the accepted state. What exact work should happen now, why is it next, what project truth and constraints must govern it, what remains intentionally deferred, and what evidence should make us stop rather than continue?",
+  "requestedOutput": "Prepare a full room transfer for a genuinely fresh destination. Preserve the current State Truth, causal rationale, corrections, supersession, constraints, open work, uncertainty, local terms, and governing connections needed for the literal task. Do not rely on source-room access or lucky reconstruction of omitted private project truth.",
+  "comparison": {
+    "baseline": "One genuinely fresh destination receives only the complete frozen chronological source-room transcript, including exact pasted-text attachments, followed by the literal task.",
+    "atlas": "One genuinely fresh destination receives only the exact server-authored compiledContent, followed by the identical literal task.",
+    "controls": [
+      "Identical model and settings",
+      "No prior messages",
+      "No project memory or source-room access",
+      "No manual explanation, correction, or hint",
+      "Freeze both destination outputs verbatim before scoring"
+    ]
+  },
+  "preDestinationGates": [
+    "Steward returns Full through the existing Room Transfer and reconstruction path",
+    "The compiledContent explicitly supplies current direction, rationale, constraints, open work, uncertainty, and next action required by the rubric",
+    "Material correction and supersession guards are supplied rather than inferred",
+    "No sensitive or unrelated source material leaks",
+    "Inspect traces each material supplied claim to governed State Truth and Exact source evidence",
+    "Generic Roadway and Blueprint scaffolding remains visible and is measured rather than pre-repaired"
+  ],
+  "stoppingRule": "At the first genuine contract failure, freeze exact input, server response, UI/domain state, relevant identifiers, and expected-versus-actual evidence. Do not repair, optimize, rerun around, or disguise the failure.",
+  "productionBoundary": "No deployment or production D1 mutation is authorized by this proof. Run against an isolated local canonical database using the frozen accepted source tree."
+}
