@@ -50,6 +50,8 @@ type ReconciliationItem = {
   }>;
   status: string;
   mechanismId: string | null;
+  checkpointDisposition: string;
+  canonicalOriginCheckpointId: string;
 };
 
 function transferId(projectId: string, fingerprint: string) {
@@ -263,14 +265,35 @@ async function exactSources(db: D1Database, projectId: string, eventIds: string[
 }
 
 async function reconcile(db: D1Database, row: Row) {
+  const checkpoint = await first<Row>(db.prepare(
+    "SELECT metadata FROM checkpoints WHERE id = ? AND project_id = ? LIMIT 1",
+  ).bind(row.checkpoint_id, row.project_id));
+  const metadata = parseJson<Record<string, unknown>>(checkpoint?.metadata, {});
+  const candidateFindingLinks = Array.isArray(metadata.candidateFindingLinks)
+    ? metadata.candidateFindingLinks.filter((value): value is Row => Boolean(value) && typeof value === "object")
+    : [];
+  const attachedFindingIds = [...new Set(candidateFindingLinks.flatMap((link) =>
+    typeof link.findingId === "string" ? [link.findingId] : [],
+  ))];
+  const findingFilter = attachedFindingIds.length
+    ? `f.checkpoint_id = ? OR f.id IN (${attachedFindingIds.map(() => "?").join(", ")})`
+    : "f.checkpoint_id = ?";
   const findings = await all<Row>(db.prepare(
     `SELECT f.*, v.proposal_statement, v.proposed_scope, v.uncertainty,
             v.reason_for_surfacing, v.created_at AS version_created_at
      FROM findings f
      JOIN finding_versions v ON v.id = f.current_version_id AND v.project_id = f.project_id
-     WHERE f.project_id = ? AND f.checkpoint_id = ?
+     WHERE f.project_id = ? AND (${findingFilter})
      ORDER BY f.created_at ASC, f.id ASC`,
-  ).bind(row.project_id, row.checkpoint_id));
+  ).bind(row.project_id, row.checkpoint_id, ...attachedFindingIds));
+  const attachmentByFindingId = new Map<string, Row & { index: number }>(
+    candidateFindingLinks.map((link, index) => [String(link.findingId), { ...link, index }]),
+  );
+  findings.sort((left, right) =>
+    (attachmentByFindingId.get(String(left.id))?.index ?? Number.MAX_SAFE_INTEGER)
+    - (attachmentByFindingId.get(String(right.id))?.index ?? Number.MAX_SAFE_INTEGER)
+    || String(left.created_at).localeCompare(String(right.created_at)),
+  );
   const mechanisms = await all<Row>(db.prepare(
     `SELECT m.id, m.source_finding_id, m.status, v.statement, v.authority_state
      FROM mechanisms m
@@ -282,6 +305,7 @@ async function reconcile(db: D1Database, row: Row) {
 
   const result: ReconciliationItem[] = [];
   for (const finding of findings) {
+    const attachment = attachmentByFindingId.get(String(finding.id));
     const statement = String(finding.proposal_statement);
     const direct = mechanisms.find((mechanism) => normalized(mechanism.statement) === normalized(statement));
     const governed = mechanisms.find((mechanism) => mechanism.source_finding_id === finding.id);
@@ -324,6 +348,8 @@ async function reconcile(db: D1Database, row: Row) {
       exactSources: await exactSources(db, String(row.project_id), eventIds),
       status: String(finding.status),
       mechanismId: governed ? String(governed.id) : direct ? String(direct.id) : null,
+      checkpointDisposition: String(attachment?.disposition || "created"),
+      canonicalOriginCheckpointId: String(attachment?.canonicalOriginCheckpointId || finding.checkpoint_id),
     });
   }
   return result;

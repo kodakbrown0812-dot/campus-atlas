@@ -43,7 +43,7 @@ const DB = {
   },
 };
 const workerUrl = pathToFileURL(path.resolve("dist/server/index.js"));
-workerUrl.searchParams.set("authentic-discovery-boundary-resume", `${process.pid}-${Date.now()}`);
+workerUrl.searchParams.set("authentic-candidate-reuse-resume", `${process.pid}-${Date.now()}`);
 const worker = (await import(workerUrl.href)).default;
 const ctx = { waitUntil() {}, passThroughOnException() {} };
 const env = {
@@ -51,8 +51,8 @@ const env = {
   ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
   CAMPUS_ATLAS_ACTION_KEY: "local-proof-action-key",
   CAMPUS_ATLAS_OWNER_USER_ID: "local-proof-owner",
-  CAMPUS_ATLAS_DEPLOYMENT_VERSION: "local-authentic-discovery-boundary-repair",
-  CAMPUS_ATLAS_SOURCE_COMMIT: "working-tree-authentic-discovery-boundary-repair",
+  CAMPUS_ATLAS_DEPLOYMENT_VERSION: "local-authentic-candidate-reuse-repair",
+  CAMPUS_ATLAS_SOURCE_COMMIT: "working-tree-authentic-candidate-reuse-repair",
 };
 const ownerHeaders = { "oai-authenticated-user-id": "local-proof-owner" };
 async function request(route, { method = "GET", idempotencyKey } = {}) {
@@ -70,7 +70,7 @@ const projectId = "campus-atlas-v18-authentic";
 const transferId = "transfer-room:c480dbbf1d71dd9b1195e03d3ef32547";
 const transfer = await request(
   `/api/v1/projects/${projectId}/transfers/${encodeURIComponent(transferId)}/resume`,
-  { method: "POST", idempotencyKey: "authentic-full-transfer-run-001-discovery-boundary-repair-resume" },
+  { method: "POST", idempotencyKey: "authentic-full-transfer-run-001-candidate-reuse-repair-resume" },
 );
 const checkpoint = transfer.value?.conversationId && transfer.value?.caseId
   ? await request(`/api/v1/projects/${projectId}/checkpoints/latest?conversationId=${encodeURIComponent(transfer.value.conversationId)}&caseId=${encodeURIComponent(transfer.value.caseId)}`)
@@ -83,14 +83,14 @@ const counts = Object.fromEntries([
 const evidence = {
   schemaVersion: 1,
   runId: "authentic-full-transfer-run-001",
-  phase: "pre_governance_after_mature_room_discovery_boundary_repair",
+  phase: "pre_governance_after_mature_room_candidate_reuse_repair",
   sourceSha256: sha256(sourceBytes),
   transfer,
   checkpoint,
   canonicalCounts: counts,
   productionChanged: false,
 };
-const evidencePath = path.join(outputDir, "transfer-result-after-discovery-boundary-repair.json");
+const evidencePath = path.join(outputDir, "transfer-result-after-candidate-reuse-repair.json");
 await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify({
   runId: evidence.runId,

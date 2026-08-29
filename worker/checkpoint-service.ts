@@ -46,7 +46,7 @@ const MAX_SELECTED_NODES = 7;
 const MAX_MATURE_SELECTED_NODES = 21;
 const MAX_MATURE_FINDINGS = 12;
 export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
-export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-propositions-v3-discovery-boundary-v1";
+export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-propositions-v3-reuse-v1";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -145,6 +145,16 @@ async function checkpointDetail(db: D1Database, projectId: string, checkpointId:
     "SELECT * FROM checkpoints WHERE id = ? AND project_id = ? LIMIT 1",
   ).bind(checkpointId, projectId));
   if (!checkpoint) throw new Error("Checkpoint not found.");
+  const metadata = parseJson<Record<string, unknown>>(checkpoint.metadata, {});
+  const candidateFindingLinks = Array.isArray(metadata.candidateFindingLinks)
+    ? metadata.candidateFindingLinks.filter((value): value is Row => Boolean(value) && typeof value === "object")
+    : [];
+  const attachedFindingIds = [...new Set(candidateFindingLinks.flatMap((link) =>
+    typeof link.findingId === "string" ? [link.findingId] : [],
+  ))];
+  const findingFilter = attachedFindingIds.length
+    ? `f.checkpoint_id = ? OR f.id IN (${attachedFindingIds.map(() => "?").join(", ")})`
+    : "f.checkpoint_id = ?";
   const [nodes, findings] = await Promise.all([
     all<Row>(db.prepare(
       `SELECT n.*, v.statement, v.representation_type, v.source_event_ids,
@@ -161,22 +171,38 @@ async function checkpointDetail(db: D1Database, projectId: string, checkpointId:
               v.reason_for_surfacing, v.expected_retrieval_effect, v.proposal_hash, v.created_by
        FROM findings f
        JOIN finding_versions v ON v.id = f.current_version_id AND v.project_id = f.project_id
-       WHERE f.project_id = ? AND f.checkpoint_id = ?
+       WHERE f.project_id = ? AND (${findingFilter})
        ORDER BY f.created_at ASC`,
-    ).bind(projectId, checkpointId)),
+    ).bind(projectId, checkpointId, ...attachedFindingIds)),
   ]);
-  const metadata = parseJson<Record<string, unknown>>(checkpoint.metadata, {});
   const selectedNodes = nodes.map(nodeView);
   const selectedNodeIds = selectedNodes.map((node) => String(node.id));
-  const checkpointFindings = findings.map((row) => ({
-    ...findingView(row),
-    selectedNodeIds,
-  }));
+  const attachmentByFindingId = new Map<string, Row & { index: number }>(
+    candidateFindingLinks.map((link, index) => [String(link.findingId), { ...link, index }]),
+  );
+  const checkpointFindings = findings
+    .sort((left, right) =>
+      (attachmentByFindingId.get(String(left.id))?.index ?? Number.MAX_SAFE_INTEGER)
+      - (attachmentByFindingId.get(String(right.id))?.index ?? Number.MAX_SAFE_INTEGER)
+      || String(left.created_at).localeCompare(String(right.created_at)),
+    )
+    .map((row) => {
+      const attachment = attachmentByFindingId.get(String(row.id));
+      return {
+        ...findingView(row),
+        checkpointId,
+        canonicalOriginCheckpointId: row.checkpoint_id,
+        checkpointDisposition: attachment?.disposition || "created",
+        checkpointSourceEventIds: Array.isArray(attachment?.sourceEventIds) ? attachment.sourceEventIds : parseJson(row.source_event_ids, []),
+        selectedNodeIds,
+      };
+    });
   return {
     checkpoint: checkpointView(checkpoint),
     selectedNodes,
     findings: checkpointFindings,
     suppressedFindingCount: Number(metadata.suppressedFindingCount || 0),
+    reusedFindingCount: Number(metadata.reusedFindingCount || 0),
     noDurableFindingProposed: checkpointFindings.length === 0,
     retrievalEffect: checkpointFindings.length > 0
       ? "no_change_until_governed"
@@ -753,6 +779,12 @@ function completionEvidence(event: Row) {
     && /\b(?:is complete|completed|committed|accepted|passed|now verified|successfully simplified|ready for)\b/iu.test(eventStatement(event));
 }
 
+function assistantWorkflowStatus(unit: MatureUnit) {
+  return sourceActorType(unit.event) === "assistant"
+    && /^(?:i(?:’|')m|i am|i(?:’|')ll|i will|we(?:’|')re|we are|we(?:’|')ll|we will)\b/iu.test(unit.statement.trim())
+    && /\b(?:using|starting|running|checking|mapping|capturing|rendering|testing|verifying|workflow|slice|build|deploy)\b/iu.test(unit.statement);
+}
+
 function completedSourceEvents(events: Row[]) {
   const completed = new Set<string>();
   const completions = events.filter(completionEvidence);
@@ -882,15 +914,18 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
   const boundary = currentBoundarySequence(discoveredUnits);
   const completedEvents = completedSourceEvents(selectedEvents);
   const incompleteUnits = new Set(discoveredUnits.filter((unit) => !completeProposition(unit)));
-  const staleUnits = new Set(discoveredUnits.filter((unit) =>
-    unit.sequence < boundary
-    && completedEvents.has(String(unit.event.id))
-    && (imperativeInstruction(unit)
-      || candidateRoles(unit).includes("current_direction")
-      || candidateRoles(unit).includes("next_action"))
-    && !unit.signals.includes("shared_term")
-    && unit.clusterKind !== "supersession_cluster",
-  ));
+  const staleUnits = new Set(discoveredUnits.filter((unit) => {
+    if (unit.sequence >= boundary
+      || unit.signals.includes("shared_term")
+      || unit.clusterKind === "supersession_cluster") return false;
+    const completedUserInstruction = completedEvents.has(String(unit.event.id))
+      && (imperativeInstruction(unit)
+        || candidateRoles(unit).includes("current_direction")
+        || candidateRoles(unit).includes("next_action"));
+    const completedAssistantState = sourceActorType(unit.event) === "assistant"
+      && (completionEvidence(unit.event) || assistantWorkflowStatus(unit));
+    return completedUserInstruction || completedAssistantState;
+  }));
   const completeUnits = discoveredUnits.filter((unit) => !incompleteUnits.has(unit) && !staleUnits.has(unit));
   const currentTerms = new Set(completeUnits
     .filter((unit) => unit.sequence >= boundary)
@@ -1412,17 +1447,31 @@ async function analyzeCheckpoint(
   }
 
   let suppressedFindingCount = 0;
+  let reusedFindingCount = 0;
   let createdFindingCount = 0;
+  const candidateFindingLinks: Array<Record<string, unknown>> = [];
   for (const candidate of findingCandidates) {
     const existingEquivalent = await first<Row>(db.prepare(
-      `SELECT f.id
+      `SELECT f.id, f.status, f.checkpoint_id
        FROM findings f
        JOIN finding_versions v ON v.id = f.current_version_id AND v.project_id = f.project_id
        WHERE f.project_id = ? AND f.case_id = ? AND v.proposal_hash = ?
        LIMIT 1`,
     ).bind(projectId, caseId, candidate.proposalHash));
     if (existingEquivalent) {
-      suppressedFindingCount += 1;
+      const reusable = ["proposed", "under_review", "deferred", "challenged", "approved"].includes(String(existingEquivalent.status));
+      if (reusable) {
+        reusedFindingCount += 1;
+        candidateFindingLinks.push({
+          findingId: String(existingEquivalent.id),
+          disposition: "reused_equivalent",
+          canonicalOriginCheckpointId: String(existingEquivalent.checkpoint_id),
+          sourceEventIds: candidate.sourceEventIds,
+          proposalHash: candidate.proposalHash,
+        });
+      } else {
+        suppressedFindingCount += 1;
+      }
       continue;
     }
     const findingId = canonicalId("finding");
@@ -1467,6 +1516,13 @@ async function analyzeCheckpoint(
         startedAt,
       ),
     );
+    candidateFindingLinks.push({
+      findingId,
+      disposition: "created",
+      canonicalOriginCheckpointId: checkpointId,
+      sourceEventIds: candidate.sourceEventIds,
+      proposalHash: candidate.proposalHash,
+    });
     createdFindingCount += 1;
   }
 
@@ -1511,6 +1567,8 @@ async function analyzeCheckpoint(
       findingCandidateOrigin: source === SERVER_FINDING_SOURCE ? "server" : "explicit_analyzer",
       findingCount: createdFindingCount,
       suppressedFindingCount,
+      reusedFindingCount,
+      candidateFindingLinks,
       selectedNodeIds,
       eventSelection: selection.metadata,
       candidateConstruction: candidateConstruction.metadata,

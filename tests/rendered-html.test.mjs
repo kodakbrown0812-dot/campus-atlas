@@ -1019,7 +1019,13 @@ test("Analyze backfills a legacy Exact import into a proposed finding without go
   });
   assert.equal(retry.response.status, 201);
   assert.equal(retry.value.checkpoint.metadata.sourceEventPreparation.status, "already_prepared");
-  assert.equal(retry.value.suppressedFindingCount, 1);
+  assert.equal(retry.value.suppressedFindingCount, 0);
+  assert.equal(retry.value.reusedFindingCount, 1);
+  assert.equal(retry.value.findings.length, 1);
+  assert.equal(retry.value.findings[0].id, analyzed.value.findings[0].id);
+  assert.equal(retry.value.findings[0].checkpointId, retry.value.checkpoint.id);
+  assert.equal(retry.value.findings[0].canonicalOriginCheckpointId, analyzed.value.checkpoint.id);
+  assert.equal(retry.value.findings[0].checkpointDisposition, "reused_equivalent");
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM events WHERE conversation_id = ?").get(conversationId).count, 1);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM findings WHERE case_id = ?").get(caseId).count, 1);
   for (const table of ["mechanisms", "governance_events", "packets", "receipts"]) {
@@ -1396,7 +1402,7 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   for (const category of ["correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty", "shared_term"]) {
     assert.ok(selection.signalCategoriesRepresented.includes(category), category);
   }
-  assert.equal(candidateConstruction.version, "slice3-mature-propositions-v3-discovery-boundary-v1");
+  assert.equal(candidateConstruction.version, "slice3-mature-propositions-v3-reuse-v1");
   assert.equal(candidateConstruction.strategy, "mature_room_complete_current_propositions_v1");
   assert.equal(candidateConstruction.budget, 12);
   assert.ok(candidateConstruction.candidateCount <= 12);
@@ -1470,7 +1476,7 @@ test("mature proposition construction rejects completed state and leaves unused 
     "A temporary meeting was moved and then forgotten.",
     "The legacy dashboard slice is complete and committed. It is no longer current.",
     "Naming discussion remains source-only chatter.",
-    "The deployment blocker was resolved and is not current.",
+    "I’m using the browser workflow for this completed UI slice and will capture screenshots.",
     "Current direction: run the bounded continuity proof now because it must close before scope widens.",
     "The next action is to freeze the output before applying the fixed score.",
     "Stopping rule:\n\nStop at the first genuine failure and do not repair it during this proof run.",
@@ -1510,6 +1516,7 @@ test("mature proposition construction rejects completed state and leaves unused 
   assert.ok(proposals.some((statement) => /Stopping rule:[\s\S]*do not repair/i.test(statement)));
   assert.ok(proposals.some((statement) => /Preserve Exact source lineage/i.test(statement)));
   assert.ok(proposals.every((statement) => !/build the legacy dashboard next/i.test(statement)));
+  assert.ok(proposals.every((statement) => !/browser workflow|capture screenshots/i.test(statement)));
   assert.ok(value.reconciliation.every((item) => item.status === "proposed"));
   assert.ok(value.reconciliation.every((item) => item.exactSources.every((source) => source.messageIds.length > 0)));
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);
@@ -3178,8 +3185,13 @@ test("Native Analyze generates one grounded proposed finding server-side and res
     },
   });
   assert.equal(duplicate.response.status, 201);
-  assert.equal(duplicate.value.findings.length, 0);
-  assert.equal(duplicate.value.suppressedFindingCount, 1);
+  assert.equal(duplicate.value.findings.length, 1);
+  assert.equal(duplicate.value.findings[0].id, analyzed.value.findings[0].id);
+  assert.equal(duplicate.value.findings[0].checkpointId, duplicate.value.checkpoint.id);
+  assert.equal(duplicate.value.findings[0].canonicalOriginCheckpointId, analyzed.value.checkpoint.id);
+  assert.equal(duplicate.value.findings[0].checkpointDisposition, "reused_equivalent");
+  assert.equal(duplicate.value.suppressedFindingCount, 0);
+  assert.equal(duplicate.value.reusedFindingCount, 1);
   assert.equal(duplicate.value.checkpoint.healthAfter, "awaiting_governance");
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM findings").get().count, 1);
 });

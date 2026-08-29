@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "status": "stopped_at_next_genuine_failure",
+  "failurePhase": "pre_governance_semantic_gate_after_candidate_reuse_repair",
+  "failureCode": "stale_completed_proof_criteria_and_incomplete_causal_supersession_remain",
+  "repairUnderTest": {
+    "evidenceExtractionVersion": "slice3-mature-coverage-v1",
+    "discoveryClassifierVersion": "mature_room_discovery_signals_v1",
+    "candidateConstructionVersion": "slice3-mature-propositions-v3-reuse-v1",
+    "selectionStrategy": "mature_room_chronology_signal_coverage_v1",
+    "candidateStrategy": "mature_room_complete_current_propositions_v1",
+    "candidateBudget": 12
+  },
+  "frozenInputs": {
+    "acceptedCoverageRepairCommit": "0b17d3a402e654703059df9c3e1022d2471642e9",
+    "acceptedCandidateRepairCommit": "83491f116acbf9037d9307db3ff73726b34438be",
+    "discoveryBoundaryRepairCommit": "74fc306d60ae9d314ac7929b5a0d2c75703509be",
+    "protocolFreezeCommit": "638627f592ec3edeff7b90cba821cf570341c554",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "structuredImportSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "baselineInputSha256": "293b54fa862de99e904e559b49e9feea18c1b20c5b879e8fef0d9a5cbc3483ef"
+  },
+  "localEvidence": {
+    "exactResumeResponseSha256": "e9f83fa1ad6111d8657a53b507fa9888557b4ba61bce2e7593a00c0a46c016ed",
+    "exactResumeResponseBytes": 388444,
+    "canonicalDatabaseSha256AtStop": "7e98eab2068146f7e4c6c849f37c8a2a035cfcfd9f783a225c46f15158cadb0c",
+    "canonicalDatabaseBytes": 2871296,
+    "canonicalDatabaseBeforeRepairSha256": "c240a96bbb1f2c6bbcafbb1e82c251a8f708b359b7e94e11bb87bf6363d0ad88",
+    "privacy": "The exact authentic transcript, exact resume response, and local canonical databases remain in the user's local proof workspace. Only hashes, counts, identifiers, selected sequences, and bounded diagnostic facts are committed here."
+  },
+  "identifiers": {
+    "projectId": "campus-atlas-v18-authentic",
+    "conversationId": "conversation:cb949752-1049-4637-9c35-19d7769d6d5d",
+    "caseId": "case:transfer:e492a415a31f8cb63fd6fb5b2f36",
+    "transferId": "transfer-room:c480dbbf1d71dd9b1195e03d3ef32547",
+    "checkpointId": "checkpoint:637f6533-724e-4117-bd93-3c5631069248"
+  },
+  "discoveryBoundary": {
+    "exactIdentityEqualityPassed": true,
+    "sourceItemsConsidered": 117,
+    "selectedEventCount": 21,
+    "acceptedAndActualSourceSequences": [32, 35, 42, 49, 61, 78, 83, 88, 89, 93, 97, 102, 103, 104, 105, 109, 110, 113, 115, 116, 117],
+    "selectedFinalThirdEventCount": 15,
+    "selectedFinalThirdEventsWithDisposition": 15
+  },
+  "candidateReuseContract": {
+    "passed": true,
+    "candidateUnitsGenerated": 12,
+    "candidateFindingsExposed": 12,
+    "canonicalFindingsCreated": 1,
+    "canonicalFindingsReused": 11,
+    "equivalentCandidatesSuppressed": 0,
+    "candidateCeilingUnchanged": true,
+    "reusedFindingsAttachedToCurrentCheckpoint": true,
+    "reusedFindingsExposeCurrentDisposition": true,
+    "duplicateCanonicalStorageCreated": false,
+    "rejectedEquivalentSuppressionRegression": false
+  },
+  "stateValidityRepair": {
+    "completedUiWorkflowSequence103Rejected": true,
+    "staleCompletedInstructionLeakageRemaining": true,
+    "remainingStaleSourceSequences": [49, 61, 110],
+    "remainingClasses": [
+      "completed Part 3 proof acceptance criteria presented as a current constraint",
+      "completed Inspect acceptance questions presented as current uncertainty"
+    ]
+  },
+  "preGovernanceSemanticGate": {
+    "passed": false,
+    "currentAuthenticFullTransferDirection": true,
+    "currentNextAction": true,
+    "completeStoppingRule": true,
+    "noRepairDuringProofBoundary": true,
+    "uiFreezeBoundary": true,
+    "taskAndRubricFreeze": true,
+    "roadwayScaffoldingScoreNotPreRepair": true,
+    "stateTruthAndContextDeliveryDefinitions": true,
+    "completeSupersessionGuard": false,
+    "causalProofFirstRationale": false,
+    "materialUncertaintyOrOpenWork": false,
+    "staleCompletedInstructionLeakage": true,
+    "irrelevantChatterPromoted": false,
+    "diagnosis": "Deduplicate-storage/reuse now works, but state validity remains too local. The constructor rejects one completed assistant workflow message while retaining older completed proof and Inspect acceptance criteria. Its supersession cluster still lacks the historical Mock Company state and the actual complexity/continuity-first causal rationale. The set therefore cannot enter governance."
+  },
+  "exactLineage": {
+    "candidateFindings": 12,
+    "sourceEventLinks": 13,
+    "sourceEventLinksResolvingToImmutableMessages": 13,
+    "missingExactMessageLinks": 0,
+    "status": "complete"
+  },
+  "canonicalCountsAtStop": {
+    "conversations": 1,
+    "conversationImports": 1,
+    "messages": 117,
+    "events": 117,
+    "cases": 1,
+    "caseEventAttachments": 117,
+    "checkpoints": 6,
+    "checkpointReasoningNodes": 112,
+    "findings": 37,
+    "findingVersions": 37,
+    "mechanisms": 0,
+    "mechanismVersions": 0,
+    "governanceEvents": 0,
+    "packets": 0,
+    "packetItems": 0,
+    "receipts": 0,
+    "transferRuns": 1
+  },
+  "executionStopped": {
+    "preGovernanceSemanticGateEvaluated": true,
+    "governancePerformed": false,
+    "stewardCalled": false,
+    "compiledContentCreated": false,
+    "destinationRoomsCreated": false,
+    "runtimeRepairOfNextFailureAttempted": false,
+    "productionChanged": false
+  },
+  "smallestLikelyNextSlice": "Repair only relationship-based state validity and causal proposition expansion after the frozen selector and now-working reuse contract. Completed proof/UI acceptance criteria must be marked historical unless still governing; the supersession guard must include historical Mock Company, current Room Transfer, and the evidence-supported reason for the change; material open work must remain explicit. Preserve canonical reuse attachments, exact 21 identities, proposition ceiling, authority boundary, and all downstream behavior."
+}
