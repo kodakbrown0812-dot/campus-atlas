@@ -1402,7 +1402,7 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   for (const category of ["correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty", "shared_term"]) {
     assert.ok(selection.signalCategoriesRepresented.includes(category), category);
   }
-  assert.equal(candidateConstruction.version, "slice3-mature-propositions-v3-reuse-v1");
+  assert.equal(candidateConstruction.version, "slice3-mature-relationships-v4");
   assert.equal(candidateConstruction.strategy, "mature_room_complete_current_propositions_v1");
   assert.equal(candidateConstruction.budget, 12);
   assert.ok(candidateConstruction.candidateCount <= 12);
@@ -1432,11 +1432,17 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
     candidateConstruction: checkpoint.value.result.checkpoint.metadata.candidateConstruction,
   }));
   assert.ok(proposals.some((statement) => /Earlier direction:[\s\S]*Explicit correction:[\s\S]*continuity proof supersedes/i.test(statement)));
+  const causalProposal = firstRun.value.reconciliation.find((item) => /Earlier direction:[\s\S]*Explicit correction:[\s\S]*continuity proof supersedes/i.test(item.statement));
+  assert.ok(causalProposal.exactSources.some((source) => /Earlier direction: build the broad dashboard next/i.test(source.exactContent)));
+  assert.ok(causalProposal.exactSources.some((source) => /Current direction: run the deterministic Room Transfer/i.test(source.exactContent)));
   assert.ok(proposals.some((statement) => /Current direction: run the deterministic Room Transfer/i.test(statement)));
   assert.ok(proposals.some((statement) => /next action is to freeze both destination outputs/i.test(statement)));
   assert.ok(proposals.some((statement) => /Do not begin broad connectors/i.test(statement)));
   assert.ok(proposals.some((statement) => /Preserve the fixed rubric before scoring/i.test(statement)));
-  assert.ok(proposals.some((statement) => /Stopping rule:[\s\S]*Stop at the first genuine failure and do not repair/i.test(statement)));
+  assert.ok(
+    proposals.some((statement) => /Stopping rule:[\s\S]*Stop at the first genuine failure and do not repair/i.test(statement)),
+    JSON.stringify({ proposals, candidateConstruction }),
+  );
   assert.ok(proposals.every((statement) => !/Earlier direction was replaced by:\s*$/i.test(statement)));
   assert.ok(proposals.some((statement) => /Open question:.*remains unresolved/i.test(statement)));
   assert.ok(proposals.filter((statement) => /earlier broad dashboard direction/i.test(statement)).length <= 1);
@@ -1471,10 +1477,10 @@ test("mature proposition construction rejects completed state and leaves unused 
   const messages = [
     "Current direction: build the legacy dashboard next.",
     "Airport timing does not affect the project.",
-    "A color option was discussed without becoming a decision.",
+    "This proof checklist requires rendered output and scoring before the slice can close.",
     "Preserve Exact source lineage because the current proof depends on traceable evidence.",
     "A temporary meeting was moved and then forgotten.",
-    "The legacy dashboard slice is complete and committed. It is no longer current.",
+    "The legacy dashboard slice is complete and committed. The proof checklist is complete and accepted. Neither remains current work.",
     "Naming discussion remains source-only chatter.",
     "I’m using the browser workflow for this completed UI slice and will capture screenshots.",
     "Current direction: run the bounded continuity proof now because it must close before scope widens.",
@@ -1517,6 +1523,7 @@ test("mature proposition construction rejects completed state and leaves unused 
   assert.ok(proposals.some((statement) => /Preserve Exact source lineage/i.test(statement)));
   assert.ok(proposals.every((statement) => !/build the legacy dashboard next/i.test(statement)));
   assert.ok(proposals.every((statement) => !/browser workflow|capture screenshots/i.test(statement)));
+  assert.ok(proposals.every((statement) => !/proof checklist|rendered output and scoring/i.test(statement)));
   assert.ok(value.reconciliation.every((item) => item.status === "proposed"));
   assert.ok(value.reconciliation.every((item) => item.exactSources.every((source) => source.messageIds.length > 0)));
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);

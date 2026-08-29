@@ -46,7 +46,7 @@ const MAX_SELECTED_NODES = 7;
 const MAX_MATURE_SELECTED_NODES = 21;
 const MAX_MATURE_FINDINGS = 12;
 export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
-export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-propositions-v3-reuse-v1";
+export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-relationships-v4";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -425,7 +425,7 @@ function continuitySignals(value: string): ContinuitySignal[] {
   if (/\b(?:next action|next step|next task|do next|build next|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after|choose and (?:freeze|continue|begin|start))\b/i.test(value)) {
     signals.push("next_action");
   }
-  if (/\b(?:uncertain|uncertainty|unresolved|open question|open loop|unknown|missing state|not yet|provisional|pending evidence|remains to be)\b/i.test(value)
+  if (/\b(?:uncertain|uncertainty|unresolved|open question|open loop|proof question|unknown|missing state|not yet|provisional|pending evidence|remains to be)\b/i.test(value)
     || /^(?:can|could|whether|will)\b[^?]{12,}\?$/i.test(value.trim())) {
     signals.push("uncertainty");
   }
@@ -564,12 +564,15 @@ function discoveryAtomicUnits(event: Row) {
 
 type MatureUnit = {
   event: Row;
+  evidenceEvents: Row[];
   statement: string;
   sequence: number;
   signals: ContinuitySignal[];
   score: number;
-  clusterKind: "atomic" | "supersession_cluster";
+  clusterKind: "atomic" | "supersession_cluster" | "causal_state_cluster";
 };
+
+type StateValidity = "current" | "still_governing_historical" | "completed" | "superseded" | "expired" | "unresolved" | "historical_source_only";
 
 type CandidateRole =
   | "current_direction"
@@ -609,15 +612,49 @@ function matureUnitScore(event: Row, statement: string, signals: ContinuitySigna
   return signals.reduce((total, signal) => total + weights[signal], 0) + recency + actor - transientPenalty;
 }
 
+function historicalDirectionQuality(value: string) {
+  return Number(/\bearly accepted direction\b/iu.test(value)) * 8
+    + Number(/\b(?:earlier|previous|historical|original)\b[\s\S]{0,120}\b(?:direction|plan|decision|state)\b/iu.test(value)) * 4
+    + Number(/\b(?:build|prioriti[sz]e|run|begin|continue|use|ship|launch)\b[\s\S]{0,100}\bnext\b/iu.test(value)) * 3;
+}
+
+function replacementDirectionQuality(value: string) {
+  return Number(/\bexplicit correction\b/iu.test(value)) * 8
+    + Number(/\bdo not\b[\s\S]{0,220}\b(?:prioriti[sz]e|instead|supersed|replace|changed to)\b/iu.test(value)) * 5
+    + Number(/\b(?:replaced by|superseded by|changed to)\b/iu.test(value)) * 4;
+}
+
+function causalRationaleQuality(value: string) {
+  return Number(/\brequired rationale\b/iu.test(value)) * 8
+    + Number(/\b(?:too complex|too complicated|difficult to understand)\b/iu.test(value)) * 7
+    + Number(/\b(?:continuity primitive|prove continuity|proof[^.]{0,100}before|before widening)\b/iu.test(value)) * 6
+    + Number(/\b(?:because|therefore|the reason|rationale)\b/iu.test(value)) * 3;
+}
+
+function completeCausalSupersession(value: string) {
+  return historicalDirectionQuality(value) >= 7
+    && replacementDirectionQuality(value) >= 5
+    && /\b(?:supersed|replac|changed to|do not)\b/iu.test(value);
+}
+
+function currentOrientationQuality(unit: MatureUnit) {
+  return Number(/\bcurrent direction\b/iu.test(unit.statement)) * 10
+    + Number(unit.signals.includes("current_direction")) * 6
+    + Number(unit.signals.includes("next_action")) * 3
+    + Number(/\b(?:begins now|continue now|start now|the next (?:task|action|step) is)\b/iu.test(unit.statement)) * 4;
+}
+
 function matureUnits(events: Row[]) {
   const maximumSequence = Math.max(0, ...events.map((event) => sourceSequence(event) || 0));
-  return events.flatMap((event) => {
+  const completedEvents = completionRelationships(events);
+  const baseUnits = events.flatMap((event) => {
     const statements = atomicUnits(event);
     const atomic: MatureUnit[] = statements.flatMap((statement) => {
       const signals = continuitySignals(statement);
       if (!signals.length) return [];
       return [{
         event,
+        evidenceEvents: [event],
         statement,
         sequence: sourceSequence(event) || 0,
         signals,
@@ -625,18 +662,23 @@ function matureUnits(events: Row[]) {
         clusterKind: "atomic" as const,
       } satisfies MatureUnit];
     });
-    const historical = statements.find((statement) => /\b(?:earlier|previous|historical|original)\b[\s\S]{0,100}\b(?:direction|plan|decision|state)\b/i.test(statement));
-    const replacement = statements.find((statement) => /\b(?:explicit correction|do not[\s\S]{0,160}(?:prioriti[sz]e|instead|rather)|replaced by|superseded by|changed to)\b/i.test(statement));
-    const rationale = statements.find((statement) => /\b(?:required rationale|rationale|because|before widening|proof[^.]{0,100}first)\b/i.test(statement));
+    const best = (quality: (value: string) => number) => statements
+      .map((statement) => ({ statement, quality: quality(statement) }))
+      .filter(({ quality }) => quality > 0)
+      .sort((left, right) => right.quality - left.quality || left.statement.localeCompare(right.statement))[0]?.statement;
+    const historical = best(historicalDirectionQuality);
+    const replacement = best(replacementDirectionQuality);
+    const rationale = best(causalRationaleQuality);
     const clusterParts = [historical, replacement, rationale]
       .filter((statement, index, values): statement is string => Boolean(statement) && values.indexOf(statement) === index);
     const clusterStatement = historical && replacement
       ? clusterParts.join("\n")
       : null;
-    if (clusterStatement && clusterStatement.length <= 1000) {
+    if (clusterStatement && clusterStatement.length <= 1400 && completeCausalSupersession(clusterStatement)) {
       const signals = [...new Set([...continuitySignals(clusterStatement), "correction", "supersession"])] as ContinuitySignal[];
       atomic.push({
         event,
+        evidenceEvents: [event],
         statement: clusterStatement,
         sequence: sourceSequence(event) || 0,
         signals,
@@ -646,6 +688,35 @@ function matureUnits(events: Row[]) {
     }
     return atomic;
   });
+  const expanded = baseUnits
+    .filter((unit) => unit.clusterKind === "supersession_cluster" && causalRationaleQuality(unit.statement) > 0)
+    .flatMap((unit): MatureUnit[] => {
+      const latestCurrent = baseUnits
+        .filter((candidate) => candidate.clusterKind === "atomic"
+          && candidate.sequence > unit.sequence
+          && !completedEvents.has(String(candidate.event.id))
+          && sourceActorType(candidate.event) === "user"
+          && explicitCurrentOrientation(candidate)
+          && termOverlap(unit.statement, candidate.statement).count >= 2)
+        .sort((left, right) => currentOrientationQuality(right) - currentOrientationQuality(left)
+          || termOverlap(unit.statement, right.statement).count - termOverlap(unit.statement, left.statement).count
+          || right.sequence - left.sequence
+          || compareMatureUnits(left, right))[0];
+      if (!latestCurrent) return [];
+      const statement = `${unit.statement}\n${latestCurrent.statement}`;
+      if (statement.length > 1800) return [];
+      const signals = [...new Set([...unit.signals, ...latestCurrent.signals, "correction", "supersession", "connection"])] as ContinuitySignal[];
+      return [{
+        event: latestCurrent.event,
+        evidenceEvents: [...new Map([...unit.evidenceEvents, ...latestCurrent.evidenceEvents].map((event) => [String(event.id), event])).values()],
+        statement,
+        sequence: latestCurrent.sequence,
+        signals,
+        score: matureUnitScore(latestCurrent.event, statement, signals, maximumSequence) + 16 + causalRationaleQuality(unit.statement),
+        clusterKind: "causal_state_cluster" as const,
+      } satisfies MatureUnit];
+    });
+  return [...baseUnits, ...expanded];
 }
 
 function discoveryMatureUnits(events: Row[]) {
@@ -655,6 +726,7 @@ function discoveryMatureUnits(events: Row[]) {
     if (!signals.length) return [];
     return [{
       event,
+      evidenceEvents: [event],
       statement,
       sequence: sourceSequence(event) || 0,
       signals,
@@ -750,7 +822,9 @@ function nakedStructuralFragment(value: string) {
 }
 
 function completeSupersession(unit: MatureUnit) {
-  if (unit.clusterKind === "supersession_cluster") return true;
+  if (unit.clusterKind === "supersession_cluster" || unit.clusterKind === "causal_state_cluster") {
+    return completeCausalSupersession(unit.statement);
+  }
   return /\b(?:explicit correction|correction)\b/iu.test(unit.statement)
     && /\bdo not\b/iu.test(unit.statement)
     && unit.signals.includes("supersession");
@@ -775,39 +849,89 @@ function completeProposition(unit: MatureUnit) {
 }
 
 function completionEvidence(event: Row) {
-  return sourceActorType(event) === "assistant"
-    && /\b(?:is complete|completed|committed|accepted|passed|now verified|successfully simplified|ready for)\b/iu.test(eventStatement(event));
+  return /\b(?:is complete|are complete|has completed|have completed|completed|committed|accepted|passed|now verified|successfully simplified|successfully completed|ready for|is now frozen|are now frozen|now frozen)\b/iu.test(eventStatement(event));
 }
 
 function assistantWorkflowStatus(unit: MatureUnit) {
   return sourceActorType(unit.event) === "assistant"
-    && /^(?:i(?:’|')m|i am|i(?:’|')ll|i will|we(?:’|')re|we are|we(?:’|')ll|we will)\b/iu.test(unit.statement.trim())
+    && /\b(?:i(?:’|')m|i am|i(?:’|')ll|i will|we(?:’|')re|we are|we(?:’|')ll|we will)\b/iu.test(unit.statement)
     && /\b(?:using|starting|running|checking|mapping|capturing|rendering|testing|verifying|workflow|slice|build|deploy)\b/iu.test(unit.statement);
 }
 
-function completedSourceEvents(events: Row[]) {
-  const completed = new Set<string>();
+function phaseBoundInstruction(event: Row) {
+  return /\b(?:this slice|this proof|this run|part\s+\d+[a-z]?|acceptance (?:gate|criteria)|rubric|checklist)\b/iu.test(eventStatement(event));
+}
+
+function relationshipTerms(value: string) {
+  const generic = new Set([
+    "atlas", "campus", "context", "continue", "current", "exact", "project", "proof",
+    "room", "source", "state", "transfer", "user", "work",
+  ]);
+  return new Set([...normalizedTerms(value)].filter((term) => !generic.has(term)));
+}
+
+function relationshipAnchors(value: string) {
+  return new Set((value.toLowerCase().match(/\b(?:part|slice)\s+\d+[a-z]?\b/gu) || [])
+    .map((anchor) => anchor.replace(/\s+/gu, " ")));
+}
+
+function explicitReferentialClosure(event: Row, completion: Row) {
+  const source = eventStatement(event);
+  const later = eventStatement(completion);
+  for (const noun of ["checklist", "criteria", "rubric", "slice", "proof", "test", "audit", "trim"]) {
+    if (new RegExp(`\\b${noun}\\b`, "iu").test(source)
+      && new RegExp(`\\b(?:this|that|the|those|these)\\b[^.!?]{0,60}\\b${noun}\\b`, "iu").test(later)) return true;
+  }
+  return false;
+}
+
+function completionRelationships(events: Row[]) {
+  const completed = new Map<string, Row[]>();
   const completions = events.filter(completionEvidence);
   for (const event of events) {
-    if (sourceActorType(event) !== "user") continue;
     const eventSequence = sourceSequence(event) || 0;
-    const terms = normalizedTerms(eventStatement(event));
+    if (!phaseBoundInstruction(event)) continue;
+    const terms = relationshipTerms(eventStatement(event));
+    const anchors = relationshipAnchors(eventStatement(event));
+    const matches: { completion: Row; score: number; distance: number }[] = [];
     for (const completion of completions) {
-      if ((sourceSequence(completion) || 0) <= eventSequence) continue;
+      const completionSequence = sourceSequence(completion) || 0;
+      if (completionSequence <= eventSequence) continue;
       let overlap = 0;
-      for (const term of normalizedTerms(eventStatement(completion))) if (terms.has(term)) overlap += 1;
-      if (overlap >= 3) {
-        completed.add(String(event.id));
-        break;
-      }
+      for (const term of relationshipTerms(eventStatement(completion))) if (terms.has(term)) overlap += 1;
+      const completionAnchors = relationshipAnchors(eventStatement(completion));
+      const sharedAnchor = [...anchors].some((anchor) => completionAnchors.has(anchor));
+      const referential = explicitReferentialClosure(event, completion);
+      if (!sharedAnchor && overlap < 3 && !referential) continue;
+      matches.push({
+        completion,
+        score: Number(sharedAnchor) * 12 + Number(referential) * 8 + Math.min(overlap, 8),
+        distance: completionSequence - eventSequence,
+      });
+    }
+    const best = matches.sort((left, right) => right.score - left.score || left.distance - right.distance
+      || String(left.completion.id).localeCompare(String(right.completion.id)))[0];
+    if (best) {
+      completed.set(String(event.id), [best.completion]);
     }
   }
   return completed;
 }
 
-function imperativeInstruction(unit: MatureUnit) {
-  return /^(?:do not|don't|must|never|avoid|preserve|show|keep|move|make|use|run|create|add|remove|ensure|prefer)\b/iu.test(unit.statement.trim())
-    || /\bthis slice\b/iu.test(unit.statement);
+function expirationRelationships(events: Row[]) {
+  const expired = new Map<string, Row[]>();
+  const resolutions = events.filter((event) => /\b(?:resolved|unblocked|no longer (?:blocked|pending|waiting)|not a current blocker|is not current)\b/iu.test(eventStatement(event)));
+  for (const event of events) {
+    if (!/\b(?:blocked|waiting|pending|temporary|temporarily|failing)\b/iu.test(eventStatement(event))) continue;
+    const terms = normalizedTerms(eventStatement(event));
+    for (const resolution of resolutions) {
+      if ((sourceSequence(resolution) || 0) <= (sourceSequence(event) || 0)) continue;
+      let overlap = 0;
+      for (const term of normalizedTerms(eventStatement(resolution))) if (terms.has(term)) overlap += 1;
+      if (overlap >= 2) expired.set(String(event.id), [...(expired.get(String(event.id)) || []), resolution]);
+    }
+  }
+  return expired;
 }
 
 function criticalConstraint(unit: MatureUnit) {
@@ -912,22 +1036,11 @@ function matureFindingType(signals: ContinuitySignal[]) {
 async function matureFindingCandidates(selectedEvents: Row[]): Promise<CandidateConstruction> {
   const discoveredUnits = matureUnits(selectedEvents).sort(compareMatureUnits);
   const boundary = currentBoundarySequence(discoveredUnits);
-  const completedEvents = completedSourceEvents(selectedEvents);
+  const completedEvents = completionRelationships(selectedEvents);
+  const expiredEvents = expirationRelationships(selectedEvents);
   const incompleteUnits = new Set(discoveredUnits.filter((unit) => !completeProposition(unit)));
-  const staleUnits = new Set(discoveredUnits.filter((unit) => {
-    if (unit.sequence >= boundary
-      || unit.signals.includes("shared_term")
-      || unit.clusterKind === "supersession_cluster") return false;
-    const completedUserInstruction = completedEvents.has(String(unit.event.id))
-      && (imperativeInstruction(unit)
-        || candidateRoles(unit).includes("current_direction")
-        || candidateRoles(unit).includes("next_action"));
-    const completedAssistantState = sourceActorType(unit.event) === "assistant"
-      && (completionEvidence(unit.event) || assistantWorkflowStatus(unit));
-    return completedUserInstruction || completedAssistantState;
-  }));
-  const completeUnits = discoveredUnits.filter((unit) => !incompleteUnits.has(unit) && !staleUnits.has(unit));
-  const currentTerms = new Set(completeUnits
+  const structurallyCompleteUnits = discoveredUnits.filter((unit) => !incompleteUnits.has(unit));
+  const currentTerms = new Set(structurallyCompleteUnits
     .filter((unit) => unit.sequence >= boundary)
     .flatMap((unit) => [...normalizedTerms(unit.statement)]));
   const relationshipCount = (unit: MatureUnit) => {
@@ -935,13 +1048,36 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     for (const term of normalizedTerms(unit.statement)) if (currentTerms.has(term)) count += 1;
     return count;
   };
-  const directlyRelevant = (unit: MatureUnit) => unit.sequence >= boundary
-    || unit.clusterKind === "supersession_cluster"
-    || candidateRoles(unit).includes("correction_guard")
-    || criticalConstraint(unit)
-    || unit.signals.includes("shared_term")
-    || unit.signals.includes("uncertainty")
-    || relationshipCount(unit) >= 3;
+  const causalEvidenceEventIds = new Set(structurallyCompleteUnits
+    .filter((unit) => unit.clusterKind !== "atomic" && completeCausalSupersession(unit.statement))
+    .flatMap((unit) => unit.evidenceEvents.map((event) => String(event.id))));
+  const stateValidity = (unit: MatureUnit): StateValidity => {
+    if (unit.clusterKind === "causal_state_cluster") return "current";
+    if (unit.clusterKind === "supersession_cluster" && completeCausalSupersession(unit.statement)) {
+      return "still_governing_historical";
+    }
+    const eventId = String(unit.event.id);
+    if (expiredEvents.has(eventId)) return "expired";
+    if (completedEvents.has(eventId) || assistantWorkflowStatus(unit)) {
+      return unit.signals.includes("shared_term") ? "still_governing_historical" : "completed";
+    }
+    if (unit.clusterKind === "atomic"
+      && causalEvidenceEventIds.has(eventId)
+      && historicalDirectionQuality(unit.statement) >= 4
+      && replacementDirectionQuality(unit.statement) === 0) return "superseded";
+    if (unit.signals.includes("uncertainty")) return "unresolved";
+    if (unit.sequence >= boundary) return "current";
+    if (unit.signals.includes("shared_term") || criticalConstraint(unit) || relationshipCount(unit) >= 3) {
+      return "still_governing_historical";
+    }
+    return "historical_source_only";
+  };
+  const validityByUnit = new Map(structurallyCompleteUnits.map((unit) => [unit, stateValidity(unit)]));
+  const staleUnits = new Set(structurallyCompleteUnits.filter((unit) =>
+    ["completed", "superseded", "expired"].includes(validityByUnit.get(unit) || ""),
+  ));
+  const completeUnits = structurallyCompleteUnits.filter((unit) => !staleUnits.has(unit));
+  const directlyRelevant = (unit: MatureUnit) => ["current", "still_governing_historical", "unresolved"].includes(validityByUnit.get(unit) || "");
   const units = completeUnits.filter(directlyRelevant);
   const selected: CandidateSeed[] = [];
   const redundantUnits = new Set<MatureUnit>();
@@ -951,6 +1087,12 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     if (!seed.roles.length) return false;
     const duplicate = selected.find((candidate) => functionallyRedundant(seed, candidate));
     if (duplicate) {
+      if (criticalConstraint(unit) && !criticalConstraint(duplicate.unit)) {
+        const duplicateIndex = selected.indexOf(duplicate);
+        redundantUnits.add(duplicate.unit);
+        selected.splice(duplicateIndex, 1, seed);
+        return true;
+      }
       redundantUnits.add(unit);
       return false;
     }
@@ -961,16 +1103,26 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     .filter((unit) => candidateRoles(unit).includes(role))
     .sort((left, right) => {
       const dependencyRole = ["correction_guard", "rationale", "connection", "constraint"].includes(role);
-      return (role === "constraint" ? Number(criticalConstraint(right)) - Number(criticalConstraint(left)) : 0)
+      const statePriorities: Partial<Record<StateValidity, number>> = {
+        current: 4,
+        unresolved: 3,
+        still_governing_historical: 2,
+      };
+      const statePriority = (unit: MatureUnit) => statePriorities[validityByUnit.get(unit) || "historical_source_only"] || 0;
+      return statePriority(right) - statePriority(left)
+        || (role === "constraint" ? Number(criticalConstraint(right)) - Number(criticalConstraint(left)) : 0)
+        || (dependencyRole ? causalRationaleQuality(right.statement) - causalRationaleQuality(left.statement) : 0)
         || (dependencyRole ? relationshipCount(right) - relationshipCount(left) : 0)
+        || (role === "constraint" ? right.statement.length - left.statement.length : 0)
         || compareForRole(left, right, role, boundary);
     });
 
   for (const role of ["current_direction", "next_action"] satisfies CandidateRole[]) add(rankedForRole(role)[0]);
 
+  let currentConstraints = 0;
   for (const unit of rankedForRole("constraint")) {
-    if (selected.length >= MAX_MATURE_FINDINGS) break;
-    if (unit.sequence >= boundary) add(unit);
+    if (currentConstraints >= 4 || selected.length >= MAX_MATURE_FINDINGS) break;
+    if (validityByUnit.get(unit) === "current" && add(unit)) currentConstraints += 1;
   }
 
   for (const role of ["correction_guard", "rationale", "uncertainty"] satisfies CandidateRole[]) {
@@ -986,7 +1138,7 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
   let persistentEarlierConstraints = 0;
   for (const unit of rankedForRole("constraint")) {
     if (persistentEarlierConstraints >= 3 || selected.length >= MAX_MATURE_FINDINGS) break;
-    if (unit.sequence >= boundary
+    if (validityByUnit.get(unit) !== "still_governing_historical"
       || unit.signals.includes("correction")
       || unit.signals.includes("supersession")
       || (relationshipCount(unit) < 3 && !criticalConstraint(unit))) continue;
@@ -1020,8 +1172,12 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
 
   const candidates = await Promise.all(selected.map(async (seed) => {
     const primaryId = String(seed.unit.event.id);
-    const supportingEventIds = [...new Set((supportingByCandidate.get(seed) || []).map((unit) => String(unit.event.id)))];
-    const sourceEventIds = [...supportingEventIds, primaryId].sort((left, right) => {
+    const dependencyEventIds = seed.unit.evidenceEvents
+      .map((event) => String(event.id))
+      .filter((eventId) => eventId !== primaryId);
+    const supportingEventIds = [...new Set((supportingByCandidate.get(seed) || [])
+      .flatMap((unit) => unit.evidenceEvents.map((event) => String(event.id))))];
+    const sourceEventIds = [...new Set([...dependencyEventIds, ...supportingEventIds, primaryId])].sort((left, right) => {
       const leftEvent = selectedEvents.find((event) => String(event.id) === left);
       const rightEvent = selectedEvents.find((event) => String(event.id) === right);
       return leftEvent && rightEvent ? chronologicalEventOrder(leftEvent, rightEvent) : left.localeCompare(right);
@@ -1047,7 +1203,10 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
   const maximumSequence = Math.max(0, ...selectedEvents.map((event) => sourceSequence(event) || 0));
   const finalThirdStart = Math.floor((maximumSequence * 2) / 3) + 1;
   const candidateEventIds = new Set(selected.map((seed) => String(seed.unit.event.id)));
-  const supportingEventIds = new Set([...supportingByCandidate.values()].flat().map((unit) => String(unit.event.id)));
+  const supportingEventIds = new Set([
+    ...selected.flatMap((seed) => seed.unit.evidenceEvents.map((event) => String(event.id)).filter((id) => id !== String(seed.unit.event.id))),
+    ...[...supportingByCandidate.values()].flat().flatMap((unit) => unit.evidenceEvents.map((event) => String(event.id))),
+  ]);
   const redundantEventIds = new Set([...redundantUnits].map((unit) => String(unit.event.id)));
   const unitsByEvent = new Map<string, MatureUnit[]>();
   for (const unit of discoveredUnits) {
@@ -1102,7 +1261,21 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
           statementHashInputLength: unit.statement.length,
         })),
       staleOrCompletedUnitsRejected: staleUnits.size,
-      completedSourceEventIds: [...completedEvents].sort(),
+      completedSourceEventIds: [...completedEvents.keys()].sort(),
+      completionRelationships: [...completedEvents.entries()].map(([eventId, closureEvents]) => ({
+        eventId,
+        closureEventIds: [...new Set(closureEvents.map((event) => String(event.id)))].sort(),
+      })),
+      expirationRelationships: [...expiredEvents.entries()].map(([eventId, resolutionEvents]) => ({
+        eventId,
+        resolutionEventIds: [...new Set(resolutionEvents.map((event) => String(event.id)))].sort(),
+      })),
+      candidateStateValidity: selected.map((seed, index) => ({
+        proposalHash: candidates[index].proposalHash,
+        state: validityByUnit.get(seed.unit),
+        clusterKind: seed.unit.clusterKind,
+        sourceSequences: [...new Set(seed.unit.evidenceEvents.map((event) => sourceSequence(event)).filter((value): value is number => value !== null))].sort((left, right) => left - right),
+      })),
       selectedFinalThirdStartSequence: finalThirdStart,
       selectedTailEvidenceDisposition,
       constructionStoppedBecause: selected.length >= MAX_MATURE_FINDINGS

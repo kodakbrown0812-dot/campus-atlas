@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "phase": "stopped_at_first_downstream_failure_after_relationship_state_repair",
+  "repairBoundary": {
+    "candidateConstructionVersion": "slice3-mature-relationships-v4",
+    "discoveryVersion": "slice3-mature-coverage-v1",
+    "discoveryIdentitiesPreserved": true,
+    "selectedSourceSequences": [
+      32,
+      35,
+      42,
+      49,
+      61,
+      78,
+      83,
+      88,
+      89,
+      93,
+      97,
+      102,
+      103,
+      104,
+      105,
+      109,
+      110,
+      113,
+      115,
+      116,
+      117
+    ],
+    "eventsConsidered": 117,
+    "eventsSelected": 21,
+    "candidateCeiling": 12,
+    "candidateCount": 8,
+    "candidateReuse": {
+      "reusedEquivalent": 6,
+      "created": 2,
+      "duplicateCanonicalStorageCreatedForReusedCandidates": false
+    },
+    "authorityCreatedDuringAnalysis": false,
+    "exactLineage": {
+      "candidateCount": 8,
+      "completeEventAndMessageLinks": 8,
+      "missingLinks": 0
+    }
+  },
+  "semanticGate": {
+    "passed": true,
+    "completedPart3CriteriaRejectedAsCurrent": true,
+    "completedInspectCriteriaRejectedAsUncertainty": true,
+    "mockCompanyToRoomTransferSupersessionComplete": true,
+    "continuityFirstRationaleSupplied": true,
+    "materialOpenProofQuestionExplicit": true,
+    "currentAuthenticDirectionSupplied": true,
+    "uiFreezeSupplied": true,
+    "currentNextActionSupplied": true,
+    "stopAndPreserveConstraintSupplied": true,
+    "stateTruthAndContextDeliveryMeaningsSupplied": true,
+    "staleOnlyCandidateLeakage": 0,
+    "irrelevantChatterPromoted": 0
+  },
+  "governance": {
+    "reached": true,
+    "reviewedCandidates": 8,
+    "use": 8,
+    "consider": 0,
+    "exclude": 0,
+    "transferStageAfterReview": "ready_for_steward",
+    "reviewItemsRemaining": 0,
+    "governanceEventsCreated": 8,
+    "mechanismsAfterReview": 3
+  },
+  "steward": {
+    "reached": true,
+    "request": {
+      "literalTaskIdentity": "fixtures/authentic/runs/run-001/protocol.json#literalTask",
+      "requestedOutputIdentity": "fixtures/authentic/runs/run-001/protocol.json#requestedOutput",
+      "caseScopeSupplied": true,
+      "tokenBudget": 800
+    },
+    "expected": {
+      "need": "full",
+      "status": "compiled",
+      "packetCreated": true,
+      "receiptCreated": true
+    },
+    "actual": {
+      "httpStatus": 409,
+      "need": "full",
+      "reasonCodes": [
+        "explicit_full_room_transfer"
+      ],
+      "status": "clarification_required",
+      "interpretiveAmbiguity": true,
+      "materialAmbiguity": true,
+      "outcomeEquivalent": false,
+      "primaryRoadway": null,
+      "roadwayCandidates": [
+        "Margin / Run-Line Value",
+        "Outcome / Postmortem",
+        "Broad Lock-Finding"
+      ],
+      "packetCreated": false,
+      "receiptCreated": false,
+      "providerCallPerformed": false,
+      "authorityChanged": false
+    }
+  },
+  "firstGenuineFailure": {
+    "classification": "irrelevant_generic_roadway_ambiguity_blocks_authentic_full_context_delivery",
+    "boundary": "Context Delivery roadway selection",
+    "expected": "The frozen authentic Full request should continue through the existing server-authored packet path while generic Roadway and Blueprint scaffolding remains visible for scoring.",
+    "actual": "Three sports-derived roadway candidates were treated as materially nonequivalent, so Steward stopped for clarification before compiling any context.",
+    "downstreamRepairAttempted": false,
+    "destinationRoomsReached": false
+  },
+  "canonicalCountsAtStop": {
+    "mechanisms": 3,
+    "mechanismVersions": 3,
+    "governanceEvents": 8,
+    "packets": 0,
+    "packetItems": 0,
+    "receipts": 0,
+    "transferRuns": 1
+  },
+  "frozenEvidence": {
+    "sourceSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "localPreGovernanceEvidenceSha256": "c6801343b338d01080e38375df8f462483f4d4b658b3aece1f93c8660e3795fe",
+    "localGovernanceEvidenceSha256": "7ad706fb4015bd6fc10889fff478507e95e68118f2adde8bfc1e6f6c3cff0ae8",
+    "localStewardEvidenceSha256": "fcecd67bc0469126fca6b920ab4e6784ac950e890edf96a18ceff8d844705c67",
+    "privateTranscriptCommitted": false
+  },
+  "productionChanged": false
+}
