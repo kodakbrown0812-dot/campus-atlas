@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "status": "stopped_at_next_first_genuine_failure",
+  "failurePhase": "mature_room_candidate_construction_before_governance_or_steward",
+  "failureCode": "bounded_candidate_set_saturated_by_stale_instructional_state",
+  "repairUnderTest": {
+    "previousExtractionVersion": "slice3-sparse-v1",
+    "currentExtractionVersion": "slice3-mature-coverage-v1",
+    "selectionStrategy": "mature_room_chronology_signal_coverage_v1"
+  },
+  "frozenInputs": {
+    "acceptedUiCommit": "2764bed97db4e02e8684c05b36b103620f0bb042",
+    "protocolFreezeCommit": "638627f592ec3edeff7b90cba821cf570341c554",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "structuredImportSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "baselineInputSha256": "293b54fa862de99e904e559b49e9feea18c1b20c5b879e8fef0d9a5cbc3483ef"
+  },
+  "localEvidence": {
+    "exactResumeResponseSha256": "b869144126300623062fa68b1f4a14519eb8040310af1d90b79f739d72c73a87",
+    "exactResumeResponseBytes": 726741,
+    "canonicalDatabaseSha256AtStop": "b5a81455287c6ae48e7a18949466cf606f5d55347814430a5a1c4abcac0a9140",
+    "canonicalDatabaseBytes": 2834432,
+    "canonicalDatabaseBeforeRepairSha256": "18269c7bfa9a0c8e3bd62064b22c36e6b9c6b5cc3e77e02a9ed63f4595bf9012",
+    "privacy": "The exact authentic transcript, exact resume response, and local canonical databases remain in the user's local proof workspace. Only hashes, counts, identifiers, selected sequences, and bounded diagnostic facts are committed here."
+  },
+  "identifiers": {
+    "projectId": "campus-atlas-v18-authentic",
+    "conversationId": "conversation:cb949752-1049-4637-9c35-19d7769d6d5d",
+    "caseId": "case:transfer:e492a415a31f8cb63fd6fb5b2f36",
+    "transferId": "transfer-room:c480dbbf1d71dd9b1195e03d3ef32547",
+    "checkpointId": "checkpoint:b1997f89-ba13-4750-8d47-56c9d4ff3de0"
+  },
+  "expected": {
+    "preGovernanceCoverage": "The proposed candidate set materially covers the current authentic Full Room Transfer direction, frozen UI boundary, State Truth versus Context Delivery discipline, current stopping rule, current next action, relevant correction or supersession, material constraints, and material open work, all with Exact evidence.",
+    "authorityBoundary": "Candidates remain proposed until individually reviewed and governed."
+  },
+  "actual": {
+    "sourceItemsConsidered": 117,
+    "selectedEventCount": 21,
+    "selectedSourceSequences": [32, 35, 42, 49, 61, 78, 83, 88, 89, 93, 97, 102, 103, 104, 105, 109, 110, 113, 115, 116, 117],
+    "chronologySpan": {
+      "first": 32,
+      "last": 117
+    },
+    "signalCategoriesRepresentedBySelectedEvidence": [
+      "correction",
+      "supersession",
+      "current_direction",
+      "next_action",
+      "constraint",
+      "uncertainty",
+      "shared_term",
+      "connection"
+    ],
+    "omittedEventCount": 96,
+    "candidateCount": 12,
+    "candidateCategories": {
+      "correction": 3,
+      "supersession": 3,
+      "mechanism_recognition": 3,
+      "scope_revision": 3
+    },
+    "currentAuthenticFullTransferDirectionSurfaced": false,
+    "uiFrozenNoNewUiSliceSurfaced": false,
+    "stateTruthContextDeliveryDisciplineSurfaced": true,
+    "currentProofStoppingRuleSurfaced": false,
+    "currentNextActionSurfaced": false,
+    "historicalCorrectionSurfaced": true,
+    "historicalSupersessionSurfaced": true,
+    "materialCurrentConstraintsSurfaced": false,
+    "materialUncertaintyOrOpenWorkSurfaced": false,
+    "staleOnlyCandidateLeakage": true,
+    "irrelevantChatterPromoted": false,
+    "exactLineage": {
+      "candidateFindings": 12,
+      "sourceEventLinks": 55,
+      "sourceEventLinksResolvingToImmutableMessages": 55,
+      "missingExactMessageLinks": 0,
+      "status": "complete"
+    },
+    "authorityCreatedAutomatically": false
+  },
+  "diagnosis": {
+    "eventSelection": "passed the original coverage boundary: source chronology is explicit, the first-prefix collapse is removed, the current tail is selected, and the selected evidence spans multiple continuity-signal categories.",
+    "candidateConstruction": "failed the authentic pre-governance coverage gate: the fixed twelve-candidate budget was filled by high-scoring older proof and UI instructions before the selected current-tail evidence could become proposals.",
+    "classification": "State Truth candidate construction and currentness discrimination failure after event coverage, before governance or Context Delivery.",
+    "stopReason": "Approving the surfaced set would govern stale instructional state while omitting materially current project direction and next action."
+  },
+  "canonicalCountsAtStop": {
+    "conversations": 1,
+    "conversationImports": 1,
+    "messages": 117,
+    "events": 117,
+    "cases": 1,
+    "caseEventAttachments": 117,
+    "checkpoints": 2,
+    "checkpointReasoningNodes": 28,
+    "findings": 13,
+    "findingVersions": 13,
+    "mechanisms": 0,
+    "mechanismVersions": 0,
+    "governanceEvents": 0,
+    "packets": 0,
+    "packetItems": 0,
+    "receipts": 0,
+    "transferRuns": 1
+  },
+  "executionStopped": {
+    "preGovernanceCoveragePassed": false,
+    "governancePerformed": false,
+    "stewardCalled": false,
+    "compiledContentCreated": false,
+    "destinationRoomsCreated": false,
+    "runtimeRepairOfNextFailureAttempted": false,
+    "productionChanged": false
+  },
+  "smallestLikelyNextSlice": "Repair only mature-room candidate construction so the bounded proposal set distinguishes current governing tail state from historical proof instructions and covers diverse material categories before any per-signal quota can consume the candidate budget. Keep the now-working chronological event coverage, Exact lineage, authority boundary, and all downstream Context Delivery behavior frozen."
+}

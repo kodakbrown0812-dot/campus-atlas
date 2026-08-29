@@ -1,4 +1,4 @@
-import { runCheckpoint } from "./checkpoint-service";
+import { CHECKPOINT_EXTRACTION_VERSION, runCheckpoint } from "./checkpoint-service";
 import { importConversation } from "./conversation-cases";
 import { ensureExactImportSourceEvents } from "./source-event-materialization";
 import { sha256 } from "./transcript-import";
@@ -230,7 +230,11 @@ async function reusableCheckpoint(db: D1Database, row: Row, expected: number) {
      WHERE project_id = ? AND conversation_id = ? AND case_id = ?
      ORDER BY started_at DESC, rowid DESC LIMIT 1`,
   ).bind(row.project_id, row.conversation_id, row.case_id));
-  return checkpoint && preparationVerified(checkpoint, expected) ? checkpoint : null;
+  return checkpoint
+    && checkpoint.extraction_version === CHECKPOINT_EXTRACTION_VERSION
+    && preparationVerified(checkpoint, expected)
+    ? checkpoint
+    : null;
 }
 
 async function exactSources(db: D1Database, projectId: string, eventIds: string[]) {
@@ -500,7 +504,7 @@ async function orchestrate(db: D1Database, row: Row, imported: Row) {
         caseId,
         trigger: "import_completed",
         source: "canonical_case_events",
-      }, `transfer-room:${row.id}:checkpoint`);
+      }, `transfer-room:${row.id}:checkpoint:${CHECKPOINT_EXTRACTION_VERSION}`);
       const checkpointView = result.checkpoint as Row;
       if (!checkpointView || checkpointView.status !== "complete") {
         await blockRun(db, row, String(checkpointView?.error || "Analysis did not complete safely."));

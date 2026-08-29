@@ -1301,6 +1301,126 @@ test("Transfer Room performs one exact import through review into one governed L
   assert.deepEqual(canonicalMutationCounts(DB), beforeSteward);
 });
 
+test("mature Exact room analysis preserves chronology, bounded signal coverage, atomic candidates, lineage, and replay", async () => {
+  const worker = await builtWorker("mature-room-state-truth-coverage");
+  const DB = await sqliteD1();
+  const projectId = "planning";
+  await seedCanonicalProject(worker, DB, projectId, "Planning Continuity");
+  const messages = [
+    { role: "user", text: "Exact lineage means every durable claim must preserve its source event and message because later delivery depends on that evidence." },
+    { role: "assistant", text: "Airport coffee was acceptable while waiting for the connection." },
+    { role: "user", text: "We can revisit the temporary meeting time after lunch." },
+    { role: "assistant", text: "A blue header was one visual styling idea, not a project decision." },
+    { role: "user", text: "The deployment is temporarily blocked while local authentication is checked." },
+    { role: "assistant", text: "Naming brainstorm: North Star, Archive, or Relay." },
+    { role: "user", text: "Earlier direction: build the broad dashboard next." },
+    { role: "assistant", text: "The coffee order changed, which has no bearing on project state." },
+    { role: "user", text: "Correction: do not build the broad dashboard next. The deterministic continuity proof supersedes that earlier direction." },
+    { role: "user", text: "State Truth means the governed project facts, constraints, corrections, and uncertainty that are actually authoritative now." },
+    { role: "user", text: "Context Delivery means the task-specific subset of State Truth supplied to a fresh computation." },
+    { role: "user", text: "Open question: whether every selected claim reaches the original Exact message remains unresolved until lineage is inspected." },
+    { role: "assistant", text: "The temporary deployment blocker is resolved and must not return as current." },
+    { role: "assistant", text: "Tuesday was discussed for scheduling but no longer constrains the proof." },
+    { role: "user", text: "A compact mobile layout was considered and then left outside this proof." },
+    { role: "assistant", text: "One repeated explanation of the dashboard added no new authority." },
+    { role: "user", text: "The connector idea remains an abandoned branch rather than current work." },
+    { role: "assistant", text: "This sentence is ordinary chatter with no durable project consequence." },
+    { role: "user", text: "The scoring notes can stay private until both outputs are frozen." },
+    { role: "user", text: "Current direction: run the deterministic Room Transfer continuity proof now because the primitive must be proven before scope widens." },
+    { role: "user", text: "The next action is to freeze both destination outputs before applying the fixed rubric score." },
+    { role: "user", text: "Do not begin broad connectors or a larger company trial until the deterministic transfer proof closes." },
+    { role: "assistant", text: "Authentication is now resolved; it is not a current blocker." },
+    { role: "user", text: "Continue now with the bounded transfer proof, preserve exact lineage, and stop if the packet omits a governing constraint." },
+  ];
+  const transcript = JSON.stringify({
+    messages: messages.map((message, index) => ({
+      id: `mature-message-${String(index + 1).padStart(2, "0")}`,
+      role: message.role,
+      timestamp: `2026-08-01T12:${String(index).padStart(2, "0")}:00.000Z`,
+      text: message.text,
+    })),
+  });
+  const ownerEnv = {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "mature-room-server-key",
+    CAMPUS_ATLAS_OWNER_USER_ID: "mature-room-owner",
+  };
+  async function ownerRequest(path, { method = "GET", body, key } = {}) {
+    const response = await worker.fetch(new Request(`http://localhost${path}`, {
+      method,
+      headers: {
+        "oai-authenticated-user-id": "mature-room-owner",
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...(key ? { "idempotency-key": key } : {}),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }), ownerEnv, ctx);
+    return { response, value: await response.json() };
+  }
+
+  const firstRun = await ownerRequest(`/api/v1/projects/${projectId}/transfers`, {
+    method: "POST",
+    key: "mature-room-first-run",
+    body: { title: "Mature chronology coverage", format: "json", transcript },
+  });
+  assert.equal(firstRun.response.status, 201, JSON.stringify(firstRun.value));
+  assert.equal(firstRun.value.stage, "awaiting_review");
+  assert.equal(firstRun.value.actualCounts.messages, messages.length);
+  assert.equal(firstRun.value.actualCounts.sourceEvents, messages.length);
+  assert.ok(firstRun.value.actualCounts.selected > 7);
+  assert.ok(firstRun.value.actualCounts.selected <= 21);
+  assert.ok(firstRun.value.actualCounts.durableCandidates > 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(DISTINCT ingested_at) AS count FROM events").get().count, 1);
+
+  const checkpoint = await ownerRequest(
+    `/api/v1/projects/${projectId}/checkpoints/latest?conversationId=${encodeURIComponent(firstRun.value.conversationId)}&caseId=${encodeURIComponent(firstRun.value.caseId)}`,
+  );
+  assert.equal(checkpoint.response.status, 200, JSON.stringify(checkpoint.value));
+  assert.equal(checkpoint.value.result.checkpoint.extractionVersion, "slice3-mature-coverage-v1");
+  const selection = checkpoint.value.result.checkpoint.metadata.eventSelection;
+  assert.equal(selection.strategy, "mature_room_chronology_signal_coverage_v1");
+  assert.deepEqual(selection.chronologySpan, { first: 1, last: messages.length });
+  assert.ok(selection.selectedSourceSequences.includes(1), "still-governing early constraint must remain discoverable");
+  assert.ok(selection.selectedSourceSequences.includes(9), "middle correction must be covered");
+  assert.ok(selection.selectedSourceSequences.includes(20), "recent current direction must be covered");
+  assert.ok(selection.selectedSourceSequences.includes(messages.length), "current tail must be covered");
+  assert.ok(selection.selectedSourceSequences.some((sequence) => sequence > 8 && sequence < 17));
+  assert.ok(selection.omittedCount > 0, "mature selection must remain bounded");
+  for (const category of ["correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty", "shared_term"]) {
+    assert.ok(selection.signalCategoriesRepresented.includes(category), category);
+  }
+
+  const proposals = firstRun.value.reconciliation.map((item) => item.statement);
+  assert.ok(proposals.some((statement) => /Exact lineage means/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Correction: do not build the broad dashboard next/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Current direction: run the deterministic Room Transfer/i.test(statement)));
+  assert.ok(proposals.some((statement) => /next action is to freeze both destination outputs/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Do not begin broad connectors/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Open question:.*remains unresolved/i.test(statement)));
+  assert.ok(firstRun.value.reconciliation.some((item) => item.candidateType === "supersession"));
+  assert.ok(firstRun.value.reconciliation.every((item) => item.status === "proposed"));
+  assert.ok(firstRun.value.reconciliation.every((item) => item.exactSources.length > 0));
+  assert.ok(firstRun.value.reconciliation.every((item) => item.exactSources.every((source) => source.messageIds.length > 0)));
+  assert.ok(proposals.every((statement) => !/Airport coffee|Naming brainstorm|ordinary chatter/i.test(statement)));
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 0);
+
+  const beforeReplay = canonicalMutationCounts(DB);
+  const replay = await ownerRequest(`/api/v1/projects/${projectId}/transfers`, {
+    method: "POST",
+    key: "mature-room-replay",
+    body: { title: "Same mature room", format: "json", transcript },
+  });
+  assert.equal(replay.response.status, 201, JSON.stringify(replay.value));
+  assert.equal(replay.value.id, firstRun.value.id);
+  assert.deepEqual(
+    replay.value.reconciliation.map(({ statement, candidateType, sourceEventIds }) => ({ statement, candidateType, sourceEventIds })),
+    firstRun.value.reconciliation.map(({ statement, candidateType, sourceEventIds }) => ({ statement, candidateType, sourceEventIds })),
+  );
+  assert.deepEqual(canonicalMutationCounts(DB), beforeReplay);
+});
+
 test("Transfer Room resumes after a controlled stage failure and treats sensitive proposed state as non-authoritative", async () => {
   const worker = await builtWorker("transfer-room-v01-recovery");
   const DB = await sqliteD1();

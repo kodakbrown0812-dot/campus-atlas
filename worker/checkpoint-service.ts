@@ -43,7 +43,9 @@ const FINDING_TYPES = new Set([
 ]);
 const SCOPES = new Set(["local", "project_wide", "cross_project"]);
 const MAX_SELECTED_NODES = 7;
-const EXTRACTION_VERSION = "slice3-sparse-v1";
+const MAX_MATURE_SELECTED_NODES = 21;
+const MAX_MATURE_FINDINGS = 12;
+export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -220,6 +222,57 @@ function deriveMissingState(events: Row[]) {
   return missing;
 }
 
+function eventMetadata(event: Row) {
+  return parseJson<Record<string, unknown>>(event.metadata, {});
+}
+
+function sourceMessageMetadata(event: Row) {
+  const metadata = eventMetadata(event);
+  return metadata.sourceMessage && typeof metadata.sourceMessage === "object"
+    ? metadata.sourceMessage as Row
+    : null;
+}
+
+function sourceSequence(event: Row) {
+  const sequence = Number(sourceMessageMetadata(event)?.sequence);
+  if (Number.isInteger(sequence) && sequence > 0) return sequence;
+  const encoded = String(event.id || "").match(/^event:exact-message:(\d+):/u)?.[1];
+  return encoded ? Number(encoded) : null;
+}
+
+function sourceActorType(event: Row) {
+  return String(sourceMessageMetadata(event)?.actorType || "unknown").toLowerCase();
+}
+
+function eventTypePriority(event: Row) {
+  const priority: Record<string, number> = {
+    correction: 0,
+    challenge: 1,
+    outcome: 2,
+    decision: 3,
+    constraint: 4,
+    unknown: 5,
+    source_message: 6,
+  };
+  return priority[String(event.event_type).toLowerCase()] ?? 7;
+}
+
+function chronologicalEventOrder(left: Row, right: Row) {
+  const typeDifference = eventTypePriority(left) - eventTypePriority(right);
+  if (typeDifference) return typeDifference;
+  const leftSequence = sourceSequence(left);
+  const rightSequence = sourceSequence(right);
+  if (leftSequence !== null && rightSequence !== null && leftSequence !== rightSequence) {
+    return leftSequence - rightSequence;
+  }
+  const leftObserved = Date.parse(String(left.observed_at || left.ingested_at || ""));
+  const rightObserved = Date.parse(String(right.observed_at || right.ingested_at || ""));
+  if (Number.isFinite(leftObserved) && Number.isFinite(rightObserved) && leftObserved !== rightObserved) {
+    return leftObserved - rightObserved;
+  }
+  return String(left.id).localeCompare(String(right.id));
+}
+
 async function caseEvents(
   db: D1Database,
   projectId: string,
@@ -249,6 +302,7 @@ async function caseEvents(
        e.ingested_at DESC,
        e.id ASC`,
   ).bind(projectId, conversationId, caseId, caseId));
+  events.sort(chronologicalEventOrder);
   if (requestedEventIds.length === 0) return events;
   const requested = new Set(requestedEventIds);
   const selected = events.filter((event) => requested.has(String(event.id)));
@@ -306,7 +360,305 @@ function related(primary: Row, candidate: Row) {
   return overlap >= 3;
 }
 
-async function serverFindingCandidates(selectedEvents: Row[]): Promise<FindingCandidate[]> {
+type ContinuitySignal =
+  | "correction"
+  | "supersession"
+  | "constraint"
+  | "current_direction"
+  | "next_action"
+  | "uncertainty"
+  | "shared_term"
+  | "connection";
+
+const CONTINUITY_SIGNAL_ORDER: ContinuitySignal[] = [
+  "correction",
+  "supersession",
+  "current_direction",
+  "next_action",
+  "constraint",
+  "uncertainty",
+  "shared_term",
+  "connection",
+];
+
+function continuitySignals(value: string): ContinuitySignal[] {
+  const signals: ContinuitySignal[] = [];
+  if (/\b(?:correction|corrected|incorrect|misunderstood|instead|rather than|not the right|no longer applies)\b/i.test(value)) {
+    signals.push("correction");
+  }
+  if (/\b(?:supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|previously|earlier (?:plan|decision|direction)|historical rather than current|no longer (?:current|governing))\b/i.test(value)) {
+    signals.push("supersession");
+  }
+  if (/\b(?:must(?: not)?|do not|don't|never|avoid|preserve|required|requires|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/i.test(value)) {
+    signals.push("constraint");
+  }
+  if (/\b(?:current (?:direction|plan|work|state|objective|phase|surface)|is now|are now|begins now|prioriti[sz]e|proceed with|the next task is)\b/i.test(value)) {
+    signals.push("current_direction");
+  }
+  if (/\b(?:next action|next step|do next|build next|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after)\b/i.test(value)) {
+    signals.push("next_action");
+  }
+  if (/\b(?:uncertain|uncertainty|unresolved|open question|open loop|unknown|missing state|not yet|provisional|pending evidence|remains to be)\b/i.test(value)) {
+    signals.push("uncertainty");
+  }
+  if (/^[A-Z][A-Za-z0-9 /+_-]{2,48}\s+(?:means|refers to|answers|is defined as)\b/m.test(value)
+    || /\b(?:we call this|the term .{1,48} means|local meaning|shared term)\b/i.test(value)) {
+    signals.push("shared_term");
+  }
+  if (/\b(?:because|therefore|so that|depends on|affects|changes how|materially alters|in order to|the reason)\b/i.test(value)) {
+    signals.push("connection");
+  }
+  return signals;
+}
+
+function cleanAtomicUnit(value: string) {
+  return value
+    .trim()
+    .replace(/^#{1,6}\s+/u, "")
+    .replace(/^(?:[-*+] |\d+[.)] )/u, "")
+    .trim();
+}
+
+function atomicUnits(event: Row) {
+  const raw = eventStatement(event).replace(/\r\n?/gu, "\n");
+  const paragraphs = raw.split(/\n\s*\n/gu).map((value) => value.trim()).filter(Boolean);
+  const grouped: string[] = [];
+  for (let index = 0; index < paragraphs.length; index += 1) {
+    let value = paragraphs[index];
+    if (value.endsWith(":")) {
+      while (index + 1 < paragraphs.length
+        && /^(?:[-*+] |\d+[.)] )/u.test(paragraphs[index + 1])
+        && `${value}\n${paragraphs[index + 1]}`.length <= 700) {
+        index += 1;
+        value = `${value}\n${paragraphs[index]}`;
+      }
+    }
+    grouped.push(value);
+  }
+
+  const units: string[] = [];
+  for (const block of grouped) {
+    const cleanedBlock = cleanAtomicUnit(block);
+    if (cleanedBlock.length <= 700) {
+      units.push(cleanedBlock);
+      continue;
+    }
+    const lines = block.split(/\n+/gu).map(cleanAtomicUnit).filter(Boolean);
+    for (const line of lines) {
+      if (line.length <= 700) {
+        units.push(line);
+        continue;
+      }
+      units.push(...line.split(/(?<=[.!?])\s+/gu).map(cleanAtomicUnit).filter(Boolean));
+    }
+  }
+  return units.filter((value) => value.length >= 24 && value.length <= 700);
+}
+
+type MatureUnit = {
+  event: Row;
+  statement: string;
+  sequence: number;
+  signals: ContinuitySignal[];
+  score: number;
+};
+
+function matureUnitScore(event: Row, statement: string, signals: ContinuitySignal[], maximumSequence: number) {
+  const weights: Record<ContinuitySignal, number> = {
+    correction: 13,
+    supersession: 13,
+    constraint: 9,
+    current_direction: 11,
+    next_action: 11,
+    uncertainty: 7,
+    shared_term: 6,
+    connection: 4,
+  };
+  const sequence = sourceSequence(event) || 0;
+  const recency = maximumSequence > 0 ? Math.floor((sequence / maximumSequence) * 8) : 0;
+  const actor = sourceActorType(event) === "user" ? 5 : sourceActorType(event) === "assistant" ? 1 : 0;
+  const transientPenalty = /\b(?:coffee|airport|wifi|screenshot|scheduling|styling|naming idea|i(?:’|')m (?:checking|running|waiting|capturing))\b/i.test(statement) ? 9 : 0;
+  return signals.reduce((total, signal) => total + weights[signal], 0) + recency + actor - transientPenalty;
+}
+
+function matureUnits(events: Row[]) {
+  const maximumSequence = Math.max(0, ...events.map((event) => sourceSequence(event) || 0));
+  return events.flatMap((event) => atomicUnits(event).flatMap((statement) => {
+    const signals = continuitySignals(statement);
+    if (!signals.length) return [];
+    return [{
+      event,
+      statement,
+      sequence: sourceSequence(event) || 0,
+      signals,
+      score: matureUnitScore(event, statement, signals, maximumSequence),
+    } satisfies MatureUnit];
+  }));
+}
+
+function compareMatureUnits(left: MatureUnit, right: MatureUnit) {
+  return right.score - left.score
+    || right.signals.length - left.signals.length
+    || right.sequence - left.sequence
+    || left.statement.localeCompare(right.statement)
+    || String(left.event.id).localeCompare(String(right.event.id));
+}
+
+type EventSelection = {
+  events: Row[];
+  mature: boolean;
+  metadata: Record<string, unknown>;
+};
+
+function selectEventsForAnalysis(events: Row[]): EventSelection {
+  const sourceEvents = events.filter((event) => String(event.event_type).toLowerCase() === "source_message" && sourceSequence(event) !== null);
+  if (sourceEvents.length <= MAX_SELECTED_NODES) {
+    const selected = events.slice(0, MAX_SELECTED_NODES);
+    return {
+      events: selected,
+      mature: false,
+      metadata: {
+        strategy: "small_room_sparse_v1",
+        totalEvents: events.length,
+        selectedSourceSequences: selected.flatMap((event) => sourceSequence(event) ?? []),
+        omittedCount: Math.max(0, events.length - selected.length),
+        selectionStoppedBecause: `The small-room bound of ${MAX_SELECTED_NODES} reasoning nodes was reached or all events were selected.`,
+      },
+    };
+  }
+
+  const units = matureUnits(sourceEvents);
+  const eventUnits = new Map<string, MatureUnit[]>();
+  for (const unit of units) {
+    const id = String(unit.event.id);
+    eventUnits.set(id, [...(eventUnits.get(id) || []), unit]);
+  }
+  const rankedEvents = sourceEvents.map((event) => {
+    const values = eventUnits.get(String(event.id)) || [];
+    return {
+      event,
+      sequence: sourceSequence(event) || 0,
+      score: values.length ? Math.max(...values.map((value) => value.score)) : -1,
+      signals: new Set(values.flatMap((value) => value.signals)),
+    };
+  }).sort((left, right) => right.score - left.score
+    || right.signals.size - left.signals.size
+    || right.sequence - left.sequence
+    || String(left.event.id).localeCompare(String(right.event.id)));
+
+  const selected = new Map<string, Row>();
+  const include = (event: Row | undefined) => {
+    if (event) selected.set(String(event.id), event);
+  };
+  const maximumSequence = Math.max(...rankedEvents.map(({ sequence }) => sequence));
+  for (const [start, end] of [[1, Math.ceil(maximumSequence / 3)], [Math.ceil(maximumSequence / 3) + 1, Math.ceil(maximumSequence * 2 / 3)], [Math.ceil(maximumSequence * 2 / 3) + 1, maximumSequence]]) {
+    include(rankedEvents.find(({ sequence }) => sequence >= start && sequence <= end)?.event);
+  }
+  for (const entry of [...rankedEvents].sort((left, right) => right.sequence - left.sequence).slice(0, 3)) include(entry.event);
+  for (const signal of CONTINUITY_SIGNAL_ORDER) {
+    include(rankedEvents.find(({ signals }) => signals.has(signal))?.event);
+  }
+  for (const entry of rankedEvents) {
+    if (selected.size >= MAX_MATURE_SELECTED_NODES) break;
+    if (entry.score >= 0) include(entry.event);
+  }
+  for (const event of events.filter((candidate) => String(candidate.event_type).toLowerCase() !== "source_message")) {
+    if (selected.size >= MAX_MATURE_SELECTED_NODES) break;
+    include(event);
+  }
+
+  const bounded = [...selected.values()]
+    .sort(chronologicalEventOrder)
+    .slice(0, MAX_MATURE_SELECTED_NODES);
+  const selectedSequences = bounded.flatMap((event) => sourceSequence(event) ?? []);
+  const categories = [...new Set(bounded.flatMap((event) =>
+    (eventUnits.get(String(event.id)) || []).flatMap((unit) => unit.signals),
+  ))].sort((left, right) => CONTINUITY_SIGNAL_ORDER.indexOf(left) - CONTINUITY_SIGNAL_ORDER.indexOf(right));
+  return {
+    events: bounded,
+    mature: true,
+    metadata: {
+      strategy: "mature_room_chronology_signal_coverage_v1",
+      totalEvents: events.length,
+      totalSourceMessageEvents: sourceEvents.length,
+      selectedSourceSequences: selectedSequences,
+      chronologySpan: selectedSequences.length ? { first: Math.min(...selectedSequences), last: Math.max(...selectedSequences) } : null,
+      signalCategoriesRepresented: categories,
+      omittedCount: Math.max(0, events.length - bounded.length),
+      selectionStoppedBecause: `The deterministic mature-room bound of ${MAX_MATURE_SELECTED_NODES} reasoning nodes was reached after chronology thirds, current tail, continuity-signal categories, and ranked fill were covered.`,
+    },
+  };
+}
+
+function matureFindingType(signals: ContinuitySignal[]) {
+  if (signals.includes("supersession")) return "supersession";
+  if (signals.includes("correction")) return "correction";
+  if (signals.includes("constraint")) return "scope_revision";
+  return "mechanism_recognition";
+}
+
+async function matureFindingCandidates(selectedEvents: Row[]): Promise<FindingCandidate[]> {
+  const units = matureUnits(selectedEvents).sort(compareMatureUnits);
+  const selected: MatureUnit[] = [];
+  const seen = new Set<string>();
+  const quotas: Record<ContinuitySignal, number> = {
+    correction: 2,
+    supersession: 2,
+    current_direction: 2,
+    next_action: 2,
+    constraint: 4,
+    uncertainty: 1,
+    shared_term: 2,
+    connection: 1,
+  };
+  for (const signal of CONTINUITY_SIGNAL_ORDER) {
+    for (const unit of units) {
+      if (selected.length >= MAX_MATURE_FINDINGS || quotas[signal] <= 0) break;
+      const normalized = [...normalizedTerms(unit.statement)].sort().join(" ");
+      if (!unit.signals.includes(signal) || seen.has(normalized)) continue;
+      selected.push(unit);
+      seen.add(normalized);
+      quotas[signal] -= 1;
+    }
+  }
+  for (const unit of units) {
+    if (selected.length >= MAX_MATURE_FINDINGS) break;
+    const normalized = [...normalizedTerms(unit.statement)].sort().join(" ");
+    if (seen.has(normalized)) continue;
+    selected.push(unit);
+    seen.add(normalized);
+  }
+
+  return Promise.all(selected.map(async (unit) => {
+    const relatedEvents = selectedEvents
+      .filter((event) => event === unit.event || related(unit.event, event))
+      .sort(chronologicalEventOrder)
+      .slice(0, 4);
+    const sourceEventIds = relatedEvents.map((event) => String(event.id));
+    const primaryId = String(unit.event.id);
+    if (!sourceEventIds.includes(primaryId)) sourceEventIds.push(primaryId);
+    const category = CONTINUITY_SIGNAL_ORDER.find((signal) => unit.signals.includes(signal)) || "connection";
+    const candidate = {
+      findingType: matureFindingType(unit.signals),
+      sourceEventIds,
+      proposalStatement: unit.statement,
+      proposedScope: "local",
+      conditions: [],
+      exclusions: [],
+      supportingEvidence: sourceEventIds.filter((id) => id !== primaryId),
+      counterevidence: [],
+      uncertainty: unit.signals.includes("uncertainty")
+        ? "The Exact source explicitly marks this project state as unresolved or uncertain."
+        : null,
+      reasonForSurfacing: `Exact source sequence ${unit.sequence} contains a material ${category.replaceAll("_", " ")} continuity signal selected by bounded mature-room coverage.`,
+      expectedRetrievalEffect: "No retrieval change unless Cody governs this atomic project-state proposal.",
+    };
+    return { ...candidate, proposalHash: await sha256(JSON.stringify(candidate)) };
+  }));
+}
+
+async function serverFindingCandidates(selectedEvents: Row[], mature: boolean): Promise<FindingCandidate[]> {
+  if (mature) return matureFindingCandidates(selectedEvents);
   const primary = selectedEvents.find((event) => {
     const type = String(event.event_type).toLowerCase();
     const statement = eventStatement(event);
@@ -380,7 +732,7 @@ async function preparationStoppedCheckpoint(
     startedAt,
     completedAt,
     status,
-    EXTRACTION_VERSION,
+    CHECKPOINT_EXTRACTION_VERSION,
     json(["source_events"]),
     error,
     idempotencyKey,
@@ -536,13 +888,14 @@ async function analyzeCheckpoint(
   const allowedEventIds = new Set(events.map((event) => String(event.id)));
   const startedAt = now();
   const checkpointId = canonicalId("checkpoint");
-  const selectedEvents = events.slice(0, MAX_SELECTED_NODES);
+  const selection = selectEventsForAnalysis(events);
+  const selectedEvents = selection.events;
   const rawFindings = source === SERVER_FINDING_SOURCE
     ? null
     : body.findingCandidates === undefined ? [] : body.findingCandidates;
   if (rawFindings !== null && !Array.isArray(rawFindings)) throw new Error("Finding candidates must be an array.");
   const findingCandidates = rawFindings === null
-    ? await serverFindingCandidates(selectedEvents)
+    ? await serverFindingCandidates(selectedEvents, selection.mature)
     : await Promise.all(rawFindings.map((candidate) => validateFindingCandidate(candidate, allowedEventIds)));
   const statements: D1PreparedStatement[] = [];
   const selectedNodeIds: string[] = [];
@@ -699,7 +1052,7 @@ async function analyzeCheckpoint(
     source,
     startedAt,
     completedAt,
-    EXTRACTION_VERSION,
+    CHECKPOINT_EXTRACTION_VERSION,
     events.length,
     selectedEvents.length,
     Math.max(0, events.length - selectedEvents.length),
@@ -715,6 +1068,7 @@ async function analyzeCheckpoint(
       findingCount: createdFindingCount,
       suppressedFindingCount,
       selectedNodeIds,
+      eventSelection: selection.metadata,
       authorityCreated: false,
       sourceEventPreparation,
     }),
