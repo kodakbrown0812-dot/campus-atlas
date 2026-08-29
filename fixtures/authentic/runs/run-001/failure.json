@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "status": "stopped_at_first_genuine_failure",
+  "failurePhase": "transfer_room_analysis_before_governance_or_steward",
+  "failureCode": "mature_room_analysis_selected_stale_prefix_and_one_candidate",
+  "frozenInputs": {
+    "acceptedUiCommit": "2764bed97db4e02e8684c05b36b103620f0bb042",
+    "protocolFreezeCommit": "638627f592ec3edeff7b90cba821cf570341c554",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "structuredImportSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "baselineInputSha256": "293b54fa862de99e904e559b49e9feea18c1b20c5b879e8fef0d9a5cbc3483ef",
+    "transferRequestBodySha256": "1421b82576b342c3aeac412c6f837a9d7c16dec4355cbde4ea6ce603702c2b14"
+  },
+  "sourceSize": {
+    "messages": 117,
+    "userMessages": 21,
+    "assistantMessages": 93,
+    "attachments": 3,
+    "utf8Bytes": 188534,
+    "characters": 187532,
+    "whitespaceWords": 25423,
+    "estimatedTokens": 46883
+  },
+  "localEvidence": {
+    "exactTransferResponseSha256": "a28c919d6e6be1e601659dcaac981581dc322c58660007a85c32d03f85f43e5a",
+    "exactTransferResponseBytes": 29671,
+    "canonicalDatabaseSha256AtStop": "18269c7bfa9a0c8e3bd62064b22c36e6b9c6b5cc3e77e02a9ed63f4595bf9012",
+    "canonicalDatabaseBytes": 1654784,
+    "privacy": "The exact authentic transcript, exact transfer response, and stopped local canonical database remain in the user's local proof workspace. Only hashes, counts, identifiers, and bounded diagnostic facts are committed here."
+  },
+  "identifiers": {
+    "projectId": "campus-atlas-v18-authentic",
+    "conversationId": "conversation:cb949752-1049-4637-9c35-19d7769d6d5d",
+    "caseId": "case:transfer:e492a415a31f8cb63fd6fb5b2f36",
+    "transferId": "transfer-room:c480dbbf1d71dd9b1195e03d3ef32547",
+    "checkpointId": "checkpoint:7a5e4d6f-81db-470e-9067-a38d836b9eaa",
+    "findingId": "finding:0ab8591f-a584-41f0-a392-71adb0dc1c47"
+  },
+  "expected": {
+    "transferRoom": "Preserve the complete Exact room and identify the multiple material current truths, corrections, supersessions, constraints, open work, uncertainty, shared meanings, and next action needed for the frozen Full continuation task.",
+    "review": "Human review should receive evidence-backed, independently governable proposals representing current project state without requiring the reviewer to rewrite stale evidence into a new truth.",
+    "stewardGate": "Only after sufficient governed State Truth exists should Steward compile task-specific Full context."
+  },
+  "actual": {
+    "transferStatus": 201,
+    "stage": "awaiting_review",
+    "messagesPreserved": 117,
+    "exactEventsMaterialized": 117,
+    "eventsConsidered": 117,
+    "reasoningNodesSelected": 7,
+    "durableCandidates": 1,
+    "reviewItems": 1,
+    "selectedMessageSequences": [1, 2, 3, 4, 5, 6, 7],
+    "selectedWindowObservedAt": {
+      "first": "2026-08-23T04:04:56.118Z",
+      "last": "2026-08-23T04:08:10.013Z"
+    },
+    "allSelectedEventsShareIngestedAt": "2026-08-29T20:06:09.342Z",
+    "onlyProposal": "The code now carries only the canonical case identifier through the existing memory-only project provider; no task text or case ID is added to the URL. The transfer API exposes its already-stored case, Steward initializes the visible Advanced selector from it, and the server still performs project/case validation. I’ve also converted the focused proof to a genuinely case-local mechanism so the regression cannot pass by accidentally widening authority.",
+    "proposalContext": "This is a historical Part 2 case-handoff implementation detail from the room's opening minutes, not the current project direction or next action.",
+    "currentSourceSequence117Selected": false,
+    "currentAuthenticProofDirectionSuppliedForReview": false,
+    "uiFreezeSuppliedForReview": false,
+    "stateTruthContextDeliveryDisciplineSuppliedForReview": false,
+    "currentStoppingRuleSuppliedForReview": false,
+    "currentNextActionSuppliedForReview": false
+  },
+  "diagnosis": {
+    "exactImport": "passed: every frozen source message materialized into one immutable message and one canonical Exact event",
+    "selection": "failed for mature-room continuity: the sparse checkpoint selected only source sequences 1 through 7",
+    "ordering": "all imported source events shared one ingestion timestamp, so the deterministic tie-break preserved the earliest source prefix rather than current recency",
+    "candidateConstruction": "the server-owned analyzer returned one candidate from that seven-event window",
+    "authorityBoundary": "the one proposal was not governed because approving it would not establish the current project State Truth required by the frozen task",
+    "classification": "State Truth construction / analysis coverage failure, before Context Delivery ranking or packet compilation"
+  },
+  "canonicalCountsAtStop": {
+    "projects": 1,
+    "conversations": 1,
+    "conversationImports": 1,
+    "messages": 117,
+    "events": 117,
+    "cases": 1,
+    "caseEventAttachments": 117,
+    "reasoningNodes": 7,
+    "reasoningNodeVersions": 7,
+    "checkpoints": 1,
+    "checkpointReasoningNodes": 7,
+    "findings": 1,
+    "findingVersions": 1,
+    "mechanisms": 0,
+    "mechanismVersions": 0,
+    "governanceEvents": 0,
+    "packets": 0,
+    "packetItems": 0,
+    "receipts": 0,
+    "transferRuns": 1
+  },
+  "executionStopped": {
+    "governancePerformed": false,
+    "stewardCalled": false,
+    "compiledContentCreated": false,
+    "baselineDestinationCreated": false,
+    "atlasDestinationCreated": false,
+    "destinationOutputsCreated": false,
+    "scoringPerformed": false,
+    "compressionCalculatedAgainstPacket": false,
+    "runtimeRepairAttempted": false,
+    "productionChanged": false
+  },
+  "scores": {
+    "baseline": null,
+    "atlas": null,
+    "reason": "The packet-preservation precondition failed before Steward. Destination behavior cannot rescue State Truth that Atlas did not construct or supply."
+  },
+  "smallestLikelyCorrectiveSlice": "Repair mature-room analysis coverage only: preserve chronological/recency semantics for Exact imports and produce multiple independently governable, evidence-linked current-state candidates beyond the first sparse prefix. Do not change Need Gate, task ranking, packet selection, compiler, UI, Roadway scaffolding, or destination protocol until that repair passes this frozen source and rubric."
+}
