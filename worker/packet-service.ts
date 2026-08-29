@@ -466,6 +466,14 @@ async function packetDetail(db: D1Database, projectId: string, packetId: string)
   };
 }
 
+function packetRequiresRoadwayClarification(interpretation: TaskInterpretation) {
+  const zeroApplicableRoadways = !interpretation.primaryRoadway
+    && !interpretation.materialAmbiguity
+    && interpretation.applicability.applicableRoadwayIds.length === 0;
+  return interpretation.clarificationRequired
+    || (!interpretation.primaryRoadway && !zeroApplicableRoadways);
+}
+
 export async function compilePacket(
   db: D1Database,
   projectId: string,
@@ -505,7 +513,7 @@ export async function compilePacket(
       },
     }
     : interpretation;
-  if (interpretation.clarificationRequired || !interpretation.primaryRoadway) {
+  if (packetRequiresRoadwayClarification(interpretation)) {
     return {
       status: "clarification_required",
       interpretation,
@@ -584,8 +592,8 @@ export async function compilePacket(
       interpretation.literalRequest,
       interpretation.requiredReasoningMechanism,
       json(storedInterpretation),
-      interpretation.primaryRoadway.id,
-      interpretation.primaryRoadway.versionId,
+      interpretation.primaryRoadway!.id,
+      interpretation.primaryRoadway!.versionId,
       json(interpretation.supportingModules),
       budget,
       rendered.finalTokenCount,
@@ -672,7 +680,7 @@ export async function previewPacketCandidates(
   }
   const interpretation = options.interpretation
     || await interpretTask(db, projectId, body, options.interpretOptions);
-  if (interpretation.clarificationRequired || !interpretation.primaryRoadway) {
+  if (packetRequiresRoadwayClarification(interpretation)) {
     return {
       status: "clarification_required",
       interpretation,

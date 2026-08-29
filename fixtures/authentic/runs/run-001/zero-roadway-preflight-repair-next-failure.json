@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "phase": "stopped_at_first_compiler_failure_after_zero_roadway_preflight_repair",
+  "repairBoundary": {
+    "invariant": "Full requires sufficient governed State Truth, not the existence of an applicable Roadway.",
+    "zeroApplicableRoadwaysNoLongerRequireClarification": true,
+    "zeroApplicableRoadwaysMayEnterPacketPreview": true,
+    "zeroApplicableRoadwaysMayEnterPacketCompilation": true,
+    "oneApplicableRoadwayBehaviorPreserved": true,
+    "multipleConflictingApplicableRoadwaysStillRequireClarification": true,
+    "packetRenderingChanged": false,
+    "packetStorageChanged": false
+  },
+  "stateTruthPreservation": {
+    "discoveryVersion": "slice3-mature-coverage-v1",
+    "candidateConstructionVersion": "slice3-mature-relationships-v4",
+    "discoveryIdentitiesPreserved": true,
+    "selectedSourceSequences": [
+      32,
+      35,
+      42,
+      49,
+      61,
+      78,
+      83,
+      88,
+      89,
+      93,
+      97,
+      102,
+      103,
+      104,
+      105,
+      109,
+      110,
+      113,
+      115,
+      116,
+      117
+    ],
+    "eventsConsidered": 117,
+    "eventsSelected": 21,
+    "candidateCount": 8,
+    "candidateReuse": {
+      "reusedEquivalent": 6,
+      "created": 2,
+      "duplicateCanonicalStorageCreatedForReusedCandidates": false
+    },
+    "exactLineageComplete": true,
+    "authorityCreatedDuringAnalysis": false,
+    "semanticGatePreserved": true
+  },
+  "governance": {
+    "reached": true,
+    "reviewedCandidates": 8,
+    "use": 8,
+    "consider": 0,
+    "exclude": 0,
+    "transferStageAfterReview": "ready_for_steward",
+    "reviewItemsRemaining": 0,
+    "governanceEventsCreated": 8,
+    "mechanismsAfterReview": 3
+  },
+  "roadwayApplicability": {
+    "primaryRoadway": null,
+    "materialAmbiguity": false,
+    "clarificationRequired": false,
+    "applicableRoadwayCount": 0,
+    "candidateRoadwayCount": 0,
+    "excludedRoadwayCount": 3,
+    "governedRelationshipEvidenceUsed": false,
+    "unchangedFromAcceptedRoadwayRepair": true
+  },
+  "steward": {
+    "reached": true,
+    "request": {
+      "literalTaskIdentity": "fixtures/authentic/runs/run-001/protocol.json#literalTask",
+      "requestedOutputIdentity": "fixtures/authentic/runs/run-001/protocol.json#requestedOutput",
+      "caseScopeSupplied": true,
+      "tokenBudget": 800
+    },
+    "need": "full",
+    "reasonCodes": [
+      "explicit_full_room_transfer"
+    ],
+    "actual": {
+      "httpStatus": 400,
+      "error": "Cannot read properties of null (reading 'requiredChecks')",
+      "packetCreated": false,
+      "receiptCreated": false,
+      "providerCallPerformed": false,
+      "authorityChanged": false
+    }
+  },
+  "firstGenuineFailure": {
+    "classification": "packet_renderer_assumes_every_full_packet_has_a_primary_roadway",
+    "boundary": "Context Delivery packet rendering",
+    "expected": "After preflight accepts a non-ambiguous zero-Roadway Full request, the existing packet compiler should render governed State Truth without Roadway-specific scaffolding.",
+    "actual": "The repaired gate passed the request into the unchanged compiler, whose Roadway-check construction dereferenced primaryRoadway.requiredChecks and failed before candidate rendering or packet creation.",
+    "downstreamRepairAttempted": false,
+    "packetCompilerChanged": false,
+    "destinationRoomsReached": false
+  },
+  "canonicalCountsAtStop": {
+    "mechanisms": 3,
+    "mechanismVersions": 3,
+    "governanceEvents": 8,
+    "packets": 0,
+    "packetItems": 0,
+    "receipts": 0,
+    "transferRuns": 1
+  },
+  "frozenEvidence": {
+    "sourceSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "localPreGovernanceEvidenceSha256": "5a22d38d846a1593faa13e845a07e5b0ae51464023497b32a560aa91ae836158",
+    "localGovernanceEvidenceSha256": "b13841ad04bd63c8cac4cbb7d530e1ba29916b8cbb7fa4847603bec0dc178db1",
+    "localRoadwayDiagnosticSha256": "a172e5fb0e4af70da99010162356190e2ef8ed9f0a29cd4da20b8bd15afabac1",
+    "localStewardEvidenceSha256": "84827548227a4df964cc765ae8c0464a66a3211489017c5609737cbf6d7c293b",
+    "privateTranscriptCommitted": false
+  },
+  "productionChanged": false
+}

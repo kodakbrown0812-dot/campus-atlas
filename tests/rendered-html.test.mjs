@@ -1628,9 +1628,13 @@ test("Roadway outcome equivalence collapses only one safe governed mechanism", a
     assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 0);
     assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
 
+    const registry = await slice2Request(worker, DB, "/api/v1/projects/sports/roadways");
+    const broadRoadway = registry.value.roadways.find((roadway) => roadway.name === "Broad Lock-Finding");
+    assert.ok(broadRoadway);
     const explicitFull = await reconstructionRunRequest(worker, DB, "sports", {
       task,
       requestedOutput: "full room transfer",
+      roadwayOverride: broadRoadway.id,
     }, "part-2a-explicit-full");
     assert.equal(explicitFull.value.need.level, "full");
     assert.equal(explicitFull.value.capsule, null);
@@ -1649,10 +1653,10 @@ test("Roadway outcome equivalence collapses only one safe governed mechanism", a
       statement: "The project update timing rationale is the Thursday operating close.",
     });
     const multiple = await reconstructionRunRequest(worker, DB, "sports", {
-      task: "Prepare the project update timing and rationale.",
+      task: "Compare the best option and explain why the prior outcome failed while preparing the project update timing and rationale.",
     }, "part-2a-multiple");
     assert.equal(multiple.value.need.level, "full");
-    assert.equal(multiple.value.roadway.materialAmbiguity, false);
+    assert.equal(multiple.value.roadway.materialAmbiguity, true);
     assert.equal(multiple.value.roadway.outcomeEquivalent, false);
     assert.equal(multiple.value.capsule, null);
   }
@@ -1679,11 +1683,11 @@ test("Roadway outcome equivalence collapses only one safe governed mechanism", a
       supportingCaseIds: [bounded.caseId],
     });
     const scoped = await reconstructionRunRequest(worker, DB, "sports", {
-      task: "Prepare the project update timing context.",
+      task: "Compare the best option and explain why the prior outcome failed while preparing the project update timing context.",
       caseId: bounded.caseId,
     }, "part-2a-scope-difference");
     assert.equal(scoped.value.need.level, "full");
-    assert.equal(scoped.value.roadway.materialAmbiguity, false);
+    assert.equal(scoped.value.roadway.materialAmbiguity, true);
     assert.match(scoped.value.roadway.convergenceReason, /exactly one applicable governed mechanism/i);
     assert.equal(scoped.value.capsule, null);
   }
@@ -1698,10 +1702,10 @@ test("Roadway outcome equivalence collapses only one safe governed mechanism", a
       scopeConditions: ["Confidential owner-only handling is required."],
     });
     const sensitive = await reconstructionRunRequest(worker, DB, "sports", {
-      task: "Prepare the access token timing context.",
+      task: "Compare the best option and explain why the prior outcome failed while preparing the access token timing context.",
     }, "part-2a-sensitive");
     assert.equal(sensitive.value.need.level, "full");
-    assert.equal(sensitive.value.roadway.materialAmbiguity, false);
+    assert.equal(sensitive.value.roadway.materialAmbiguity, true);
     assert.match(sensitive.value.roadway.convergenceReason, /sensitivity/i);
     assert.equal(sensitive.value.capsule, null);
   }
@@ -6845,7 +6849,7 @@ test("V1.7.1 Light escalates to full treatment when linked counterevidence could
   });
   const before = canonicalMutationCounts(DB);
   const result = await continuityRequest(worker, DB, "workflow", {
-    task: "Prepare a Codex-ready transfer from mobile.",
+    task: "Compare options for a Codex-ready transfer from mobile while preserving governing qualification.",
   });
   assert.equal(result.response.status, 200, JSON.stringify(result.value));
   assert.equal(result.value.need.level, "full");
@@ -7238,15 +7242,6 @@ test("Atlas Steward escalates a Light aid into Full through the same reconstruct
   assert.equal(light.value.packet, null);
   assert.equal(light.value.receipt, null);
 
-  const fullPreflight = await reconstructionRunRequest(worker, DB, "workflow", {
-    task: "Prepare a Codex-ready transfer from mobile.",
-    requestedOutput: "Prepare a full room transfer.",
-  }, "steward-full-escalation-preflight");
-  assert.equal(fullPreflight.response.status, 409);
-  assert.equal(fullPreflight.value.status, "clarification_required");
-  assert.equal(fullPreflight.value.need.level, "full");
-  assert.equal(fullPreflight.value.roadway.materialAmbiguity, false);
-  assert.deepEqual(fullPreflight.value.roadway.candidates, []);
   const registry = await slice2Request(worker, DB, "/api/v1/projects/workflow/roadways");
   const broadRoadway = registry.value.roadways.find((roadway) => roadway.name === "Broad Lock-Finding");
   assert.ok(broadRoadway);

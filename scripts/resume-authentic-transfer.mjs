@@ -44,7 +44,7 @@ const DB = {
   },
 };
 const workerUrl = pathToFileURL(path.resolve("dist/server/index.js"));
-workerUrl.searchParams.set("authentic-roadway-applicability-resume", `${process.pid}-${Date.now()}`);
+workerUrl.searchParams.set("authentic-zero-roadway-preflight-resume", `${process.pid}-${Date.now()}`);
 const worker = (await import(workerUrl.href)).default;
 const ctx = { waitUntil() {}, passThroughOnException() {} };
 const env = {
@@ -52,8 +52,8 @@ const env = {
   ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
   CAMPUS_ATLAS_ACTION_KEY: "local-proof-action-key",
   CAMPUS_ATLAS_OWNER_USER_ID: "local-proof-owner",
-  CAMPUS_ATLAS_DEPLOYMENT_VERSION: "local-authentic-roadway-applicability-repair",
-  CAMPUS_ATLAS_SOURCE_COMMIT: "working-tree-authentic-roadway-applicability-repair",
+  CAMPUS_ATLAS_DEPLOYMENT_VERSION: "local-authentic-zero-roadway-preflight-repair",
+  CAMPUS_ATLAS_SOURCE_COMMIT: "working-tree-authentic-zero-roadway-preflight-repair",
 };
 const ownerHeaders = { "oai-authenticated-user-id": "local-proof-owner" };
 async function request(route, { method = "GET", idempotencyKey } = {}) {
@@ -71,7 +71,7 @@ const projectId = "campus-atlas-v18-authentic";
 const transferId = "transfer-room:c480dbbf1d71dd9b1195e03d3ef32547";
 const transfer = await request(
   `/api/v1/projects/${projectId}/transfers/${encodeURIComponent(transferId)}/resume`,
-  { method: "POST", idempotencyKey: "authentic-full-transfer-run-001-roadway-applicability-repair-resume" },
+  { method: "POST", idempotencyKey: "authentic-full-transfer-run-001-zero-roadway-preflight-repair-resume" },
 );
 const checkpoint = transfer.value?.conversationId && transfer.value?.caseId
   ? await request(`/api/v1/projects/${projectId}/checkpoints/latest?conversationId=${encodeURIComponent(transfer.value.conversationId)}&caseId=${encodeURIComponent(transfer.value.caseId)}`)
@@ -84,14 +84,14 @@ const counts = Object.fromEntries([
 const evidence = {
   schemaVersion: 1,
   runId: "authentic-full-transfer-run-001",
-  phase: "pre_governance_after_roadway_applicability_repair",
+  phase: "pre_governance_after_zero_roadway_preflight_repair",
   sourceSha256: sha256(sourceBytes),
   transfer,
   checkpoint,
   canonicalCounts: counts,
   productionChanged: false,
 };
-const evidencePath = path.join(outputDir, "transfer-result-after-roadway-applicability-repair.json");
+const evidencePath = path.join(outputDir, "transfer-result-after-zero-roadway-preflight-repair.json");
 await writeFile(evidencePath, `${JSON.stringify(evidence, null, 2)}\n`);
 process.stdout.write(`${JSON.stringify({
   runId: evidence.runId,
