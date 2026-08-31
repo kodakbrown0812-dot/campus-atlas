@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "phase": "packet_gate_passed_after_atomic_comparison_preservation_repair",
+  "diagnosis": {
+    "failureBoundary": "Full packet rendering and semantic compaction",
+    "cause": "The atomic governing classifier did not recognize comparison and baseline clauses, and it recognized only the literal preserve form rather than preservation inflections such as preserving. The proof-question mechanism therefore used ordinary character truncation and lost the comparison target that defined proof acceptance.",
+    "discoveryChanged": false,
+    "stateTruthChanged": false,
+    "governanceChanged": false,
+    "applicabilityChanged": false,
+    "packetSelectionChanged": false
+  },
+  "repair": {
+    "scope": "atomic packet-rendering preservation only",
+    "comparisonSignalsProtected": [
+      "at least as",
+      "no worse than",
+      "no less than",
+      "better than",
+      "worse than",
+      "versus",
+      "compared with or to",
+      "baseline"
+    ],
+    "additionalProtectedForms": [
+      "cannot / can't",
+      "preserve / preserves / preserved / preserving"
+    ],
+    "globalBudgetIncreased": false,
+    "compactionDisabled": false,
+    "descriptiveCompactionPreserved": true,
+    "unsafeOverflowStillFailsClosed": true
+  },
+  "frozenUpstream": {
+    "sourceItems": 117,
+    "sourceEstimatedTokens": 46883,
+    "discoveryVersion": "slice3-mature-coverage-v1",
+    "candidateConstructionVersion": "slice3-mature-relationships-v4",
+    "selectedSourceSequences": [
+      32,
+      35,
+      42,
+      49,
+      61,
+      78,
+      83,
+      88,
+      89,
+      93,
+      97,
+      102,
+      103,
+      104,
+      105,
+      109,
+      110,
+      113,
+      115,
+      116,
+      117
+    ],
+    "selectedEventIdentityEquality": true,
+    "candidateCount": 8,
+    "candidateReuse": {
+      "created": 2,
+      "reusedEquivalent": 6
+    },
+    "governedUseCandidates": 8,
+    "newAuthorityCreated": false,
+    "need": "full",
+    "applicableRoadways": 0,
+    "materialRoadwayAmbiguity": false
+  },
+  "frozenDelivery": {
+    "packetId": "packet:4e9a1940-af28-4f31-8c7c-b64d0bf5f4ed",
+    "receiptId": "receipt:a195fde4-4c6b-4c6b-a33a-1dfeac7ad5aa",
+    "tokenBudget": 800,
+    "packetEstimatedTokens": 756,
+    "sourceEstimatedTokens": 46883,
+    "atlasSourceRatio": 0.016125247957681887,
+    "sourceAtlasCompressionRatio": 62.014550264550266,
+    "percentageReduction": 98.3874752042318,
+    "absoluteEstimatedTokensSaved": 46127,
+    "utf8Bytes": 3023,
+    "characters": 3023,
+    "whitespaceWords": 369,
+    "compiledContentSha256": "d3e2f357887134121a4e5139aa483c41412517f583ed32b7bcc269b389d30ebf",
+    "packetCanonicalJsonSha256": "54dc76a8c826f02aea4dc118d9e101a5c9aa0fd1fd73fa454d3f81f9ac22b4d9",
+    "receiptCanonicalJsonSha256": "9630aa88e5778869779801ae2cbabd7f4338657cf47bc1fc3485442554619500",
+    "treatmentCounts": {
+      "Use": 7,
+      "Consider": 71,
+      "Exclude": 120
+    },
+    "governingMechanismsSupplied": 7,
+    "genericRoadwayScaffoldingPresent": false,
+    "useMechanismsWithCompleteFindingExactEventMessageLineage": 7,
+    "exactCompiledContentAndReceiptRemainLocalPrivate": true
+  },
+  "semanticPacketGate": {
+    "currentDirection": "present",
+    "exactNextAction": "present",
+    "stoppingAndNoRepairBoundary": "present",
+    "acceptedUiBoundary": "present_via_accepted_product_surface",
+    "relevantConstraints": "present",
+    "mockCompanyToRoomTransferSupersession": "present",
+    "continuityFirstRationale": "present",
+    "materialOpenOrDeferredWork": "present",
+    "completeProofAcceptanceCondition": "passed",
+    "comparisonClausePreserved": "at least as correctly as the ordinary baseline",
+    "packetCompletenessPassed": true
+  },
+  "frozenEvidence": {
+    "sourceSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "localDatabaseSha256": "94ef0989df659acdd2620639ce12324dcbc5a8f1cf2f3f4e9c4d42907322c852",
+    "localStewardEvidenceSha256": "7f0759670331e12692493507e33fc8eb63491fef5c2da4e58118e9de4427431d",
+    "privateTranscriptCommitted": false
+  },
+  "nextFrozenProofStep": {
+    "step": "genuinely fresh baseline and Atlas destination comparison under the frozen protocol",
+    "executed": false,
+    "firstDownstreamFailure": null,
+    "downstreamRepairAttempted": false
+  },
+  "productionChanged": false
+}

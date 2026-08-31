@@ -56,9 +56,11 @@ function compact(value: string, maximum = 220) {
 
 const ATOMIC_GOVERNING_SIGNALS = [
   /\b(?:before|after|until|unless|only if|only after)\b/i,
-  /\b(?:must|must not|do not|don't|never)\b/i,
+  /\b(?:must|must not|do not|don't|cannot|can't|never)\b/i,
   /\b(?:require|requires|required|requiring)\b/i,
-  /\b(?:preserve|avoid|defer|deferred|supersedes?|replaces?)\b/i,
+  /\b(?:preserv(?:e|es|ed|ing)|avoid|defer|deferred|supersedes?|replaces?)\b/i,
+  /\b(?:at least as|no worse than|no less than|better than|worse than|versus|compared? (?:with|to)|baseline)\b/i,
+  /\b(?:acceptance (?:criterion|criteria|condition)|passes? only if|succeeds? only if|stop at|stop before|stopping rule)\b/i,
   /\bif\b[\s\S]*\b(?:then|stop|use|exclude|include|fail|continue|defer|preserve)\b/i,
   /\b(?:constraints?|requirements?|guardrails?)\s*:/i,
   /\buse\b[\s\S]*\b(?:not|instead of|rather than)\b/i,

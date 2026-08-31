@@ -8077,7 +8077,9 @@ test("packet compaction preserves complete atomic governing meaning and fails sa
       temporal: "For the migration transfer proof, freeze outputs before applying the fixed score.",
       until: "Do not begin the larger migration trial until deterministic transfer proof closes.",
       negation: "Do not deploy the migration transfer branch during this proof.",
-      conditional: "The migration transfer proof must preserve this condition: if the preservation gate fails, stop before destination execution.",
+      conditional: "The migration transfer proof must preserve this condition: if the preservation gate fails, stop before repair and before destination execution.",
+      prerequisite: "The migration transfer proof has this expansion boundary: begin the larger comparison only after the deterministic transfer proof closes.",
+      comparison: "The migration transfer proof acceptance criterion is satisfied only if the fresh destination continues at least as correctly as the ordinary complete-transcript baseline.",
       supersession: "The current migration transfer pathway supersedes the historical catalog rollout as the governing direction.",
     };
     for (const [name, statement] of Object.entries(atomicStatements)) {
@@ -8096,8 +8098,8 @@ test("packet compaction preserves complete atomic governing meaning and fails sa
     });
 
     const result = await reconstructionRunRequest(worker, DB, "planning", {
-      task: "What should we build next for the migration transfer proof, what should we avoid, and what constraints govern it?",
-      requestedOutput: "Prepare a full room transfer with current direction, rationale, constraints, and the boundary before expansion.",
+      task: "What should we build next for the migration transfer proof, what should we avoid, what must perform at least as correctly as the ordinary baseline, and what only-after boundary governs the larger comparison?",
+      requestedOutput: "Prepare a full room transfer with current direction, rationale, constraints, baseline acceptance criterion, and the boundary before expansion.",
       roadwayOverride: "broad-lock-finding",
       tokenBudget: 1600,
     }, "part3e-atomic-rendering");
@@ -8117,7 +8119,10 @@ test("packet compaction preserves complete atomic governing meaning and fails sa
     assert.match(content, /Do not begin the larger migration trial until deterministic transfer proof closes/i);
     assert.doesNotMatch(content, /until…/i);
     assert.match(content, /Do not deploy the migration transfer branch/i);
-    assert.match(content, /if the preservation gate fails, stop before destination execution/i);
+    assert.match(content, /if the preservation gate fails, stop before repair and before destination execution/i);
+    assert.match(content, /begin the larger comparison only after the deterministic transfer proof closes/i);
+    assert.match(content, /continues at least as correctly as the ordinary complete-transcript baseline/i);
+    assert.doesNotMatch(content, /continues correctly(?:\s|\.|\[)/i);
     assert.match(content, /supersedes the historical catalog rollout as the governing direction/i);
     const descriptiveLine = content.split("\n").find((line) => line.includes(descriptivePrefix));
     assert.ok(descriptiveLine);
@@ -8132,7 +8137,7 @@ test("packet compaction preserves complete atomic governing meaning and fails sa
     seedSlice4Mechanism(DB, {
       id: "mechanism:part3e-atomic-overflow",
       projectId: "overflow",
-      statement: `The migration transfer proof must preserve this complete enumerated constraint before destination execution: ${"retain exact source, scope, negation, ordering, prerequisite, exception, threshold, and causal boundary; ".repeat(18)}`,
+      statement: `The migration transfer proof passes only if it performs at least as correctly as the complete-transcript baseline and preserves this complete enumerated constraint before destination execution: ${"retain exact source, scope, negation, ordering, prerequisite, exception, threshold, and causal boundary; ".repeat(18)}`,
     });
     const result = await createSlice4Packet(worker, DB, {
       projectId: "overflow",
@@ -8144,6 +8149,7 @@ test("packet compaction preserves complete atomic governing meaning and fails sa
     assert.equal(result.value.packet.status, "failed");
     assert.match(result.value.packet.compilationError, /^minimum_safe_packet_exceeds_budget:/);
     assert.match(result.value.packet.compiledContent, /Compilation stopped: minimum safe packet requires/i);
+    assert.doesNotMatch(result.value.packet.compiledContent, /at least as correctly.*…/i);
     assert.doesNotMatch(result.value.packet.compiledContent, /retain exact source.*…/i);
   }
 });
