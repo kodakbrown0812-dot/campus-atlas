@@ -46,9 +46,9 @@ export default function PacketPreview({
     <section className={styles.readyPanel} aria-labelledby="prepared-context-title">
       <header className={styles.readyHeader}>
         <div>
-          <span>Full project context</span>
-          <h2 id="prepared-context-title">Ready to continue</h2>
-          <p>Atlas prepared the project state this task needs.</p>
+          <span>Fresh-room packet</span>
+          <h2 id="prepared-context-title">Ready to copy</h2>
+          <p>Atlas prepared the smallest safe project context this continuation needs.</p>
         </div>
       </header>
 

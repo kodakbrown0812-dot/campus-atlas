@@ -121,7 +121,7 @@ export default function TransferRoom({
     const value = await response.json().catch(() => ({ error: "Room transfer failed." })) as Transfer & { error?: string };
     if (!response.ok || !value.id) {
       setError(response.status === 401
-        ? "Canonical writes are not authorized. Nothing was transferred."
+        ? "Sign in to transfer this room. Nothing was changed."
         : value.error || "Room transfer failed. Preserved stages remain safe to resume.");
       setStatus("ready");
       return false;
@@ -202,7 +202,7 @@ export default function TransferRoom({
     );
     const value = await response.json().catch(() => ({ error: "Review action failed." })) as { error?: string };
     if (!response.ok) {
-      setError(value.error || "Review action failed. Project truth was not changed.");
+      setError(value.error || "That decision could not be saved. The preserved project state was not changed.");
       setStatus("ready");
       return;
     }
@@ -338,12 +338,12 @@ export default function TransferRoom({
 
           {current.stage === "ready_for_steward" && (
             <div className={styles.transferReady}>
-              <strong>This room is ready to continue.</strong>
+              <strong>This room is ready for its transfer packet.</strong>
               <Link
                 href={`/projects/${encodeURIComponent(projectId)}/ask`}
                 onClick={() => carryTask(projectId, "", current.caseId)}
               >
-                Continue in Steward
+                Prepare transfer packet
               </Link>
             </div>
           )}

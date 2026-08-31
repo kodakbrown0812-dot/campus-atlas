@@ -472,14 +472,16 @@ export default function ConversationWorkspace({
       <Link className={styles.back} href={`/projects/${encodeURIComponent(projectId)}/work`}>← Work</Link>
       <header className={styles.header}>
         <div>
-          <span className={styles.eyebrow}>{detail.conversation.sourceType} conversation</span>
+          <span className={styles.eyebrow}>Preserved room</span>
           <h1>{detail.conversation.title}</h1>
           <p>{readableTime(detail.conversation.originalStartedAt || detail.conversation.createdAt)} → {detail.conversation.originalEndedAt ? readableTime(detail.conversation.originalEndedAt) : "Open"}</p>
         </div>
-        <span className={styles.status}>{detail.messages.length} immutable messages</span>
+        <span className={styles.status}>{detail.messages.length} messages preserved</span>
       </header>
 
-      <section className={styles.caseBar} id="active-case">
+      <details className={styles.panel}>
+        <summary>Advanced / Internal controls</summary>
+        <section className={styles.caseBar} id="active-case">
         <div>
           <span>Project</span>
           <strong>{projectId}</strong>
@@ -515,11 +517,12 @@ export default function ConversationWorkspace({
         <Link className={styles.structureButton} href={`/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/structure`}>
           View structure
         </Link>
-      </section>
+        </section>
+      </details>
 
       {!canWrite && (
         <div className={styles.readOnly}>
-          Read-only session. Enable canonical writes from the sidebar or mobile D1 control. Transcript reads remain available.
+          Sign in from the application shell to make changes. The preserved transcript remains available.
         </div>
       )}
 
@@ -540,12 +543,13 @@ export default function ConversationWorkspace({
               <pre>{message.exactContent}</pre>
               <div className={styles.source}>
                 <span>{readableTime(message.originalTimestamp || message.ingestedAt)}</span>
-                <code>{message.sourceReference || message.contentHash}</code>
               </div>
             </article>
           ))}
 
-          <form className={styles.composer} onSubmit={appendMessage}>
+          <details className={styles.panel}>
+            <summary>Advanced / Native conversation controls</summary>
+            <form className={styles.composer} onSubmit={appendMessage}>
             <div className={styles.composerHeader}>
               <div>
                 <span className={styles.eyebrow}>Native composer</span>
@@ -577,10 +581,13 @@ export default function ConversationWorkspace({
                 Preserve message
               </button>
             </div>
-          </form>
+            </form>
+          </details>
         </section>
 
-        <aside className={styles.sidebar}>
+        <details className={styles.panel}>
+          <summary>Advanced / Internal records</summary>
+          <aside className={styles.sidebar}>
           <section className={styles.panel}>
             <span className={styles.eyebrow}>Case continuity</span>
             <h2>Active case</h2>
@@ -644,7 +651,8 @@ export default function ConversationWorkspace({
               </article>
             ))}
           </section>
-        </aside>
+          </aside>
+        </details>
       </div>
 
       {analysisStatus !== "idle" && (

@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useEffect, useMemo, useState } from "react";
 import { WriteSessionProvider, useWriteSession } from "./write-session";
 import { StewardTaskProvider } from "./steward-task";
-import ContextualAdd from "./contextual-add";
 import styles from "./shell.module.css";
 
 type Project = {
@@ -14,18 +13,6 @@ type Project = {
   description: string | null;
   pendingFindingCount: number;
   lastActivityAt: string;
-};
-
-type Health = {
-  canonicalState: "available";
-  persistence: "canonical_d1";
-  fixtureMode: false;
-  seededFallback: false;
-  publicDemo: boolean;
-  buildIdentity: {
-    deploymentVersion: string | null;
-    sourceCommit: string | null;
-  };
 };
 
 const destinations = [
@@ -48,17 +35,6 @@ function destinationHref(projectId: string, destination: typeof destinations[num
   return `/projects/${encoded}/work`;
 }
 
-function BuildIdentity({ health }: { health: Health | null }) {
-  const identity = health?.buildIdentity;
-  if (!identity?.deploymentVersion || !identity.sourceCommit) return null;
-  return (
-    <div className={styles.buildIdentity} aria-label="Production build identity">
-      <strong>Deployment {identity.deploymentVersion}</strong>
-      <code>{identity.sourceCommit}</code>
-    </div>
-  );
-}
-
 function AuthorizationPanel() {
   const { session, error } = useWriteSession();
   const pathname = usePathname();
@@ -67,29 +43,27 @@ function AuthorizationPanel() {
   const signInHref = `/signin-with-chatgpt?return_to=${returnTo}`;
   const signOutHref = `/signout-with-chatgpt?return_to=${returnTo}`;
   return (
-    <section className={styles.authorization} aria-label="Canonical write authorization">
+    <section className={styles.authorization} aria-label="Account">
       <div className={styles.healthLine}>
         <i className={authorized ? styles.goodDot : styles.readOnlyDot} />
-        <span>{authorized ? "Canonical writes enabled" : "Read-only session"}</span>
+        <span>{authorized ? "Signed in" : "Sign in to continue"}</span>
       </div>
       <small>
         {authorized
-          ? session?.writeAuthorization.storage === "platform_identity"
-            ? `${session?.actor.displayName || "Cody"} · verified owner identity`
-            : `${session?.actor.displayName || "Cody"} · key held in memory only`
-          : "Reads remain available. Consequential writes fail closed."}
+          ? session?.actor.displayName || "Account ready"
+          : "You can look around now. Sign in to transfer a room or prepare a packet."}
       </small>
       {authorized ? (
         <a className={styles.textButton} href={signOutHref}>Sign out</a>
       ) : session?.actor.authenticatedByPlatform ? (
         <>
-          <p className={styles.inlineError}>This signed-in account is not the configured Atlas owner.</p>
+          <p className={styles.inlineError}>This account cannot make changes to this Atlas workspace.</p>
           <a className={styles.textButton} href={signOutHref}>Use a different ChatGPT account</a>
         </>
       ) : session?.writeAuthorization.ownerIdentityConfigured ? (
         <a className={styles.smallButton} href={signInHref}>Sign in as owner</a>
       ) : (
-        <p className={styles.inlineError}>Owner sign-in is not configured in this environment.</p>
+        <p className={styles.inlineError}>Sign-in is not available in this environment.</p>
       )}
       {error && <p className={styles.inlineError}>{error}</p>}
     </section>
@@ -106,11 +80,9 @@ function ProjectShellInner({
   const pathname = usePathname();
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>([]);
-  const [health, setHealth] = useState<Health | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [switching, setSwitching] = useState(false);
   const [mobileAuthorizationOpen, setMobileAuthorizationOpen] = useState(false);
-  const [contextualAddOpen, setContextualAddOpen] = useState(false);
   const activeDestination = destinationForPath(pathname);
 
   useEffect(() => {
@@ -121,13 +93,12 @@ function ProjectShellInner({
     ])
       .then(async ([projectsResponse, healthResponse]) => {
         if (!projectsResponse.ok || !healthResponse.ok) {
-          throw new Error("Canonical D1 state is unavailable.");
+          throw new Error("Project data is unavailable.");
         }
         const projectValue = await projectsResponse.json() as { projects: Project[] };
-        const healthValue = await healthResponse.json() as Health;
+        await healthResponse.json();
         if (!active) return;
         setProjects(projectValue.projects);
-        setHealth(healthValue);
         setStatus("ready");
         setSwitching(false);
       })
@@ -149,7 +120,6 @@ function ProjectShellInner({
     if (!nextProjectId || nextProjectId === projectId) return;
     setSwitching(true);
     setMobileAuthorizationOpen(false);
-    setContextualAddOpen(false);
     router.push(destinationHref(nextProjectId, activeDestination));
   }
 
@@ -160,13 +130,13 @@ function ProjectShellInner({
           <span>CA</span>
           <div>
             <strong>Campus Atlas</strong>
-            <small>Governed continuity</small>
+            <small>Room continuity</small>
           </div>
         </Link>
 
         <label className={styles.selectorLabel} htmlFor="project-switcher">Project</label>
         <select
-          aria-label="Canonical project"
+          aria-label="Current project"
           className={styles.projectSwitcher}
           disabled={status !== "ready" || switching}
           id="project-switcher"
@@ -198,23 +168,7 @@ function ProjectShellInner({
             Needs review <b>{activeProject.pendingFindingCount}</b>
           </Link>
         ) : null}
-        <button className={styles.contextualAdd} onClick={() => setContextualAddOpen(true)} type="button">
-          <span>＋</span> Add
-        </button>
-
         <div className={styles.sidebarBottom}>
-          <div className={styles.canonicalStatus}>
-            <i className={status === "ready" ? styles.goodDot : status === "loading" ? styles.loadingDot : styles.badDot} />
-            <div>
-              <strong>
-                {status === "ready"
-                  ? health?.publicDemo ? "Canonical D1 · demo-isolated" : "Canonical D1 connected"
-                  : status === "loading" ? "Checking canonical state" : "Canonical state unavailable"}
-              </strong>
-              <small>{health?.fixtureMode ? "Explicit fixture mode" : "No fixture fallback"}</small>
-            </div>
-          </div>
-          <BuildIdentity health={health} />
           <AuthorizationPanel />
         </div>
       </aside>
@@ -222,7 +176,7 @@ function ProjectShellInner({
       <header className={styles.mobileHeader}>
         <Link className={styles.mobileBrand} href="/">CA</Link>
         <select
-          aria-label="Canonical project"
+          aria-label="Current project"
           className={styles.mobileProjectSwitcher}
           disabled={status !== "ready" || switching}
           onChange={(event) => changeProject(event.target.value)}
@@ -232,20 +186,12 @@ function ProjectShellInner({
           {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
         </select>
         <button
-          aria-label="Open canonical write authorization"
+          aria-label="Open account"
           className={status === "ready" ? styles.mobileHealthy : styles.mobileUnavailable}
           onClick={() => setMobileAuthorizationOpen(true)}
           type="button"
         >
-          {status === "ready" ? "D1" : "!"}
-        </button>
-        <button
-          aria-label="Open Contextual Add"
-          className={styles.mobileAdd}
-          onClick={() => setContextualAddOpen(true)}
-          type="button"
-        >
-          ＋
+          {status === "ready" ? "ME" : "!"}
         </button>
       </header>
 
@@ -253,8 +199,8 @@ function ProjectShellInner({
         {switching && <div className={styles.switchNotice}>Switching project and clearing the prior project view…</div>}
         {status === "unavailable" && (
           <div className={styles.failureBanner} role="alert">
-            <strong>Canonical state unavailable</strong>
-            <span>No seeded content was substituted. Existing URLs remain valid; retry when D1 is available.</span>
+            <strong>Project data unavailable</strong>
+            <span>Atlas did not substitute another project. Try again when the workspace is available.</span>
           </div>
         )}
         {children}
@@ -279,28 +225,21 @@ function ProjectShellInner({
       {mobileAuthorizationOpen && (
         <div className={styles.mobileSheetBackdrop} onMouseDown={() => setMobileAuthorizationOpen(false)}>
           <section
-            aria-label="Session and write authorization"
+            aria-label="Account"
             className={styles.mobileSheet}
             onMouseDown={(event) => event.stopPropagation()}
           >
             <header>
               <div>
-                <strong>Session and write access</strong>
-                <small>The key stays in memory and is cleared on refresh.</small>
+                <strong>Account</strong>
+                <small>Sign in to transfer rooms and prepare packets.</small>
               </div>
               <button aria-label="Close authorization" onClick={() => setMobileAuthorizationOpen(false)} type="button">×</button>
             </header>
-            <BuildIdentity health={health} />
             <AuthorizationPanel />
           </section>
         </div>
       )}
-      <ContextualAdd
-        key={projectId}
-        onClose={() => setContextualAddOpen(false)}
-        open={contextualAddOpen}
-        projectId={projectId}
-      />
     </div>
   );
 }

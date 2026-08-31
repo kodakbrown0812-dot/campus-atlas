@@ -12,13 +12,13 @@ export default async function FindingPage({
     <main className={styles.page}>
       <div className={styles.shell}>
         <Link className={styles.back} href={`/projects/${encodeURIComponent(projectId)}/findings`}>
-          ← Atlas Found
+          ← Items needing your decision
         </Link>
         <header className={styles.header}>
           <div>
-            <span className={styles.eyebrow}>Review one consequence</span>
-            <h1>Finding review</h1>
-            <p>Atlas’s proposal and Cody’s governed wording remain distinct, versioned records.</p>
+            <span className={styles.eyebrow}>One decision</span>
+            <h1>What should carry forward?</h1>
+            <p>Review Atlas’s wording and its supporting conversation before deciding.</p>
           </div>
         </header>
         <FindingReview findingId={findingId} projectId={projectId} />

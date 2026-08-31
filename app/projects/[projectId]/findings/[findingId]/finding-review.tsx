@@ -71,12 +71,12 @@ type GovernanceResult = {
 };
 
 const actionCopy = [
-  { id: "approve", label: "Approve this revised mechanism for the selected retrieval scope." },
-  { id: "revise", label: "Record Cody’s revision without changing retrieval authority." },
-  { id: "reject", label: "Reject this proposal and suppress unchanged resurfacing." },
-  { id: "defer", label: "Defer this finding until its return condition is met." },
-  { id: "keep_local", label: "Keep this consequence local to the current case." },
-  { id: "challenge", label: "Challenge this proposal because its evidence or scope is insufficient." },
+  { id: "approve", label: "Keep this for future rooms" },
+  { id: "revise", label: "Save my revised wording for review" },
+  { id: "reject", label: "Do not carry this forward" },
+  { id: "defer", label: "Decide later" },
+  { id: "keep_local", label: "Keep this only with the current work" },
+  { id: "challenge", label: "Mark the evidence as insufficient" },
 ];
 
 function lines(values: string[]) {
@@ -202,13 +202,12 @@ export default function FindingReview({ projectId, findingId }: { projectId: str
   }
 
   const current = useMemo(() => detail?.versions.find((version) => version.id === detail.finding.current_version_id) || null, [detail]);
-  if (status === "loading") return <section className={styles.panel}>Loading finding, exact lineage, and governance history…</section>;
+  if (status === "loading") return <section className={styles.panel}>Loading this review and its supporting conversation…</section>;
   if (status === "error" || !detail || !current) {
     return (
       <section className={`${styles.panel} ${styles.failure}`} role="alert">
-        <strong>Finding unavailable</strong>
+        <strong>Review item unavailable</strong>
         <p>{error}</p>
-        <b>No fixture or frontend-owned version was substituted.</b>
       </section>
     );
   }
@@ -221,17 +220,10 @@ export default function FindingReview({ projectId, findingId }: { projectId: str
     <div className={styles.grid}>
       <section className={styles.transcript}>
         <article className={styles.panel}>
-          <span className={styles.eyebrow}>Atlas’s original proposal</span>
+          <span className={styles.eyebrow}>Atlas needs your decision</span>
           <h2>{original.proposal_statement}</h2>
           <p className={styles.muted}>{original.reason_for_surfacing}</p>
-          <div className={styles.detailGrid}>
-            <div><span>Finding type</span><strong>{detail.finding.finding_type}</strong></div>
-            <div><span>Proposed scope</span><strong>{original.proposed_scope}</strong></div>
-            <div><span>Current authority</span><strong>{detail.finding.authority_state}</strong></div>
-            <div><span>Status</span><strong>{detail.finding.status}</strong></div>
-            <div><span>Why uncertain</span><strong>{current.uncertainty || "Not recorded"}</strong></div>
-            <div><span>Expected retrieval effect</span><strong>{current.expected_retrieval_effect}</strong></div>
-          </div>
+          {current.uncertainty ? <p><strong>What remains uncertain:</strong> {current.uncertainty}</p> : null}
         </article>
 
         <article className={styles.panel}>
@@ -245,19 +237,25 @@ export default function FindingReview({ projectId, findingId }: { projectId: str
         </article>
 
         <article className={styles.panel}>
-          <span className={styles.eyebrow}>Exact source events and messages</span>
-          {!detail.sourceEvents.length && <p className={styles.muted}>No canonical source event is available. Governance should not proceed without inspecting this gap.</p>}
+          <span className={styles.eyebrow}>Supporting conversation</span>
+          {!detail.sourceEvents.length && <p className={styles.muted}>No exact conversation evidence is linked. Do not keep this without inspecting that gap.</p>}
           {detail.sourceEvents.map((event) => (
             <div className={styles.event} key={event.id}>
-              <strong>{event.type}</strong>
               <p>{event.exactSourceSpan}</p>
-              {event.sourceLinks.map((link) => <a href={link.href} key={link.messageId}>Open exact message and span</a>)}
+              {event.sourceLinks.map((link) => <a href={link.href} key={link.messageId}>Open the exact message</a>)}
             </div>
           ))}
         </article>
 
-        <article className={styles.panel}>
-          <span className={styles.eyebrow}>Immutable proposal and review versions</span>
+        <details className={styles.panel}>
+          <summary>Advanced / Internal record</summary>
+          <div className={styles.detailGrid}>
+            <div><span>Finding type</span><strong>{detail.finding.finding_type}</strong></div>
+            <div><span>Proposed scope</span><strong>{original.proposed_scope}</strong></div>
+            <div><span>Current authority</span><strong>{detail.finding.authority_state}</strong></div>
+            <div><span>Status</span><strong>{detail.finding.status}</strong></div>
+            <div><span>Expected retrieval effect</span><strong>{current.expected_retrieval_effect}</strong></div>
+          </div>
           {detail.versions.map((version, index) => (
             <div className={styles.event} key={version.id}>
               <strong>Version {index + 1} · {version.created_by}</strong>
@@ -265,50 +263,53 @@ export default function FindingReview({ projectId, findingId }: { projectId: str
               <p>{version.proposed_scope} · {version.created_at}</p>
             </div>
           ))}
-        </article>
+        </details>
       </section>
 
       <aside className={styles.sidebar}>
         {result && (
           <section className={styles.checkpoint} role="status">
-            <span className={styles.eyebrow}>Canonical governance confirmed</span>
-            <h2>{result.governanceEvent.action}</h2>
-            <p>Event: {result.governanceEvent.id}</p>
-            <p>Authority: {result.priorAuthority} → {result.newAuthority}</p>
-            <p>Scope: {result.priorScope} → {result.newScope}</p>
-            <strong>{result.retrievalEffect}</strong>
+            <span className={styles.eyebrow}>Decision saved</span>
+            <h2>Your review is recorded</h2>
+            <details>
+              <summary>Advanced result</summary>
+              <p>Event: {result.governanceEvent.id}</p>
+              <p>Authority: {result.priorAuthority} → {result.newAuthority}</p>
+              <p>Scope: {result.priorScope} → {result.newScope}</p>
+              <strong>{result.retrievalEffect}</strong>
+            </details>
           </section>
         )}
 
         <section className={styles.panel}>
-          <span className={styles.eyebrow}>Cody’s current reviewed wording</span>
+          <span className={styles.eyebrow}>What should carry forward</span>
           <textarea
-            aria-label="Reviewed finding wording"
+            aria-label="Reviewed wording"
             className={styles.textarea}
             disabled={terminal || status === "saving"}
             onChange={(event) => setReviewedStatement(event.target.value)}
             value={reviewedStatement}
           />
           <div className={styles.diff}>
-            <strong>Exact wording difference</strong>
+            <strong>Your wording</strong>
             <p>Atlas: {original.proposal_statement}</p>
-            <p>Cody: {reviewedStatement}</p>
-            <small>{reviewedStatement === original.proposal_statement ? "No wording change." : "Cody’s reviewed wording differs and will be the governed wording."}</small>
+            <p>You: {reviewedStatement}</p>
+            <small>{reviewedStatement === original.proposal_statement ? "No wording change." : "Your reviewed wording differs and will be saved with this decision."}</small>
           </div>
           <label className={styles.fieldLabel}>
-            Retrieval scope
+            Where this applies
             <select className={styles.select} disabled={terminal} onChange={(event) => setScope(event.target.value)} value={scope}>
-              <option value="local">Local case</option>
-              <option value="project_wide">Project-wide</option>
+              <option value="local">This work only</option>
+              <option value="project_wide">The whole project</option>
             </select>
           </label>
-          <input className={styles.input} onChange={(event) => setReason(event.target.value)} placeholder="Reason required for governance or rollback" value={reason} />
-          <input className={styles.input} onChange={(event) => setReturnCondition(event.target.value)} placeholder="Deferral return condition" value={returnCondition} />
+          <input className={styles.input} onChange={(event) => setReason(event.target.value)} placeholder="Why did you choose this?" value={reason} />
+          <input className={styles.input} onChange={(event) => setReturnCondition(event.target.value)} placeholder="When should Atlas ask again?" value={returnCondition} />
           <label className={styles.fieldLabel}>
             Optional manual review date
             <input className={styles.input} onChange={(event) => setReviewDate(event.target.value)} type="date" value={reviewDate} />
           </label>
-          {!canWrite && <p className={styles.error}>Read-only session. Enable writes once from the application shell.</p>}
+          {!canWrite && <p className={styles.error}>Sign in from the application shell to save this decision.</p>}
           <div className={styles.governanceActions}>
             {actionCopy.map((action) => (
               <button
@@ -324,18 +325,18 @@ export default function FindingReview({ projectId, findingId }: { projectId: str
           </div>
           {detail.finding.status === "rejected" && (
             <div className={styles.rejectionNotice}>
-              <strong>Rejection is preserved, not deleted.</strong>
-              <p>The source and rejected proposal remain inspectable. Retrieval eligibility is removed, unchanged resurfacing is suppressed, and a materially changed later proposal must explain what changed.</p>
+              <strong>This decision is preserved, not deleted.</strong>
+              <p>The source and rejected wording remain inspectable. Atlas will not carry the same wording forward unless materially different evidence appears.</p>
             </div>
           )}
           {detail.finding.status === "deferred" && (
-            <p className={styles.muted}>Deferral has no authoritative retrieval effect. Return when: {detail.finding.return_condition || detail.finding.expires_at}.</p>
+            <p className={styles.muted}>Atlas will ask again when: {detail.finding.return_condition || detail.finding.expires_at}.</p>
           )}
           {error && <p className={styles.error} role="alert">{error}</p>}
         </section>
 
-        <section className={styles.panel}>
-          <span className={styles.eyebrow}>Append-only governance history</span>
+        <details className={styles.panel}>
+          <summary>Advanced / Decision history</summary>
           {!detail.governance.length && <p className={styles.muted}>No governance history exists for this record.</p>}
           {detail.governance.map((event) => (
             <div className={styles.event} key={event.id}>
@@ -360,7 +361,7 @@ export default function FindingReview({ projectId, findingId }: { projectId: str
               Roll back this governance event while preserving history.
             </button>
           )}
-        </section>
+        </details>
       </aside>
     </div>
   );

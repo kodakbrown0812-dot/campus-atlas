@@ -69,20 +69,19 @@ export default function FindingQueue({ projectId }: { projectId: string }) {
   const types = [...new Set(findings.map((finding) => finding.type))];
   const cases = [...new Map(findings.map((finding) => [finding.caseId, finding.sourceCase || finding.caseId])).entries()];
 
-  if (status === "loading") return <section className={styles.panel}>Loading canonical findings…</section>;
+  if (status === "loading") return <section className={styles.panel}>Loading items that need your decision…</section>;
   if (status === "error") {
     return (
       <section className={`${styles.panel} ${styles.failure}`} role="alert">
-        <strong>Canonical findings are unavailable.</strong>
-        <p>Existing canonical records remain valid. Retry when D1 is available.</p>
-        <b>No fixture or seeded finding was substituted.</b>
+        <strong>Review items are unavailable.</strong>
+        <p>The preserved room remains safe. Try again when the workspace is available.</p>
       </section>
     );
   }
   return (
     <div className={styles.transcript}>
-      <section className={styles.panel}>
-        <span className={styles.eyebrow}>Project-scoped filters</span>
+      <details className={styles.panel}>
+        <summary>Advanced filters</summary>
         <div className={styles.filterGrid}>
           <select aria-label="Finding type filter" onChange={(event) => setFilters((value) => ({ ...value, type: event.target.value }))} value={filters.type}>
             <option value="">All finding types</option>
@@ -103,15 +102,15 @@ export default function FindingQueue({ projectId }: { projectId: string }) {
           </select>
           <input aria-label="Created since" onChange={(event) => setFilters((value) => ({ ...value, since: event.target.value }))} type="date" value={filters.since} />
         </div>
-      </section>
+      </details>
 
       {!visible.length && (
         <section className={styles.panel}>
-          <strong>{findings.length ? "No findings match these filters." : "Nothing consequential is awaiting governance."}</strong>
+          <strong>{findings.length ? "No review items match these filters." : "Atlas does not need a decision from you right now."}</strong>
           <p className={styles.muted}>
             {findings.length
-              ? "Change the project-scoped filters to inspect another canonical queue."
-              : "A successful checkpoint may legitimately produce zero findings."}
+              ? "Change the advanced filters to inspect another review item."
+              : "The transfer can continue without a manual review."}
           </p>
         </section>
       )}
@@ -130,16 +129,13 @@ export default function FindingQueue({ projectId }: { projectId: string }) {
                   key={finding.id}
                 >
                   <header>
-                    <span>{finding.type}</span>
-                    <b>{finding.status}</b>
+                    <span>{section}</span>
                   </header>
                   <strong>{finding.proposal}</strong>
                   <dl>
-                    <div><dt>Source case</dt><dd>{finding.sourceCase || finding.caseId}</dd></div>
-                    <div><dt>Why it matters</dt><dd>{finding.reasonForSurfacing}</dd></div>
-                    <div><dt>Why uncertain</dt><dd>{finding.uncertainty || "No uncertainty recorded"}</dd></div>
-                    <div><dt>Scope / authority</dt><dd>{finding.proposedScope} · {finding.authority}</dd></div>
-                    {finding.returnCondition && <div><dt>Return condition</dt><dd>{finding.returnCondition}</dd></div>}
+                    <div><dt>Why Atlas surfaced this</dt><dd>{finding.reasonForSurfacing}</dd></div>
+                    <div><dt>What remains uncertain</dt><dd>{finding.uncertainty || "No additional uncertainty was recorded."}</dd></div>
+                    {finding.returnCondition && <div><dt>Review again when</dt><dd>{finding.returnCondition}</dd></div>}
                   </dl>
                   <small>
                     Next: {finding.status === "deferred"
@@ -147,8 +143,8 @@ export default function FindingQueue({ projectId }: { projectId: string }) {
                       : finding.status === "challenged"
                         ? "Resolve the challenge without hiding it."
                         : ["approved", "rejected"].includes(finding.status)
-                          ? "Inspect the governance result and rollback history."
-                          : "Review one consequence and govern Cody's final wording."}
+                          ? "Inspect the saved decision."
+                          : "Review the wording, its supporting conversation, and decide what should carry forward."}
                   </small>
                 </Link>
               ))}

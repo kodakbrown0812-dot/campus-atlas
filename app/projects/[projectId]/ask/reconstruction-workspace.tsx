@@ -460,9 +460,9 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
       {view === "idle" ? (
         <form className={styles.stewardForm} onSubmit={(event) => void prepareContext(event)}>
           <header className={styles.formHeader}>
-            <span>Continue this work</span>
-            <h2>What are you trying to continue?</h2>
-            <p>Atlas will decide whether prior project context matters and prepare only what you need.</p>
+            <span>Fresh-room continuation</span>
+            <h2>What must the new room continue?</h2>
+            <p>Atlas will reconstruct the accepted state and prepare the smallest context that can carry it forward safely.</p>
           </header>
           <label className={styles.field} htmlFor="steward-task">
             Your task
@@ -474,8 +474,8 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
             />
           </label>
           {advancedControls}
-          {!canWrite ? <p className={styles.readOnly}>Sign in as the Atlas owner from the application shell to prepare context.</p> : null}
-          <button className={styles.primaryButton} disabled={!canWrite || !task.trim()} type="submit">Prepare context</button>
+          {!canWrite ? <p className={styles.readOnly}>Sign in from the application shell to prepare a transfer packet.</p> : null}
+          <button className={styles.primaryButton} disabled={!canWrite || !task.trim()} type="submit">Prepare transfer packet</button>
         </form>
       ) : null}
 

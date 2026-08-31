@@ -17,8 +17,8 @@ export default async function AskPage({
         <header className={styles.header}>
           <div>
             <span>Steward</span>
-            <h1>Continue with Atlas</h1>
-            <p>Tell Atlas what you are continuing. It will prepare only the project context that matters.</p>
+            <h1>Prepare the fresh-room packet</h1>
+            <p>Describe what the fresh room must continue. Atlas will carry forward only the project context needed to do it correctly.</p>
           </div>
         </header>
         <ReconstructionWorkspace key={projectId} projectId={projectId} />

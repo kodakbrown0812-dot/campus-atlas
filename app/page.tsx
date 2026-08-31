@@ -57,31 +57,31 @@ export default function CampusAtlasRoot() {
     <main className="root-state">
       <section>
         <div className="root-mark">CA</div>
-        <p className="root-eyebrow">Campus Atlas V1.7</p>
+        <p className="root-eyebrow">Campus Atlas V1.8</p>
         {state.status === "loading" && (
           <>
             <h1>Restoring your project Home</h1>
-            <p>Checking project activity and persistent D1 state. No fixture is used while this loads.</p>
-            <div className="root-progress" aria-label="Loading canonical state"><i /></div>
+            <p>Loading your current project and room transfers.</p>
+            <div className="root-progress" aria-label="Loading project"><i /></div>
           </>
         )}
         {state.status === "empty" && (
           <>
-            <h1>Start with canonical work</h1>
-            <p>No canonical project exists in this workspace. No seeded project card was substituted.</p>
+            <h1>Choose a project to begin</h1>
+            <p>No project exists in this workspace yet.</p>
             <div className="root-notice">
-              Create the first project through the governed setup workflow, then return here to start a conversation.
+              Create the first project through workspace setup, then return here to transfer an existing room.
             </div>
           </>
         )}
         {state.status === "unavailable" && (
           <>
-            <h1>Canonical state is unavailable</h1>
-            <p>{state.message}</p>
+            <h1>Your project is unavailable</h1>
+            <p>Atlas could not load the workspace right now.</p>
             <div className="root-error" role="alert">
-              Nothing was presented as saved, and no V4.6 seed was loaded. Existing canonical records remain valid.
+              Existing rooms and records remain unchanged. Atlas did not substitute another project.
             </div>
-            <button onClick={() => window.location.reload()} type="button">Retry canonical connection</button>
+            <button onClick={() => window.location.reload()} type="button">Try again</button>
           </>
         )}
       </section>

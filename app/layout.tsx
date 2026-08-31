@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Campus Atlas — Governed continuity",
-  description: "Preserve consequential reasoning, govern what changes future retrieval, and reconstruct bounded context for the next task.",
+  title: "Campus Atlas — Room transfer",
+  description: "Turn an existing AI room into a compact, safe context packet for continuing in a fresh room.",
   icons: {
     icon: "/favicon.svg",
     shortcut: "/favicon.svg",

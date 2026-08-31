@@ -41,7 +41,7 @@ function HistoryCard({
     >
       <strong>{conversation.title}</strong>
       <span>{conversation.activeCaseObjective || "No active objective yet"}</span>
-      <small>Open work →</small>
+      <small>Open internal record →</small>
     </Link>
   );
 }
@@ -170,57 +170,15 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         <div>
           <span className={styles.eyebrow}>Current project</span>
           <h1>{overview.project.name}</h1>
-          <p>Your current work and the simplest way to continue it.</p>
+          <p>Transfer an existing AI room, prepare its smallest safe packet, and continue in a fresh room.</p>
         </div>
       </header>
 
-      {activeConversation ? (
-        <section className={styles.currentWork} aria-labelledby="current-work-title">
-          <div>
-            <span className={styles.eyebrow}>Current work</span>
-            <h2 id="current-work-title">{activeConversation.title}</h2>
-            <p>{activeConversation.activeCaseObjective || "Continue this conversation and shape the next useful decision."}</p>
-          </div>
-          <div className={styles.nextAction}>
-            <span>Next</span>
-            <p>{activeConversation.nextAction}</p>
-          </div>
-          <Link
-            className={styles.continueButton}
-            href={`/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(activeConversation.id)}`}
-          >
-            Continue
-          </Link>
-        </section>
-      ) : (
-        <section className={styles.emptyState}>
-          <span>Current work</span>
-          <h2>Nothing is active yet.</h2>
-          <p>Transfer an existing room or start a new conversation when you’re ready.</p>
-        </section>
-      )}
-
-      <form className={styles.stewardEntry} onSubmit={openSteward}>
-        <div>
-          <span className={styles.eyebrow}>Continue with Atlas</span>
-          <h2>Pick up the work without starting over.</h2>
-          <p>Tell Atlas what you’re continuing. Steward will prepare the context that matters.</p>
-        </div>
-        <label htmlFor="home-steward-task">What are you trying to continue?</label>
-        <textarea
-          id="home-steward-task"
-          onChange={(event) => setStewardTask(event.target.value)}
-          placeholder="Describe the decision, task, or missing project context."
-          value={stewardTask}
-        />
-        <button disabled={!stewardTask.trim()} type="submit">Prepare context</button>
-      </form>
-
       <section className={styles.transferEntry}>
         <div>
-          <span className={styles.eyebrow}>Bring in existing work</span>
-          <h2>Transfer a room</h2>
-          <p>Bring in an existing conversation so Atlas can preserve what still matters and prepare it for future work.</p>
+          <span className={styles.eyebrow}>Start here</span>
+          <h2>Transfer an existing room</h2>
+          <p>Paste your mature room or import its export. Atlas will preserve the source, reconstruct what still governs, and stop only if it truly needs your decision.</p>
         </div>
         <button
           aria-expanded={mode === "transfer"}
@@ -239,6 +197,49 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         />
       )}
 
+      {activeConversation ? (
+        <section className={styles.currentWork} aria-labelledby="current-work-title">
+          <div>
+            <span className={styles.eyebrow}>Current work</span>
+            <h2 id="current-work-title">{activeConversation.title}</h2>
+            <p>{activeConversation.activeCaseObjective || "Continue this conversation and shape the next useful decision."}</p>
+          </div>
+          <div className={styles.nextAction}>
+            <span>Next</span>
+            <p>{activeConversation.nextAction}</p>
+          </div>
+          <Link
+            className={styles.continueButton}
+            href={`/projects/${encodeURIComponent(projectId)}/ask`}
+            onClick={() => carryTask(projectId, `Continue ${activeConversation.title} from its accepted state in a fresh room.`)}
+          >
+            Prepare packet
+          </Link>
+        </section>
+      ) : (
+        <section className={styles.emptyState}>
+          <span>Current work</span>
+          <h2>Nothing is active yet.</h2>
+          <p>Transfer an existing room or start a new conversation when you’re ready.</p>
+        </section>
+      )}
+
+      <form className={styles.stewardEntry} onSubmit={openSteward}>
+        <div>
+          <span className={styles.eyebrow}>Continue with Atlas</span>
+          <h2>Prepare the context for a fresh room.</h2>
+          <p>Tell Atlas what the fresh room needs to continue. Atlas will prepare only the project context that matters.</p>
+        </div>
+        <label htmlFor="home-steward-task">What are you trying to continue?</label>
+        <textarea
+          id="home-steward-task"
+          onChange={(event) => setStewardTask(event.target.value)}
+          placeholder="Describe the decision, task, or missing project context."
+          value={stewardTask}
+        />
+        <button disabled={!stewardTask.trim()} type="submit">Prepare transfer packet</button>
+      </form>
+
       {error && <p className={styles.error} role="alert">{error}</p>}
 
       {overview.project.pendingFindingCount > 0 ? (
@@ -249,11 +250,11 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         </Link>
       ) : null}
 
-      <details className={styles.historyDisclosure}>
-        <summary>Project history · {projectWork.length}</summary>
+      <details className={styles.moreActions}>
+        <summary>Advanced / Internal records</summary>
         <div className={styles.historyHeader}>
-          <p>Earlier work stays available without crowding the next step.</p>
-          <Link href={`/projects/${encodeURIComponent(projectId)}/conversations`}>View all work</Link>
+          <p>Developer access to preserved conversations and legacy native-work controls.</p>
+          <Link href={`/projects/${encodeURIComponent(projectId)}/conversations`}>View all internal conversations</Link>
         </div>
         {projectWork.length ? (
           <div className={styles.cardGrid}>
@@ -262,12 +263,8 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
             ))}
           </div>
         ) : <p className={styles.quietEmpty}>No earlier work in this project.</p>}
-      </details>
-
-      <details className={styles.moreActions}>
-        <summary>More ways to work</summary>
         <button onClick={() => setMode(mode === "native" ? "none" : "native")} type="button">
-          Start a new conversation in Atlas
+          Open legacy native conversation creator
         </button>
         {mode === "native" && (
           <form className={styles.entryForm} onSubmit={createNative}>
