@@ -2,15 +2,16 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { WriteSessionProvider, useWriteSession } from "./write-session";
-import { StewardTaskProvider } from "./steward-task";
+import { StewardTaskProvider, useStewardTask } from "./steward-task";
 import styles from "./shell.module.css";
 
 type Project = {
   id: string;
   name: string;
   description: string | null;
+  status: "active" | "archived";
   pendingFindingCount: number;
   lastActivityAt: string;
 };
@@ -79,26 +80,43 @@ function ProjectShellInner({
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { session, authorizationHeaders } = useWriteSession();
+  const { clearTask } = useStewardTask();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [allProjects, setAllProjects] = useState<Project[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [switching, setSwitching] = useState(false);
   const [mobileAuthorizationOpen, setMobileAuthorizationOpen] = useState(false);
+  const [projectActionsOpen, setProjectActionsOpen] = useState(false);
+  const [projectActionStatus, setProjectActionStatus] = useState<"idle" | "saving">("idle");
+  const [projectActionMessage, setProjectActionMessage] = useState("");
+  const [projectActionError, setProjectActionError] = useState("");
+  const [renameValue, setRenameValue] = useState("");
+  const [archiveConfirmation, setArchiveConfirmation] = useState(false);
   const activeDestination = destinationForPath(pathname);
+
+  const loadProjects = useCallback(async () => {
+    const [projectsResponse, allProjectsResponse, healthResponse] = await Promise.all([
+      fetch("/api/v1/projects", { cache: "no-store" }),
+      fetch("/api/v1/projects?includeArchived=true", { cache: "no-store" }),
+      fetch("/api/v1/health", { cache: "no-store" }),
+    ]);
+    if (!projectsResponse.ok || !allProjectsResponse.ok || !healthResponse.ok) {
+      throw new Error("Project data is unavailable.");
+    }
+    const projectValue = await projectsResponse.json() as { projects: Project[] };
+    const allProjectValue = await allProjectsResponse.json() as { projects: Project[] };
+    await healthResponse.json();
+    return { active: projectValue.projects, all: allProjectValue.projects };
+  }, []);
 
   useEffect(() => {
     let active = true;
-    Promise.all([
-      fetch("/api/v1/projects", { cache: "no-store" }),
-      fetch("/api/v1/health", { cache: "no-store" }),
-    ])
-      .then(async ([projectsResponse, healthResponse]) => {
-        if (!projectsResponse.ok || !healthResponse.ok) {
-          throw new Error("Project data is unavailable.");
-        }
-        const projectValue = await projectsResponse.json() as { projects: Project[] };
-        await healthResponse.json();
+    loadProjects()
+      .then((value) => {
         if (!active) return;
-        setProjects(projectValue.projects);
+        setProjects(value.active);
+        setAllProjects(value.all);
         setStatus("ready");
         setSwitching(false);
       })
@@ -109,18 +127,85 @@ function ProjectShellInner({
         }
       });
     return () => { active = false; };
-  }, [projectId]);
+  }, [loadProjects, projectId]);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === projectId) || null,
     [projectId, projects],
   );
+  const currentProject = useMemo(
+    () => allProjects.find((project) => project.id === projectId) || activeProject,
+    [activeProject, allProjects, projectId],
+  );
+  const archivedProjects = useMemo(
+    () => allProjects.filter((project) => project.status === "archived"),
+    [allProjects],
+  );
+  const canWrite = Boolean(session?.writeAuthorization.authorized);
 
   function changeProject(nextProjectId: string) {
     if (!nextProjectId || nextProjectId === projectId) return;
     setSwitching(true);
     setMobileAuthorizationOpen(false);
     router.push(destinationHref(nextProjectId, activeDestination));
+  }
+
+  function openProjectActions() {
+    setRenameValue(currentProject?.name || "");
+    setProjectActionError("");
+    setProjectActionMessage("");
+    setArchiveConfirmation(false);
+    setProjectActionsOpen(true);
+    setMobileAuthorizationOpen(false);
+  }
+
+  async function patchProject(targetProjectId: string, body: { name?: string; status?: "active" | "archived" }) {
+    setProjectActionStatus("saving");
+    setProjectActionError("");
+    setProjectActionMessage("");
+    try {
+      const response = await fetch(`/api/v1/projects/${encodeURIComponent(targetProjectId)}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json", ...authorizationHeaders() },
+        body: JSON.stringify(body),
+      });
+      const value = await response.json().catch(() => ({ error: "Project update failed." })) as {
+        project?: Project;
+        error?: string;
+      };
+      if (!response.ok || !value.project) {
+        throw new Error(response.status === 401
+          ? "Sign in as the owner to change this project."
+          : value.error || "Project update failed.");
+      }
+      const refreshed = await loadProjects();
+      setProjects(refreshed.active);
+      setAllProjects(refreshed.all);
+      window.dispatchEvent(new Event("atlas:project-lifecycle"));
+      if (body.status === "archived") {
+        clearTask(targetProjectId);
+        setProjectActionsOpen(false);
+        const next = refreshed.active.find((project) => project.id !== targetProjectId);
+        router.push(next ? destinationHref(next.id, activeDestination) : "/");
+        return;
+      }
+      if (body.status === "active") {
+        setProjectActionMessage("Project restored to your active projects.");
+      } else {
+        setProjectActionMessage("Project name updated. Its history and identity are unchanged.");
+      }
+      setArchiveConfirmation(false);
+    } catch (caught) {
+      setProjectActionError(caught instanceof Error ? caught.message : "Project update failed.");
+    } finally {
+      setProjectActionStatus("idle");
+    }
+  }
+
+  function renameProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!renameValue.trim() || !currentProject) return;
+    void patchProject(currentProject.id, { name: renameValue.trim() });
   }
 
   return (
@@ -135,17 +220,32 @@ function ProjectShellInner({
         </Link>
 
         <label className={styles.selectorLabel} htmlFor="project-switcher">Project</label>
-        <select
-          aria-label="Current project"
-          className={styles.projectSwitcher}
-          disabled={status !== "ready" || switching}
-          id="project-switcher"
-          onChange={(event) => changeProject(event.target.value)}
-          value={activeProject?.id || projectId}
-        >
-          {!activeProject && <option value={projectId}>{status === "loading" ? "Loading…" : projectId}</option>}
-          {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-        </select>
+        <div className={styles.projectControl}>
+          <select
+            aria-label="Current project"
+            className={styles.projectSwitcher}
+            disabled={status !== "ready" || switching}
+            id="project-switcher"
+            onChange={(event) => changeProject(event.target.value)}
+            value={activeProject?.id || projectId}
+          >
+            {!activeProject && (
+              <option value={projectId}>
+                {status === "loading" ? "Loading…" : currentProject ? `${currentProject.name} (Archived)` : projectId}
+              </option>
+            )}
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
+          <button
+            aria-label="Project options"
+            className={styles.projectMenuButton}
+            disabled={status !== "ready"}
+            onClick={openProjectActions}
+            type="button"
+          >
+            …
+          </button>
+        </div>
 
         <nav aria-label="Campus Atlas primary">
           {destinations.map((destination) => (
@@ -182,9 +282,18 @@ function ProjectShellInner({
           onChange={(event) => changeProject(event.target.value)}
           value={activeProject?.id || projectId}
         >
-          {!activeProject && <option value={projectId}>{projectId}</option>}
+          {!activeProject && <option value={projectId}>{currentProject ? `${currentProject.name} (Archived)` : projectId}</option>}
           {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
         </select>
+        <button
+          aria-label="Project options"
+          className={styles.mobileProjectMenu}
+          disabled={status !== "ready"}
+          onClick={openProjectActions}
+          type="button"
+        >
+          …
+        </button>
         <button
           aria-label="Open account"
           className={status === "ready" ? styles.mobileHealthy : styles.mobileUnavailable}
@@ -222,6 +331,97 @@ function ProjectShellInner({
           </Link>
         ))}
       </nav>
+      {projectActionsOpen && (
+        <div className={styles.projectSheetBackdrop} onMouseDown={() => setProjectActionsOpen(false)}>
+          <section
+            aria-label="Project options"
+            className={styles.projectSheet}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <header>
+              <div>
+                <strong>Project options</strong>
+                <small>{currentProject?.name || projectId}</small>
+              </div>
+              <button aria-label="Close project options" onClick={() => setProjectActionsOpen(false)} type="button">×</button>
+            </header>
+
+            {currentProject?.status === "archived" ? (
+              <div className={styles.projectActionBlock}>
+                <strong>This project is archived.</strong>
+                <p>Its rooms and history are still preserved.</p>
+                <button
+                  disabled={!canWrite || projectActionStatus === "saving"}
+                  onClick={() => void patchProject(currentProject.id, { status: "active" })}
+                  type="button"
+                >
+                  Restore project
+                </button>
+              </div>
+            ) : (
+              <>
+                <form className={styles.renameProject} onSubmit={renameProject}>
+                  <label htmlFor="project-display-name">Project name</label>
+                  <div>
+                    <input
+                      disabled={!canWrite || projectActionStatus === "saving"}
+                      id="project-display-name"
+                      maxLength={120}
+                      onChange={(event) => setRenameValue(event.target.value)}
+                      value={renameValue}
+                    />
+                    <button
+                      disabled={!canWrite || projectActionStatus === "saving" || !renameValue.trim() || renameValue.trim() === currentProject?.name}
+                      type="submit"
+                    >
+                      Rename
+                    </button>
+                  </div>
+                </form>
+                <div className={styles.projectActionBlock}>
+                  <strong>Remove from active projects</strong>
+                  <p>Archive this project without deleting its rooms, packets, or history.</p>
+                  {archiveConfirmation ? (
+                    <div className={styles.confirmActions}>
+                      <button
+                        disabled={!canWrite || projectActionStatus === "saving"}
+                        onClick={() => currentProject && void patchProject(currentProject.id, { status: "archived" })}
+                        type="button"
+                      >
+                        Confirm archive
+                      </button>
+                      <button onClick={() => setArchiveConfirmation(false)} type="button">Cancel</button>
+                    </div>
+                  ) : (
+                    <button disabled={!canWrite} onClick={() => setArchiveConfirmation(true)} type="button">Archive project</button>
+                  )}
+                </div>
+              </>
+            )}
+
+            <details className={styles.archivedProjects}>
+              <summary>Archived projects · {archivedProjects.length}</summary>
+              {archivedProjects.length ? archivedProjects.map((project) => (
+                <article key={project.id}>
+                  <div><strong>{project.name}</strong><small>History preserved</small></div>
+                  <Link href={destinationHref(project.id, "inspect")} onClick={() => setProjectActionsOpen(false)}>Open history</Link>
+                  <button
+                    disabled={!canWrite || projectActionStatus === "saving"}
+                    onClick={() => void patchProject(project.id, { status: "active" })}
+                    type="button"
+                  >
+                    Restore
+                  </button>
+                </article>
+              )) : <p>No archived projects.</p>}
+            </details>
+
+            {!canWrite ? <p className={styles.projectActionError}>Sign in as the owner to change projects.</p> : null}
+            {projectActionMessage ? <p className={styles.projectActionMessage} role="status">{projectActionMessage}</p> : null}
+            {projectActionError ? <p className={styles.projectActionError} role="alert">{projectActionError}</p> : null}
+          </section>
+        </div>
+      )}
       {mobileAuthorizationOpen && (
         <div className={styles.mobileSheetBackdrop} onMouseDown={() => setMobileAuthorizationOpen(false)}>
           <section

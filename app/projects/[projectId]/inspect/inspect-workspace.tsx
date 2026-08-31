@@ -174,6 +174,7 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [mechanismDetails, setMechanismDetails] = useState<Record<string, MechanismDetail>>({});
   const [latestPacket, setLatestPacket] = useState<PacketDetail | null>(null);
+  const [hasActiveWork, setHasActiveWork] = useState(false);
   const [view, setView] = useState<typeof views[number]>("Overview");
   const [technicalView, setTechnicalView] = useState<typeof technicalViews[number]>("Cases");
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
@@ -183,11 +184,19 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
     let active = true;
     async function load() {
       try {
-        const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/inspect`, { cache: "no-store" });
+        const [response, workResponse] = await Promise.all([
+          fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/inspect`, { cache: "no-store" }),
+          fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/work`, { cache: "no-store" }),
+        ]);
         const result = await response.json().catch(() => ({ error: "Inspect unavailable." })) as Overview & { error?: string };
-        if (!response.ok) throw new Error(result.error || "Inspect unavailable.");
+        const workResult = await workResponse.json().catch(() => ({ error: "Work state unavailable." })) as {
+          activeConversationId?: string | null;
+          error?: string;
+        };
+        if (!response.ok || !workResponse.ok) throw new Error(result.error || workResult.error || "Inspect unavailable.");
         if (!active) return;
         setOverview(result);
+        setHasActiveWork(Boolean(workResult.activeConversationId));
 
         const [details, packet] = await Promise.all([
           Promise.all(result.mechanisms.map(async (record) => {
@@ -241,7 +250,9 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
     );
   }
 
-  const activeCase = overview.cases.find((record) => record.status === "active") || overview.cases[0] || null;
+  const activeCase = hasActiveWork
+    ? overview.cases.find((record) => record.status === "active") || null
+    : null;
   const governing = overview.mechanisms.filter(isGoverning);
   const unresolved = overview.reasoning.filter((record) => {
     const state = `${record.status || ""} ${record.authority || ""}`.toLowerCase();

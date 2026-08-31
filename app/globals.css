@@ -140,6 +140,16 @@ p {
   background: rgba(77, 124, 254, .07);
 }
 
+.root-notice a {
+  display: block;
+  color: #c7d3ff;
+  text-decoration: none;
+}
+
+.root-notice a + a {
+  margin-top: 8px;
+}
+
 .root-error {
   border: 1px solid rgba(245, 138, 168, .3);
   color: #efadc0;

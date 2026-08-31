@@ -73,7 +73,8 @@ const worker = {
 
     if (
       ["/api/v1/health", "/api/v1/session", "/api/v1/projects"].includes(url.pathname)
-      || /^\/api\/v1\/projects\/[^/]+\/work$/.test(url.pathname)
+      || /^\/api\/v1\/projects\/[^/]+$/.test(url.pathname)
+      || /^\/api\/v1\/projects\/[^/]+\/work(?:\/[^/]+)?$/.test(url.pathname)
     ) {
       return handleShellService(authorizedRequest, env.DB, {
         actionKey: env.CAMPUS_ATLAS_ACTION_KEY,

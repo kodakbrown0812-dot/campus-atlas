@@ -12,6 +12,7 @@ type WorkConversation = {
   id: string;
   title: string;
   sourceType: string;
+  status: "active" | "completed" | "archived";
   activeCaseObjective: string | null;
   nextAction: string;
 };
@@ -28,32 +29,44 @@ type WorkOverview = {
 };
 
 function HistoryCard({
+  canWrite,
+  onRestore,
   projectId,
   conversation,
 }: {
+  canWrite: boolean;
+  onRestore: (conversation: WorkConversation) => void;
   projectId: string;
   conversation: WorkConversation;
 }) {
   return (
-    <Link
-      className={styles.historyCard}
-      href={`/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversation.id)}`}
-    >
+    <article className={styles.historyCard}>
+      <span className={styles.historyStatus}>
+        {conversation.status === "archived" ? "Archived" : conversation.status === "completed" ? "Completed" : "Earlier work"}
+      </span>
       <strong>{conversation.title}</strong>
       <span>{conversation.activeCaseObjective || "No active objective yet"}</span>
-      <small>Open internal record →</small>
-    </Link>
+      <div>
+        <Link href={`/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversation.id)}`}>
+          Open history
+        </Link>
+        {conversation.status !== "active" ? (
+          <button disabled={!canWrite} onClick={() => onRestore(conversation)} type="button">Restore</button>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
 export default function WorkWorkspace({ projectId }: { projectId: string }) {
   const router = useRouter();
   const { session, authorizationHeaders } = useWriteSession();
-  const { carryTask } = useStewardTask();
+  const { carryTask, clearTask } = useStewardTask();
   const [overview, setOverview] = useState<WorkOverview | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "unavailable">("loading");
   const [mode, setMode] = useState<"none" | "native" | "transfer">("none");
   const [error, setError] = useState("");
+  const [lifecycleMessage, setLifecycleMessage] = useState("");
   const [stewardTask, setStewardTask] = useState("");
 
   const load = useCallback(async () => {
@@ -86,6 +99,14 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     return () => { active = false; };
   }, [load]);
 
+  useEffect(() => {
+    const refresh = () => {
+      void load().then(setOverview).catch(() => undefined);
+    };
+    window.addEventListener("atlas:project-lifecycle", refresh);
+    return () => window.removeEventListener("atlas:project-lifecycle", refresh);
+  }, [load]);
+
   const projectWork = useMemo(() => {
     const conversations = overview?.conversations || [];
     return conversations.filter((item) => item.id !== overview?.activeConversationId);
@@ -93,6 +114,39 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
 
   const activeConversation = overview?.conversations.find((item) => item.id === overview.activeConversationId) || null;
   const canWrite = Boolean(session?.writeAuthorization.authorized);
+
+  async function updateWorkLifecycle(conversation: WorkConversation, nextStatus: WorkConversation["status"]) {
+    setStatus("saving");
+    setError("");
+    setLifecycleMessage("");
+    try {
+      const response = await fetch(
+        `/api/v1/projects/${encodeURIComponent(projectId)}/work/${encodeURIComponent(conversation.id)}`,
+        {
+          method: "PATCH",
+          headers: { "content-type": "application/json", ...authorizationHeaders() },
+          body: JSON.stringify({ status: nextStatus }),
+        },
+      );
+      const value = await response.json().catch(() => ({ error: "Work update failed." })) as { error?: string };
+      if (!response.ok) {
+        throw new Error(response.status === 401
+          ? "Sign in as the owner to change active work."
+          : value.error || "Work update failed.");
+      }
+      if (nextStatus !== "active") clearTask(projectId);
+      setOverview(await load());
+      setLifecycleMessage(nextStatus === "active"
+        ? `${conversation.title} is active again.`
+        : nextStatus === "completed"
+          ? `${conversation.title} is complete. Its history is still preserved.`
+          : `${conversation.title} was archived. Its history is still preserved.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Work update failed.");
+    } finally {
+      setStatus("ready");
+    }
+  }
 
   function openSteward(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -199,6 +253,25 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
 
       {activeConversation ? (
         <section className={styles.currentWork} aria-labelledby="current-work-title">
+          <details className={styles.workMenu}>
+            <summary aria-label="Current work options">…</summary>
+            <div>
+              <button
+                disabled={!canWrite || status === "saving"}
+                onClick={() => void updateWorkLifecycle(activeConversation, "completed")}
+                type="button"
+              >
+                Mark complete
+              </button>
+              <button
+                disabled={!canWrite || status === "saving"}
+                onClick={() => void updateWorkLifecycle(activeConversation, "archived")}
+                type="button"
+              >
+                Archive
+              </button>
+            </div>
+          </details>
           <div>
             <span className={styles.eyebrow}>Current work</span>
             <h2 id="current-work-title">{activeConversation.title}</h2>
@@ -219,8 +292,8 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
       ) : (
         <section className={styles.emptyState}>
           <span>Current work</span>
-          <h2>Nothing is active yet.</h2>
-          <p>Transfer an existing room or start a new conversation when you’re ready.</p>
+          <h2>No active work yet.</h2>
+          <p>Transfer an existing room or tell Steward what the fresh room needs.</p>
         </section>
       )}
 
@@ -240,6 +313,7 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         <button disabled={!stewardTask.trim()} type="submit">Prepare transfer packet</button>
       </form>
 
+      {lifecycleMessage && <p className={styles.lifecycleMessage} role="status">{lifecycleMessage}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
 
       {overview.project.pendingFindingCount > 0 ? (
@@ -259,7 +333,13 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         {projectWork.length ? (
           <div className={styles.cardGrid}>
             {projectWork.map((conversation) => (
-              <HistoryCard conversation={conversation} key={conversation.id} projectId={projectId} />
+              <HistoryCard
+                canWrite={canWrite}
+                conversation={conversation}
+                key={conversation.id}
+                onRestore={(item) => void updateWorkLifecycle(item, "active")}
+                projectId={projectId}
+              />
             ))}
           </div>
         ) : <p className={styles.quietEmpty}>No earlier work in this project.</p>}

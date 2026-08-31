@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 type RootState =
   | { status: "loading" }
   | { status: "empty" }
+  | { status: "archived"; projects: Array<{ id: string; name: string }> }
   | { status: "unavailable"; message: string };
 
 export default function CampusAtlasRoot() {
@@ -17,9 +18,10 @@ export default function CampusAtlasRoot() {
     Promise.all([
       fetch("/api/v1/health", { cache: "no-store" }),
       fetch("/api/v1/projects", { cache: "no-store" }),
+      fetch("/api/v1/projects?includeArchived=true", { cache: "no-store" }),
     ])
-      .then(async ([healthResponse, projectsResponse]) => {
-        if (!healthResponse.ok || !projectsResponse.ok) {
+      .then(async ([healthResponse, projectsResponse, allProjectsResponse]) => {
+        if (!healthResponse.ok || !projectsResponse.ok || !allProjectsResponse.ok) {
           const failure = await healthResponse.json().catch(() => null) as { error?: string } | null;
           throw new Error(failure?.error || "Canonical D1 state is unavailable.");
         }
@@ -32,13 +34,19 @@ export default function CampusAtlasRoot() {
           activeProjectId: string | null;
           projects: Array<{ id: string }>;
         };
+        const allProjects = await allProjectsResponse.json() as {
+          projects: Array<{ id: string; name: string; status: string }>;
+        };
         if (!active) return;
         if (health.canonicalState !== "available" || health.fixtureMode || health.seededFallback) {
           throw new Error("Canonical state did not pass the production health contract.");
         }
         const projectId = projects.activeProjectId || projects.projects[0]?.id;
         if (!projectId) {
-          setState({ status: "empty" });
+          const archived = allProjects.projects.filter((project) => project.status === "archived");
+          setState(archived.length
+            ? { status: "archived", projects: archived }
+            : { status: "empty" });
           return;
         }
         router.replace(`/projects/${encodeURIComponent(projectId)}/work`);
@@ -71,6 +79,19 @@ export default function CampusAtlasRoot() {
             <p>No project exists in this workspace yet.</p>
             <div className="root-notice">
               Create the first project through workspace setup, then return here to transfer an existing room.
+            </div>
+          </>
+        )}
+        {state.status === "archived" && (
+          <>
+            <h1>No active projects</h1>
+            <p>Your archived project history is still preserved.</p>
+            <div className="root-notice">
+              {state.projects.map((project) => (
+                <a href={`/projects/${encodeURIComponent(project.id)}/inspect`} key={project.id}>
+                  Open {project.name} history
+                </a>
+              ))}
             </div>
           </>
         )}

@@ -179,6 +179,7 @@
 }
 
 .currentWork {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(220px, .55fr) auto;
   align-items: center;
@@ -191,6 +192,64 @@
     radial-gradient(circle at 92% 0%, rgba(77, 124, 254, .17), transparent 25rem),
     linear-gradient(150deg, rgba(15, 39, 75, .98), rgba(7, 21, 42, .96));
   box-shadow: 0 24px 70px rgba(0, 0, 0, .18);
+}
+
+.workMenu {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  z-index: 3;
+}
+
+.workMenu > summary {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border: 1px solid rgba(137, 160, 197, .2);
+  border-radius: 9px;
+  color: #9caeca;
+  background: rgba(5, 17, 35, .82);
+  cursor: pointer;
+  list-style: none;
+}
+
+.workMenu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.workMenu > div {
+  position: absolute;
+  top: 36px;
+  right: 0;
+  display: grid;
+  width: 148px;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid rgba(137, 160, 197, .2);
+  border-radius: 10px;
+  background: #09182f;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, .34);
+}
+
+.workMenu button {
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  color: #c3d0e2;
+  text-align: left;
+  background: rgba(255, 255, 255, .025);
+  cursor: pointer;
+}
+
+.workMenu button:hover {
+  background: rgba(77, 124, 254, .11);
+}
+
+.workMenu button:disabled {
+  opacity: .48;
+  cursor: not-allowed;
 }
 
 .currentWork h2 {
@@ -351,7 +410,7 @@
 }
 
 .historyHeader a,
-.historyCard small {
+.historyCard a {
   color: #91a7e8;
   font-size: 10px;
   text-decoration: none;
@@ -365,13 +424,54 @@
   border-radius: 10px;
   color: #dce5f3;
   background: rgba(255, 255, 255, .018);
-  text-decoration: none;
 }
 
-.historyCard span {
+.historyCard > span {
   color: #8195b2;
   font-size: 10px;
   line-height: 1.45;
+}
+
+.historyCard .historyStatus {
+  color: #7ed8cc;
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.historyCard > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 5px;
+}
+
+.historyCard button {
+  min-height: 31px;
+  padding: 6px 9px;
+  border: 1px solid rgba(91, 124, 235, .34);
+  border-radius: 7px;
+  color: #becdf3;
+  background: rgba(77, 124, 254, .08);
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.historyCard button:disabled {
+  opacity: .48;
+  cursor: not-allowed;
+}
+
+.lifecycleMessage {
+  margin: 0 0 16px;
+  padding: 11px 13px;
+  border: 1px solid rgba(39, 212, 199, .2);
+  border-radius: 9px;
+  color: #a6ded6;
+  background: rgba(39, 212, 199, .055);
+  font-size: 11px;
 }
 
 .moreActions > button {

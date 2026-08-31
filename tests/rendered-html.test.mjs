@@ -629,6 +629,241 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
   });
 });
 
+test("V1.8 lifecycle rename, archive, restore, and safe deletion preserve canonical history", async () => {
+  const worker = await builtWorker("v18-lifecycle");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
+
+  const conversation = await slice2Request(worker, DB, "/api/v1/projects/sports/conversations", {
+    method: "POST",
+    body: { title: "Slice 2 light proof" },
+  });
+  assert.equal(conversation.response.status, 201);
+  const conversationId = conversation.value.conversation.id;
+  const caseRecord = await slice2Request(worker, DB, "/api/v1/projects/sports/cases", {
+    method: "POST",
+    body: {
+      objective: "Preserve the historical Light proof",
+      conversationId,
+      makeActive: true,
+      actorId: "cody",
+    },
+  });
+  assert.equal(caseRecord.response.status, 201);
+  const message = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/conversations/${encodeURIComponent(conversationId)}/messages`,
+    {
+      method: "POST",
+      idempotencyKey: "lifecycle-source-message",
+      body: { actorType: "user", content: "Frozen Light proof history must remain intact." },
+    },
+  );
+  assert.equal(message.response.status, 201);
+  const event = await slice2Request(worker, DB, "/api/v1/projects/sports/events", {
+    method: "POST",
+    body: {
+      conversationId,
+      caseId: caseRecord.value.case.id,
+      type: "observation",
+      assignmentState: "assigned",
+      exactSourceSpan: "Frozen Light proof history must remain intact.",
+      sourceSpans: [{
+        messageId: message.value.message.id,
+        start: 0,
+        end: "Frozen Light proof history must remain intact.".length,
+      }],
+    },
+  });
+  assert.equal(event.response.status, 201);
+  DB.database.prepare(
+    `INSERT INTO findings (
+      id, project_id, case_id, finding_type, source_event_ids, status, authority_state, review_required
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "finding:lifecycle-history",
+    "sports",
+    caseRecord.value.case.id,
+    "observation",
+    JSON.stringify([event.value.event.id]),
+    "approved",
+    "approved",
+    0,
+  );
+  DB.database.prepare(
+    "INSERT INTO mechanisms (id, project_id, source_finding_id, status) VALUES (?, ?, ?, ?)",
+  ).run("mechanism:lifecycle-history", "sports", "finding:lifecycle-history", "active");
+
+  const continuitySnapshot = () => ({
+    projectId: DB.database.prepare("SELECT id FROM projects WHERE id = 'sports'").get().id,
+    messages: DB.database.prepare("SELECT id, project_id, conversation_id FROM messages WHERE project_id = 'sports'").all(),
+    events: DB.database.prepare("SELECT id, project_id, conversation_id FROM events WHERE project_id = 'sports'").all(),
+    findings: DB.database.prepare("SELECT id, project_id, case_id FROM findings WHERE project_id = 'sports'").all(),
+    mechanisms: DB.database.prepare("SELECT id, project_id, source_finding_id FROM mechanisms WHERE project_id = 'sports'").all(),
+  });
+  const before = continuitySnapshot();
+
+  const renamed = await slice2Request(worker, DB, "/api/v1/projects/sports", {
+    method: "PATCH",
+    body: { name: "Room Transfer Dogfood" },
+  });
+  assert.equal(renamed.response.status, 200, JSON.stringify(renamed.value));
+  assert.equal(renamed.value.project.id, "sports");
+  assert.equal(renamed.value.project.name, "Room Transfer Dogfood");
+  assert.equal(renamed.value.changed, true);
+  assert.deepEqual(continuitySnapshot(), before);
+
+  const renameReplay = await slice2Request(worker, DB, "/api/v1/projects/sports", {
+    method: "PATCH",
+    body: { name: "Room Transfer Dogfood" },
+  });
+  assert.equal(renameReplay.response.status, 200);
+  assert.equal(renameReplay.value.project.id, "sports");
+  assert.equal(renameReplay.value.changed, false);
+
+  const beforeArchive = await slice2Request(worker, DB, "/api/v1/projects/sports/work");
+  assert.equal(beforeArchive.value.activeConversationId, conversationId);
+  const archivedWork = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/work/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: { status: "archived" } },
+  );
+  assert.equal(archivedWork.response.status, 200, JSON.stringify(archivedWork.value));
+  assert.equal(archivedWork.value.workItem.id, conversationId);
+  assert.equal(archivedWork.value.workItem.status, "archived");
+  const afterArchive = await slice2Request(worker, DB, "/api/v1/projects/sports/work");
+  assert.equal(afterArchive.value.activeConversationId, null);
+  assert.equal(afterArchive.value.conversations[0].status, "archived");
+  assert.deepEqual(continuitySnapshot(), before);
+
+  const unsafeWorkDelete = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/work/${encodeURIComponent(conversationId)}`,
+    { method: "DELETE", body: {} },
+  );
+  assert.equal(unsafeWorkDelete.response.status, 409);
+  assert.match(unsafeWorkDelete.value.error, /part of Atlas history.*archived/i);
+
+  const restoredWork = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/work/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: { status: "active" } },
+  );
+  assert.equal(restoredWork.response.status, 200);
+  const afterRestore = await slice2Request(worker, DB, "/api/v1/projects/sports/work");
+  assert.equal(afterRestore.value.activeConversationId, conversationId);
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM conversations WHERE id = ?").get(conversationId).count,
+    1,
+  );
+
+  const completedWork = await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/work/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: { status: "completed" } },
+  );
+  assert.equal(completedWork.response.status, 200);
+  assert.equal(completedWork.value.workItem.status, "completed");
+  assert.equal((await slice2Request(worker, DB, "/api/v1/projects/sports/work")).value.activeConversationId, null);
+  await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/work/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: { status: "active" } },
+  );
+
+  await slice2Request(
+    worker,
+    DB,
+    `/api/v1/projects/sports/work/${encodeURIComponent(conversationId)}`,
+    { method: "PATCH", body: { status: "archived" } },
+  );
+  const archivedProject = await slice2Request(worker, DB, "/api/v1/projects/sports", {
+    method: "PATCH",
+    body: { status: "archived" },
+  });
+  assert.equal(archivedProject.response.status, 200);
+  assert.equal(archivedProject.value.project.id, "sports");
+  assert.equal(archivedProject.value.project.status, "archived");
+  const activeProjects = await slice2Request(worker, DB, "/api/v1/projects");
+  assert.equal(activeProjects.value.projects.some((project) => project.id === "sports"), false);
+  const allProjects = await slice2Request(worker, DB, "/api/v1/projects?includeArchived=true");
+  assert.equal(allProjects.value.projects.find((project) => project.id === "sports").status, "archived");
+  const archivedHistory = await slice2Request(worker, DB, "/api/v1/projects/sports/work");
+  assert.equal(archivedHistory.response.status, 200);
+  assert.equal(archivedHistory.value.conversations[0].id, conversationId);
+
+  const unsafeProjectDelete = await slice2Request(worker, DB, "/api/v1/projects/sports", {
+    method: "DELETE",
+    body: {},
+  });
+  assert.equal(unsafeProjectDelete.response.status, 409);
+  assert.match(unsafeProjectDelete.value.error, /part of Atlas history.*archived/i);
+  assert.deepEqual(continuitySnapshot(), before);
+
+  const restoredProject = await slice2Request(worker, DB, "/api/v1/projects/sports", {
+    method: "PATCH",
+    body: { status: "active" },
+  });
+  assert.equal(restoredProject.response.status, 200);
+  assert.equal(restoredProject.value.project.id, "sports");
+  assert.equal(restoredProject.value.project.status, "active");
+  assert.equal(
+    DB.database.prepare("SELECT COUNT(*) AS count FROM projects WHERE id = 'sports'").get().count,
+    1,
+  );
+
+  await seedCanonicalProject(worker, DB, "disposable", "Disposable local project");
+  const disposableDelete = await slice2Request(worker, DB, "/api/v1/projects/disposable", {
+    method: "DELETE",
+    body: {},
+  });
+  assert.equal(disposableDelete.response.status, 200);
+  assert.equal(disposableDelete.value.deleted, true);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM projects WHERE id = 'disposable'").get().count, 0);
+});
+
+test("V1.8 lifecycle UI stays transfer-first and frozen proof artifacts remain byte-identical", async () => {
+  const shell = await readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8");
+  const home = await readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8");
+  const steward = await readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8");
+  const inspect = await readFile(new URL("../app/projects/[projectId]/inspect/inspect-workspace.tsx", import.meta.url), "utf8");
+  const authenticPacket = await readFile(new URL("../fixtures/authentic/runs/run-001/atomic-comparison-repair-packet-pass.json", import.meta.url));
+  const authenticManifest = await readFile(new URL("../fixtures/authentic/runs/run-001/source-manifest.json", import.meta.url));
+  const part2 = await readFile(new URL("../fixtures/part2/closure-audit-v23.json", import.meta.url));
+  const part3 = await readFile(new URL("../fixtures/part3/runs/run-003/failure.json", import.meta.url));
+
+  assert.match(shell, /Project options/);
+  assert.match(shell, /Rename/);
+  assert.match(shell, /Archive project/);
+  assert.match(shell, /Archived projects/);
+  assert.match(shell, /Restore project/);
+  assert.doesNotMatch(shell, /ContextualAdd|Open Contextual Add/);
+  assert.match(home, /Transfer an existing room/);
+  assert.match(home, /No active work yet/);
+  assert.match(home, /Mark complete/);
+  assert.match(home, /Archive/);
+  assert.match(home, /Restore/);
+  assert.match(home, /Advanced \/ Internal records/);
+  assert.match(steward, /pendingTask\?\.projectId === projectId/);
+  assert.doesNotMatch(steward, /activeConversationId|\/work/);
+  assert.match(inspect, /hasActiveWork/);
+  assert.match(inspect, /Advanced/);
+  assert.deepEqual(
+    ["Home", "Steward", "Inspect"].map((label) => shell.includes(`label: "${label}"`)),
+    [true, true, true],
+  );
+  assert.equal(createHash("sha256").update(authenticPacket).digest("hex"), "3f50999a91441f796a7ebb02001766d4892fe2ecd1ef550cef2bebce614db09c");
+  assert.equal(createHash("sha256").update(authenticManifest).digest("hex"), "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622");
+  assert.equal(createHash("sha256").update(part2).digest("hex"), "6ec8eed9b14a4f7c5a2064cd45423ceeb2326f84aaa34bafff41729f1b8af287");
+  assert.equal(createHash("sha256").update(part3).digest("hex"), "ac58b9e78fecb065454ad13d014cb2a3591a5713d283453b1e76229aaefbaa92");
+});
+
 test("Slice 3 migrations add checkpoints and append-only governance metadata", async () => {
   const checkpointMigration = await readFile(new URL("../drizzle/0004_odd_patriot.sql", import.meta.url), "utf8");
   const governanceMigration = await readFile(new URL("../drizzle/0005_amusing_turbo.sql", import.meta.url), "utf8");
