@@ -7302,6 +7302,80 @@ test("Full packet rendering uses governed State Truth without Roadway scaffoldin
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 1);
 });
 
+test("zero-Roadway Full selects only materially applicable governed State Truth", async () => {
+  const worker = await builtWorker("steward-zero-roadway-state-truth-applicability");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "workflow", "Workflow Engine");
+  await initializeRoadways(worker, DB, "workflow");
+
+  const current = seedSlice4Mechanism(DB, {
+    id: "mechanism:zero-roadway-current",
+    projectId: "workflow",
+    statement: "Continue the Migration Continuity proof as the current direction instead of the historical Archive First rollout.",
+  });
+  const constraint = seedSlice4Mechanism(DB, {
+    id: "mechanism:zero-roadway-constraint",
+    projectId: "workflow",
+    statement: "The Migration Continuity proof must preserve exact-source lineage before any Archive First expansion.",
+  });
+  const correction = seedSlice4Mechanism(DB, {
+    id: "mechanism:zero-roadway-correction",
+    projectId: "workflow",
+    statement: "Correction: Archive First is no longer current; continue Migration Continuity until its proof closes.",
+  });
+  const rationale = seedSlice4Mechanism(DB, {
+    id: "mechanism:zero-roadway-rationale",
+    projectId: "workflow",
+    statement: "Archive First was superseded because Migration Continuity must be proven before the project scope widens.",
+  });
+  const optional = seedSlice4Mechanism(DB, {
+    id: "mechanism:zero-roadway-optional",
+    projectId: "workflow",
+    statement: "The migration proof naming appendix records candidate labels for possible later use.",
+  });
+  const unrelated = seedSlice4Mechanism(DB, {
+    id: "mechanism:zero-roadway-unrelated",
+    projectId: "workflow",
+    statement: "The catering schedule uses a quarterly menu review.",
+  });
+
+  const task = "Continue the Migration Continuity proof: what current direction governs, what exact-source constraint prevents reversal, and why was Archive First superseded?";
+  const requestedOutput = "Prepare a full room transfer with the governing correction, causal rationale, and proof boundary.";
+  const candidates = await slice2Request(worker, DB, "/api/v1/projects/workflow/reconstruction/candidates", {
+    method: "POST",
+    body: {
+      task,
+      requestedDecisionOrOutput: requestedOutput,
+      tokenBudget: 1600,
+    },
+  });
+  assert.equal(candidates.response.status, 200, JSON.stringify(candidates.value));
+  assert.equal(candidates.value.interpretation.primaryRoadway, null);
+  assert.equal(candidates.value.interpretation.materialAmbiguity, false);
+  assert.deepEqual(candidates.value.interpretation.applicability.applicableRoadwayIds, []);
+  const treatments = new Map(Object.values(candidates.value.treatmentSummary).flat().map((item) => [item.sourceId, item]));
+  for (const mechanism of [current, constraint, correction, rationale]) {
+    assert.equal(treatments.get(mechanism.id).treatment, "Use", JSON.stringify(treatments.get(mechanism.id)));
+    assert.match(treatments.get(mechanism.id).reason, /direct governed State Truth applicability/i);
+  }
+  assert.equal(treatments.get(optional.id).treatment, "Consider");
+  assert.equal(treatments.get(unrelated.id).treatment, "Exclude");
+
+  const full = await reconstructionRunRequest(worker, DB, "workflow", {
+    task,
+    requestedOutput,
+    tokenBudget: 1600,
+  }, "steward-zero-roadway-state-truth-applicability");
+  assert.equal(full.response.status, 201, JSON.stringify(full.value));
+  assert.equal(full.value.need.level, "full");
+  assert.equal(full.value.roadway.id, null);
+  for (const mechanism of [current, constraint, correction, rationale]) {
+    assert.match(full.value.packet.compiledContent, new RegExp(treatments.get(mechanism.id).statement.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  assert.doesNotMatch(full.value.packet.compiledContent, /naming appendix|catering schedule/i);
+  assert.doesNotMatch(full.value.packet.compiledContent, /Primary roadway|Required Blueprint checks|\[CHECK\]/i);
+});
+
 test("V1.7.1 reconstruction/run enforces isolation, server ownership, and complete idempotency", async () => {
   const worker = await builtWorker("v171-slice-b-isolation-idempotency");
   const DB = await sqliteD1();

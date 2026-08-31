@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "phase": "stopped_at_first_packet_completeness_failure_after_state_truth_applicability_repair",
+  "repairBoundary": {
+    "zeroRoadwayStateTruthApplicabilityEnabled": true,
+    "roadwayRequiredForStateTruthApplicability": false,
+    "directTaskRelevanceSupported": true,
+    "governingFacetApplicabilitySupported": true,
+    "causalStateTruthStatementsRemainAtomic": true,
+    "fullPromotesAllGovernedState": false,
+    "roadwayApplicabilityChanged": false,
+    "packetCompilerChanged": false
+  },
+  "stateTruthPreservation": {
+    "discoveryVersion": "slice3-mature-coverage-v1",
+    "candidateConstructionVersion": "slice3-mature-relationships-v4",
+    "discoveryIdentitiesPreserved": true,
+    "selectedSourceSequences": [
+      32,
+      35,
+      42,
+      49,
+      61,
+      78,
+      83,
+      88,
+      89,
+      93,
+      97,
+      102,
+      103,
+      104,
+      105,
+      109,
+      110,
+      113,
+      115,
+      116,
+      117
+    ],
+    "eventsConsidered": 117,
+    "eventsSelected": 21,
+    "candidateCount": 8,
+    "candidateReuse": {
+      "reusedEquivalent": 6,
+      "created": 2,
+      "duplicateCanonicalStorageCreatedForReusedCandidates": false
+    },
+    "governedUseCandidates": 8,
+    "governanceEvents": 8,
+    "canonicalMechanisms": 3,
+    "exactLineageCompleteBeforeDelivery": true,
+    "authorityCreatedDuringApplicability": false
+  },
+  "roadwayApplicability": {
+    "primaryRoadway": null,
+    "materialAmbiguity": false,
+    "clarificationRequired": false,
+    "applicableRoadwayCount": 0,
+    "candidateRoadwayCount": 0,
+    "excludedRoadwayCount": 3,
+    "governedRelationshipEvidenceUsed": false
+  },
+  "steward": {
+    "reached": true,
+    "need": "full",
+    "reasonCodes": [
+      "explicit_full_room_transfer"
+    ],
+    "httpStatus": 201,
+    "status": "compiled",
+    "effects": {
+      "packetCreated": true,
+      "receiptCreated": true,
+      "handoffCreated": false,
+      "providerCallPerformed": false,
+      "authorityChanged": false
+    }
+  },
+  "frozenDisposition": {
+    "counts": {
+      "Use": 3,
+      "Consider": 76,
+      "Exclude": 114
+    },
+    "useMechanismIds": [
+      "mechanism:2d2adc1ab6f8934b9828b1be533eb40d",
+      "mechanism:6e04d5a98da90e56c7be29bd635704e5",
+      "mechanism:a0fda2b2c99e2eb6096d8d1682d630e4"
+    ],
+    "considerMechanismIds": [],
+    "excludeMechanismIds": [],
+    "fullExactDispositionRetainedInPrivateReceipt": true
+  },
+  "frozenPacket": {
+    "packetId": "packet:a3558fc2-ad42-4f11-8560-e7912ce95098",
+    "receiptId": "receipt:10b89e43-1282-47ad-8245-c1cd2ca0df7e",
+    "tokenBudget": 800,
+    "finalTokenCount": 387,
+    "utf8Bytes": 1549,
+    "characters": 1547,
+    "whitespaceWords": 183,
+    "compiledContentSha256": "6f2b8dc96007df490f281f7ee809f3a5b621742dd2b56300d584dd90c04eece1",
+    "packetCanonicalJsonSha256": "e4e6e3436d5c31f6d9702c40f7f0971955943202cae57a7ebb63c4695eb59957",
+    "receiptCanonicalJsonSha256": "6a7d30cb67d61f92633b8db421850ef0973b33a3896f47e9592d829f87aee5ee",
+    "primaryRoadwayId": null,
+    "primaryRoadwayVersionId": null,
+    "governingMechanismsSupplied": 3,
+    "requiredChecksSupplied": 0,
+    "genericRoadwayScaffoldingPresent": false,
+    "canonicalPacketItems": 193,
+    "exactEventCandidatesRetainedForLineage": 117,
+    "useMechanismsWithFindingNodeEventLineage": 3,
+    "exactPacketAndReceiptRemainLocalPrivate": true
+  },
+  "priorPacketImmutability": {
+    "priorPacketId": "packet:d3c389d6-bc4a-4597-9eea-7357f572af3f",
+    "priorReceiptId": "receipt:f87ee393-df3d-4a0c-a29f-f0efca7b0ce7",
+    "priorCompiledContentSha256": "bc3fa2e0e6239eae601e5cc4a665752c24182f39cbf75536fef7ea329c3cc7ea",
+    "priorPacketAndReceiptRetained": true
+  },
+  "firstGenuineFailure": {
+    "classification": "selected_governed_mechanism_versions_do_not_cover_frozen_continuity_state",
+    "boundary": "Full packet completeness after successful task-to-State-Truth applicability",
+    "expected": "The three applicable governed mechanisms should carry the materially required current direction, next action, rationale, corrections or supersession guards, constraints, deferred work, and stop boundary represented by the eight reviewed State Truth candidates.",
+    "actual": "All three current governed mechanisms were correctly selected as Use, but their current statements supply only the authentic proof question and short State Truth and Context Delivery definitions. The packet omits the specific current authentic-transfer direction, accepted UI freeze, no-repair stopping rule, material constraints, deferred work, and current next action. One supplied proof-question statement is also compacted with an ellipsis.",
+    "applicabilityRepairPassed": true,
+    "downstreamRepairAttempted": false,
+    "destinationRoomsReached": false,
+    "copyBehaviorReached": false
+  },
+  "frozenEvidence": {
+    "sourceSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "localDatabaseSha256": "a50e0127a342534ff97cadf6ee5b821c49dbf3db3e66a711f2e6abf773e3dff5",
+    "localStewardEvidenceSha256": "43460aed7f0f6ffc1bf0c7ac71928e0d6c945485cae7418e2911971ef450fbf7",
+    "privateTranscriptCommitted": false
+  },
+  "productionChanged": false
+}

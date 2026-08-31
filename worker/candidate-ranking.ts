@@ -404,12 +404,16 @@ function planningAnchors(value: string) {
   )));
 }
 
-function broadPlanningApplicability(
+function governedStateTruthApplicability(
   candidate: RawCandidate,
   interpretation: TaskInterpretation,
 ) {
   if (candidate.sourceType !== "Mechanism") return null;
-  if (interpretation.primaryRoadway?.slug !== "broad-lock-finding") return null;
+  const broadRoadway = interpretation.primaryRoadway?.slug === "broad-lock-finding";
+  const noApplicableRoadway = !interpretation.primaryRoadway
+    && !interpretation.materialAmbiguity
+    && interpretation.applicability.applicableRoadwayIds.length === 0;
+  if (!broadRoadway && !noApplicableRoadway) return null;
   const context = matchingContext(interpretation);
   const requestedFacets = planningFacets(context);
   const broadContinuation = requestedFacets.includes("direction")
@@ -420,20 +424,28 @@ function broadPlanningApplicability(
   const coveredFacets = candidateFacets.filter((facet) => requestedFacets.includes(facet));
   const statusGuard = candidateFacets.includes("status")
     && (requestedFacets.includes("direction") || requestedFacets.includes("avoidance"));
-  if (!coveredFacets.length && !statusGuard) return null;
 
   const contextAnchors = new Set(planningAnchors(context));
   const sharedAnchors = planningAnchors(candidate.statement).filter((word) => contextAnchors.has(word));
-  if (sharedAnchors.length < 1) return null;
+  const contextEntities = new Set(entityTerms(context));
+  const sharedEntities = entityTerms(candidate.statement).filter((entity) => contextEntities.has(entity));
+  const governingFacetApplies = sharedAnchors.length >= 1 && (coveredFacets.length > 0 || statusGuard);
+  const directStateTruthApplies = noApplicableRoadway && (
+    sharedAnchors.length >= 4
+    || (sharedAnchors.length >= 1 && sharedEntities.length >= 2)
+  );
+  if (!governingFacetApplies && !directStateTruthApplies) return null;
 
   return {
-    score: coveredFacets.length >= 2 ? 4 : 3,
+    score: coveredFacets.length >= 2 || sharedAnchors.length >= 3 ? 4 : 3,
+    mode: broadRoadway ? "broad_roadway" as const : "direct_state_truth" as const,
     requestedFacets,
     candidateFacets,
     coveredFacets: statusGuard && !coveredFacets.includes("status")
       ? [...coveredFacets, "status" as const]
       : coveredFacets,
     sharedAnchors,
+    sharedEntities,
   };
 }
 
@@ -474,7 +486,7 @@ function taskMatch(signals: DiscoverySignals, candidate: RawCandidate, interpret
       ? semanticFamilies(candidate.statement).some((family) => ["margin", "price"].includes(family))
       : semanticFamilies(candidate.statement).some((family) => ["broad", "price", "margin"].includes(family));
   const directScore = directFamily && roleMatch ? 4 : directFamily ? 3 : lexical || roleMatch ? 2 : signals.entityMatch > 0 ? 1 : 0;
-  const planning = broadPlanningApplicability(candidate, interpretation);
+  const planning = governedStateTruthApplicability(candidate, interpretation);
   return {
     score: Math.max(directScore, planning?.score || 0),
     planning,
@@ -560,7 +572,9 @@ function rankCandidate(candidate: RawCandidate, interpretation: TaskInterpretati
   ) {
     treatment = "Use";
     reason = applicability.planning
-      ? `Broad project-continuation applicability covers ${applicability.planning.coveredFacets.join(", ")} with bounded task anchors: ${applicability.planning.sharedAnchors.join(", ")}. Valid scope, approved authority, and current governing status permit Use.`
+      ? applicability.planning.mode === "broad_roadway"
+        ? `Broad project-continuation applicability covers ${applicability.planning.coveredFacets.join(", ")} with bounded task anchors: ${applicability.planning.sharedAnchors.join(", ")}. Valid scope, approved authority, and current governing status permit Use.`
+        : `Direct governed State Truth applicability${applicability.planning.coveredFacets.length ? ` covers ${applicability.planning.coveredFacets.join(", ")}` : " establishes material task relevance"} with bounded task anchors: ${applicability.planning.sharedAnchors.join(", ")}. Valid scope, approved authority, and current governing status permit Use without a Roadway.`
       : "Direct mechanism fit, valid scope, approved authority, and adequate historical freshness permit governing use.";
   } else if (candidate.authority === "challenged") {
     treatment = "Consider";
