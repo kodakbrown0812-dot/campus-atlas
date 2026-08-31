@@ -4464,6 +4464,138 @@ test("Slice 4 calibration treatments enforce mechanism, scope, authority, eviden
   assert.equal(isolatedIds.includes(primary.id), false);
 });
 
+test("semantic identity dependencies preserve conflicting accepted-state commits without promoting unrelated identifiers", async () => {
+  const worker = await builtWorker("semantic-identity-unresolved");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Semantic Identity Conflict");
+  await initializeRoadways(worker, DB, "sports");
+  const acceptedCommit = "2764bed97db4e02e8684c05b36b103620f0bb042";
+  const conflictingCommit = "2764bed97db4e02e8684c05b36b103620f0bb942";
+  const unrelatedCommit = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const seeded = await seedSlice3Case(worker, DB, "semantic-identity-unresolved", [
+    "observation",
+    "decision",
+    "observation",
+  ], [
+    `Implemented the accepted product surface UI; final report — Commit: ${acceptedCommit}.`,
+    `UI simplification is frozen at commit ${conflictingCommit}.`,
+    `Unrelated repository note: commit ${unrelatedCommit} belongs to the documentation exporter.`,
+  ]);
+  const boundary = seedSlice4Mechanism(DB, {
+    id: "mechanism:semantic-ui-boundary",
+    statement: "The next proof must continue the accepted current product surface and avoid another UI slice: Home = steering; Steward = Context Delivery; Inspect = readable State Truth plus proof.",
+    supportingCaseIds: [seeded.caseId],
+  });
+  const identity = seedSlice4Mechanism(DB, {
+    id: "mechanism:semantic-ui-identity",
+    statement: `UI simplification is frozen at commit ${conflictingCommit}.`,
+    supportingCaseIds: [seeded.caseId],
+  });
+  const unrelated = seedSlice4Mechanism(DB, {
+    id: "mechanism:unrelated-repository-identity",
+    statement: `Documentation exporter source commit ${unrelatedCommit} was recorded for reference.`,
+    supportingCaseIds: [seeded.caseId],
+  });
+
+  const result = await createSlice4Packet(worker, DB, {
+    task: "What should we build next for the accepted product surface, what should we avoid, and what constraints must govern the proof?",
+    caseId: seeded.caseId,
+    tokenBudget: 1600,
+    roadwayOverride: "broad-lock-finding",
+  }, "semantic-identity-unresolved-packet");
+  assert.equal(result.response.status, 201, JSON.stringify(result.value));
+  assert.equal(result.value.packet.status, "compiled");
+  const content = result.value.packet.compiledContent;
+  assert.match(content, new RegExp(acceptedCommit), JSON.stringify(result.value.receipt.treatmentSummary));
+  assert.match(content, new RegExp(conflictingCommit));
+  assert.match(content, /Identity conflict: accepted UI commit .* is unresolved/i);
+  const boundaryLine = content.split("\n").find((line) => line.includes(boundary.id));
+  assert.ok(boundaryLine, JSON.stringify(result.value.receipt.treatmentSummary));
+  assert.match(boundaryLine, new RegExp(acceptedCommit));
+  assert.match(boundaryLine, new RegExp(conflictingCommit));
+  assert.equal(content.includes(unrelatedCommit), false);
+
+  const treatments = Object.values(result.value.receipt.treatmentSummary).flat();
+  const byId = new Map(treatments.map((item) => [item.sourceId, item]));
+  assert.equal(byId.get(identity.id).treatment, "Use");
+  assert.equal(byId.get(identity.id).metadata.materializedByDependencySourceId, boundary.id);
+  assert.equal(byId.get(boundary.id).metadata.semanticIdentityDependency.escalation, "full_governed_conflict");
+  assert.match(byId.get(identity.id).reason, /inherits task relevance/i);
+  assert.notEqual(byId.get(unrelated.id).treatment, "Use");
+  const acceptedEvidence = treatments.find((item) => (
+    item.sourceId === seeded.events[0].id && item.metadata?.semanticIdentityDependency?.value === acceptedCommit
+  ));
+  assert.ok(acceptedEvidence, JSON.stringify(treatments));
+  assert.equal(acceptedEvidence.treatment, "Use");
+  assert.equal(acceptedEvidence.metadata.materializedByDependencySourceId, boundary.id);
+  const sourceMessageId = JSON.parse(DB.database.prepare(
+    "SELECT source_message_ids FROM events WHERE id = ?",
+  ).get(acceptedEvidence.sourceId).source_message_ids)[0];
+  const exactMessage = DB.database.prepare("SELECT exact_content FROM messages WHERE id = ?").get(sourceMessageId);
+  assert.match(exactMessage.exact_content, new RegExp(acceptedCommit));
+  assert.ok(result.value.receipt.unresolvedConflicts.some((item) => (
+    item.sourceId === boundary.id && item.statement.includes(acceptedCommit) && item.statement.includes(conflictingCommit)
+  )));
+});
+
+test("explicit governing correction resolves semantic identity despite a later conflicting identifier", async () => {
+  const worker = await builtWorker("semantic-identity-resolved");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "Semantic Identity Resolution");
+  await initializeRoadways(worker, DB, "sports");
+  const acceptedCommit = "1111111111111111111111111111111111111042";
+  const rejectedCommit = "2222222222222222222222222222222222222942";
+  const seeded = await seedSlice3Case(worker, DB, "semantic-identity-resolved", [
+    "observation",
+    "correction",
+    "observation",
+  ], [
+    `UI simplification was previously reported at commit ${rejectedCommit}.`,
+    `Correction: the explicitly accepted UI commit is ${acceptedCommit}, not ${rejectedCommit}.`,
+    `A later unreviewed UI simplification note repeats commit ${rejectedCommit}.`,
+  ]);
+  const boundary = seedSlice4Mechanism(DB, {
+    id: "mechanism:resolved-ui-boundary",
+    statement: "The next proof must continue the accepted current product surface and avoid another UI slice: Home = steering; Steward = Context Delivery; Inspect = readable State Truth plus proof.",
+    supportingCaseIds: [seeded.caseId],
+  });
+  const governingIdentity = seedSlice4Mechanism(DB, {
+    id: "mechanism:resolved-ui-identity",
+    statement: `Correction: the explicitly accepted UI commit is ${acceptedCommit}, not ${rejectedCommit}.`,
+    supportingCaseIds: [seeded.caseId],
+  });
+  const laterIdentity = seedSlice4Mechanism(DB, {
+    id: "mechanism:later-ui-identity",
+    statement: `UI simplification is frozen at commit ${rejectedCommit}.`,
+    supportingCaseIds: [seeded.caseId],
+    createdAt: "2026-07-02T12:00:00.000Z",
+  });
+
+  const result = await createSlice4Packet(worker, DB, {
+    task: "What should we build next for the accepted product surface, what should we avoid, and what constraints must govern the proof?",
+    caseId: seeded.caseId,
+    tokenBudget: 1600,
+    roadwayOverride: "broad-lock-finding",
+  }, "semantic-identity-resolved-packet");
+  assert.equal(result.response.status, 201, JSON.stringify(result.value));
+  assert.equal(result.value.packet.status, "compiled");
+  const content = result.value.packet.compiledContent;
+  const boundaryLine = content.split("\n").find((line) => line.includes(boundary.id));
+  assert.ok(boundaryLine);
+  assert.match(boundaryLine, new RegExp(acceptedCommit));
+  assert.doesNotMatch(boundaryLine, new RegExp(rejectedCommit));
+  assert.doesNotMatch(content, /Identity conflict:/i);
+  assert.equal(result.value.receipt.unresolvedConflicts.length, 0);
+
+  const treatments = Object.values(result.value.receipt.treatmentSummary).flat();
+  const byId = new Map(treatments.map((item) => [item.sourceId, item]));
+  assert.equal(byId.get(governingIdentity.id).treatment, "Use");
+  assert.equal(byId.get(governingIdentity.id).metadata.semanticIdentityDependency.status, "resolved");
+  assert.equal(byId.get(governingIdentity.id).metadata.semanticIdentityDependency.value, acceptedCommit);
+  assert.notEqual(byId.get(laterIdentity.id).treatment, "Use");
+  assert.match(byId.get(boundary.id).reason, /resolved by/i);
+});
+
 test("Slice 4 enforces 400, 800, and 1600 budgets, honest failures, idempotency, and immutability", async () => {
   const worker = await builtWorker("slice4-budgets-immutability");
   const DB = await sqliteD1();

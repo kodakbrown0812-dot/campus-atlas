@@ -226,8 +226,11 @@ function renderPacket(
   missingLiveState: string[],
 ) {
   const header = renderHeader(interpretation, budget, projectId);
-  const useItems = candidates.filter((item) => item.treatment === "Use");
-  const protectedCandidates = minimumSafeItems(candidates);
+  const renderedCandidates = candidates.filter((item) => (
+    typeof item.metadata?.materializedByDependencySourceId !== "string"
+  ));
+  const useItems = renderedCandidates.filter((item) => item.treatment === "Use");
+  const protectedCandidates = minimumSafeItems(renderedCandidates);
   const mandatory = [
     section("Required Blueprint checks", checks),
     section("Required current state", useItems.filter((item) => item.sourceType === "LiveStateSnapshot")),

@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "phase": "packet_gate_passed_after_semantic_identity_dependency_repair",
+  "diagnosis": {
+    "failureBoundary": "Semantic identity dependency, conflict handling, and task-specific delivery",
+    "cause": "The accepted UI boundary and its concrete repository identity were ranked independently. Raw recency allowed a later conflicting commit identity to appear settled, and the identity was then excluded for weak lexical task overlap.",
+    "firstFailedCriterion": 3,
+    "otherRubricMissesRepaired": false,
+    "discoveryChanged": false,
+    "candidateConstructionChanged": false,
+    "stateTruthChanged": false,
+    "governanceChanged": false,
+    "baseApplicabilityChanged": false,
+    "atomicCompactionChanged": false
+  },
+  "repair": {
+    "scope": "semantic commit identity and accepted-state dependency preservation only",
+    "semanticityRule": "An identifier is preserved only when its removal would make materially different accepted states, authorities, provenance, or future actions indistinguishable.",
+    "dependencyRule": "A material identity inherits delivery relevance from the task-relevant governed proposition it disambiguates and is rendered with that proposition.",
+    "conflictRule": "Raw recency cannot resolve conflicting semantic identities. Resolution requires explicit correction, acceptance, governance, or supersession evidence; otherwise the conflict remains governed and unresolved.",
+    "unrelatedIdentifiersPromoted": false,
+    "globalBudgetIncreased": false,
+    "compactionDisabled": false
+  },
+  "frozenUpstream": {
+    "sourceItems": 117,
+    "sourceEstimatedTokens": 46883,
+    "sourceUtf8Bytes": 188534,
+    "discoveryVersion": "slice3-mature-coverage-v1",
+    "candidateConstructionVersion": "slice3-mature-relationships-v4",
+    "selectedSourceSequences": [
+      32,
+      35,
+      42,
+      49,
+      61,
+      78,
+      83,
+      88,
+      89,
+      93,
+      97,
+      102,
+      103,
+      104,
+      105,
+      109,
+      110,
+      113,
+      115,
+      116,
+      117
+    ],
+    "candidateCount": 8,
+    "candidateRoles": [
+      "current_direction",
+      "next_action",
+      "constraint",
+      "correction_guard",
+      "rationale",
+      "connection",
+      "uncertainty",
+      "shared_term"
+    ],
+    "governedMechanisms": 8,
+    "governanceEvents": 8,
+    "need": "full",
+    "applicableRoadways": 0,
+    "materialRoadwayAmbiguity": false
+  },
+  "identityResult": {
+    "conflictDetected": true,
+    "subject": "accepted_ui_state",
+    "identities": [
+      "2764bed97db4e02e8684c05b36b103620f0bb042",
+      "2764bed97db4e02e8684c05b36b103620f0bb942"
+    ],
+    "governingIdentity": null,
+    "resolution": "unresolved_no_canonical_correction_acceptance_governance_or_supersession",
+    "escalation": "full_governed_conflict",
+    "boundaryMechanismId": "mechanism:7b80e390b6933b033ea16984e22e5cca",
+    "conflictingIdentityMechanismId": "mechanism:4196b28d7c7bc036c2014258e6481472",
+    "acceptedIdentityExactEvidence": {
+      "eventId": "event:exact-message:00000116:9dad50f030ca63a6fa9c8b48",
+      "sequence": 116,
+      "contentSha256": "101e37ec2051280ed03978610a2f648deb2d676a27d231f2d020639a25b616d7",
+      "exactBytesMatch": true
+    },
+    "conflictingIdentitySourceSequence": 117,
+    "authorityOverRecencyVerifiedByFocusedTest": true
+  },
+  "applicability": {
+    "acceptedBoundaryTreatment": "Use",
+    "acceptedBoundaryRepresentation": "Conflicted",
+    "acceptedIdentityExactEventTreatment": "Use",
+    "conflictingIdentityMechanismTreatment": "Use",
+    "inheritanceSource": "task-relevant accepted UI boundary",
+    "identityLexicalOverlapRequired": false,
+    "unrelatedShaTreatment": "prunable",
+    "treatmentCounts": {
+      "Use": 9,
+      "Consider": 70,
+      "Exclude": 119
+    }
+  },
+  "frozenDelivery": {
+    "packetId": "packet:aa96082a-78ff-4263-8847-8e8923f0ca99",
+    "receiptId": "receipt:e35421ee-fa66-4c6f-8ee3-124ae8dfea6e",
+    "tokenBudget": 800,
+    "previousPacketEstimatedTokens": 756,
+    "packetEstimatedTokens": 791,
+    "packetTokenDelta": 35,
+    "sourceEstimatedTokens": 46883,
+    "percentageReduction": 98.3128212785018,
+    "absoluteEstimatedTokensSaved": 46092,
+    "utf8Bytes": 3162,
+    "whitespaceWords": 379,
+    "compiledContentSha256": "79174486caac2e7901b16ccdc5025a6e84bde120d07aec9a086a584b0bcdc571",
+    "packetCanonicalJsonSha256": "40864c1f6242a3068ffce9ab1254eda658c32184c09eeed94ec611796ab7fc1c",
+    "receiptCanonicalJsonSha256": "808afbf738ec9840450a24b50f942a32ac19d22f03a7dc04edeed2065befdbd9",
+    "governingMechanismsSupplied": 8,
+    "protectedConflictsSupplied": 1,
+    "identityRenderedWithAcceptedBoundary": true,
+    "exactCompiledContentAndReceiptRemainLocalPrivate": true
+  },
+  "lineage": {
+    "useMechanismsWithCompleteFindingExactEventMessageLineage": 8,
+    "useMechanismsTotal": 8,
+    "acceptedIdentityExactEventLineageComplete": true
+  },
+  "privateLocalEvidence": {
+    "directory": "/private/tmp/campus-atlas-semantic-identity.final-20260830",
+    "databaseSha256": "adac956d858317ccfa5da72caf1dd2aab232c980d5999d5a58eb16373ca4c8ad",
+    "pipelineEvidenceSha256": "76d5978d75805f42db25eea03b3613fbd8e317e514c3918871cd61e9a29b1d3b",
+    "stewardResultSha256": "17f4e84419111f695312b27c26a8989cc57dbfdbc599eaa1ca3fb415518b2f09",
+    "privateTranscriptCommitted": false
+  },
+  "frozenEvidence": {
+    "sourceSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "inputDatabaseSha256": "94ef0989df659acdd2620639ce12324dcbc5a8f1cf2f3f4e9c4d42907322c852",
+    "baselineDestinationOutputSha256": "c3d757bb37471856b93b45565a5e4c9d4241ee85a91082c4585ceeecfcbdad0b",
+    "atlasDestinationOutputSha256": "89721ee15b4f64ceaeaf40b98f9f35d01ddf80689aa735d6c3e166659dda6fab",
+    "destinationComparisonScorecardSha256": "fbc6dc15cad3ea358cf7169732072d71dcbf6dc7438318ba50f2b52781434360",
+    "baselineAndAtlasDestinationOutputsChanged": false,
+    "destinationRerun": false
+  },
+  "regressions": {
+    "tests": 111,
+    "passed": 106,
+    "documentedSkips": 5,
+    "failed": 0,
+    "typecheck": "passed",
+    "lint": "passed",
+    "build": "passed",
+    "artifactValidation": "passed",
+    "part3b": "frozen_and_deterministic",
+    "part3c": "frozen_and_deterministic",
+    "part3d": "frozen_and_verified",
+    "part3e": "frozen_and_verified"
+  },
+  "nextSmallestFailure": {
+    "repairDeferred": "persistent proof controls plus task-specific delivery and audit envelope",
+    "convergingCriteria": [6, 8, 9, 10, 11, 12, 18, 19, 24],
+    "distinctDiscoveryDependencyMiss": 23,
+    "downstreamRepairAttempted": false
+  },
+  "uiChanged": false,
+  "productionChanged": false
+}

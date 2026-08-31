@@ -97,6 +97,192 @@ function entityTerms(value: string) {
   return distinct(value.match(/\b[A-Z][A-Za-z0-9–'-]{2,}\b/g) || []).map((term) => term.toLowerCase());
 }
 
+type SemanticIdentityKind = "commit";
+
+type SemanticIdentityClaim = {
+  candidate: RankedCandidate;
+  kind: SemanticIdentityKind;
+  subject: string;
+  value: string;
+};
+
+type SemanticIdentityResolution = {
+  winner: string;
+  loser: string;
+  sourceId: string;
+};
+
+const COMMIT_IDENTITY = /\b[0-9a-f]{7,40}\b/giu;
+const COMMIT_IDENTITY_CUE = /\b(?:commit|source commit|commit sha|repository revision)\b/iu;
+
+function semanticIdentitySubjects(value: string) {
+  const subjects: string[] = [];
+  if (/\b(?:ui simplification|interface|product surface)\b/iu.test(value)
+    || /\bui\b[\s\S]{0,80}\bcommit\b/iu.test(value)
+    || (/\bHome\b/u.test(value) && /\bSteward\b/u.test(value) && /\bInspect\b/u.test(value))) {
+    subjects.push("accepted_ui_state");
+  }
+  if (/\b(?:production|deployment)\b/iu.test(value)) subjects.push("production_deployment_state");
+  if (/\b(?:packet|receipt)\b/iu.test(value)) subjects.push("delivery_artifact_state");
+  return subjects;
+}
+
+function semanticIdentityClaims(candidate: RankedCandidate): SemanticIdentityClaim[] {
+  if (!COMMIT_IDENTITY_CUE.test(candidate.statement)) return [];
+  const claims: SemanticIdentityClaim[] = [];
+  const units = candidate.statement.split(/\n+|(?<=[.!?])\s+/u).map((value) => value.trim()).filter(Boolean);
+  const acceptedUiReport = /\bfinal pre-authentic-test (?:inspect|ui) trim\b/iu.test(candidate.statement);
+  for (const unit of units) {
+    if (!COMMIT_IDENTITY_CUE.test(unit)) continue;
+    const unitValues = distinct([...unit.matchAll(COMMIT_IDENTITY)].map((match) => match[0].toLowerCase()));
+    if (!unitValues.length) continue;
+    const subjects = semanticIdentitySubjects(unit);
+    if (acceptedUiReport && /^\s*(?:\d+[.)]\s*)?\**commit\b[\s:*]*/iu.test(unit)) {
+      subjects.push("accepted_ui_state");
+    }
+    const purportsToAcceptedState = /\b(?:accepted|frozen|governing|authoritative)\b/iu.test(unit)
+      || (acceptedUiReport && /^\s*(?:\d+[.)]\s*)?\**commit\b[\s:*]*/iu.test(unit));
+    if (!purportsToAcceptedState) continue;
+    for (const subject of distinct(subjects)) {
+      for (const value of unitValues) claims.push({ candidate, kind: "commit", subject, value });
+    }
+  }
+  return claims;
+}
+
+function boundaryAcceptsSemanticIdentity(candidate: RankedCandidate, subject: string) {
+  if (candidate.sourceType !== "Mechanism" || candidate.treatment !== "Use") return false;
+  if (!["approved_local", "approved_project_wide", "approved_cross_project"].includes(candidate.authority)) return false;
+  if (!semanticIdentitySubjects(candidate.statement).includes(subject)) return false;
+  return /\b(?:accepted|current|frozen|governing|authoritative)\b/iu.test(candidate.statement);
+}
+
+function escaped(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+}
+
+function explicitSemanticIdentityResolution(claims: SemanticIdentityClaim[]): SemanticIdentityResolution | null {
+  const values = distinct(claims.map((claim) => claim.value));
+  if (values.length < 2) return null;
+  const candidateClaims = new Map<RankedCandidate, string[]>();
+  for (const claim of claims) {
+    candidateClaims.set(claim.candidate, distinct([...(candidateClaims.get(claim.candidate) || []), claim.value]));
+  }
+  for (const [candidate, candidateValues] of candidateClaims) {
+    if (candidateValues.length < 2) continue;
+    const statement = candidate.statement.toLowerCase();
+    const explicitAuthority = /\b(?:correction|corrected|explicitly accepted|governing identity|authoritative identity|supersedes|replaces|superseded|replaced)\b/iu.test(statement);
+    if (!explicitAuthority) continue;
+    for (const winner of candidateValues) {
+      for (const loser of candidateValues) {
+        if (winner === loser) continue;
+        const winnerBeforeNot = new RegExp(`${escaped(winner)}[\\s\\S]{0,80}\\bnot\\b[\\s\\S]{0,30}${escaped(loser)}`, "iu");
+        const winnerSupersedes = new RegExp(`${escaped(winner)}[\\s\\S]{0,80}\\b(?:supersedes|replaces)\\b[\\s\\S]{0,40}${escaped(loser)}`, "iu");
+        const loserSupersededBy = new RegExp(`${escaped(loser)}[\\s\\S]{0,80}\\b(?:superseded|replaced) by\\b[\\s\\S]{0,40}${escaped(winner)}`, "iu");
+        if (winnerBeforeNot.test(statement) || winnerSupersedes.test(statement) || loserSupersededBy.test(statement)) {
+          return { winner, loser, sourceId: candidate.sourceId };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function semanticIdentityClaimPriority(claim: SemanticIdentityClaim) {
+  const explicitResolution = /\b(?:correction|corrected|explicitly accepted|governing identity|authoritative identity|supersedes|replaces|superseded|replaced)\b/iu.test(claim.candidate.statement);
+  return Number(explicitResolution) * 100
+    + Number(claim.candidate.sourceType === "Mechanism") * 50
+    + Number(["approved_local", "approved_project_wide", "approved_cross_project"].includes(claim.candidate.authority)) * 20
+    + Number(claim.candidate.representation === "Exact") * 10;
+}
+
+function preferredSemanticIdentityClaim(claims: SemanticIdentityClaim[], value: string) {
+  return claims
+    .filter((claim) => claim.value === value)
+    .sort((left, right) => semanticIdentityClaimPriority(right) - semanticIdentityClaimPriority(left)
+      || left.candidate.sourceId.localeCompare(right.candidate.sourceId))[0];
+}
+
+function preserveSemanticIdentityDependencies(candidates: RankedCandidate[]) {
+  const claims = candidates.flatMap(semanticIdentityClaims);
+  const groups = new Map<string, SemanticIdentityClaim[]>();
+  for (const claim of claims) {
+    const key = `${claim.kind}:${claim.subject}`;
+    groups.set(key, [...(groups.get(key) || []), claim]);
+  }
+  for (const groupClaims of groups.values()) {
+    const subject = groupClaims[0]?.subject;
+    if (!subject) continue;
+    const boundary = candidates.find((candidate) => boundaryAcceptsSemanticIdentity(candidate, subject));
+    if (!boundary) continue;
+    const values = distinct(groupClaims.map((claim) => claim.value)).sort();
+    if (!values.length) continue;
+    const resolution = explicitSemanticIdentityResolution(groupClaims);
+    const deliveredValues = resolution ? [resolution.winner] : values;
+    const evidenceSourceIds = distinct(groupClaims.map((claim) => claim.candidate.sourceId));
+    const materializedClaims = deliveredValues
+      .map((value) => preferredSemanticIdentityClaim(groupClaims, value))
+      .filter((claim): claim is SemanticIdentityClaim => Boolean(claim));
+    if (!materializedClaims.length) continue;
+
+    for (const claim of materializedClaims) {
+      claim.candidate.treatment = "Use";
+      claim.candidate.representation = resolution ? claim.candidate.representation : "Conflicted";
+      claim.candidate.protectedRole = "required_state";
+      claim.candidate.reason = `Semantic ${claim.kind} identity inherits task relevance from governing proposition ${boundary.sourceId}; the identity materially distinguishes the accepted state.`;
+      claim.candidate.metadata = {
+        ...claim.candidate.metadata,
+        materializedByDependencySourceId: boundary.sourceId,
+        semanticIdentityDependency: {
+          kind: claim.kind,
+          subject,
+          value: claim.value,
+          status: resolution ? "resolved" : values.length > 1 ? "unresolved_conflict" : "linked",
+          escalation: !resolution && values.length > 1 ? "full_governed_conflict" : null,
+          resolutionSourceId: resolution?.sourceId || null,
+          evidenceSourceIds,
+        },
+      };
+    }
+
+    const identitySentence = resolution
+      ? `Identity dependency: accepted UI commit ${resolution.winner}.`
+      : values.length > 1
+        ? `Identity conflict: accepted UI commit ${values.join(" vs ")} is unresolved.`
+        : `Identity dependency: accepted UI commit ${values[0]}.`;
+    if (!boundary.statement.includes(identitySentence)) {
+      const separator = /[.!?]$/u.test(boundary.statement.trim()) ? " " : ". ";
+      boundary.statement = `${boundary.statement.trim()}${separator}${identitySentence}`;
+    }
+    boundary.representation = values.length > 1 && !resolution ? "Conflicted" : boundary.representation;
+    boundary.protectedRole = values.length > 1 && !resolution ? "conflict" : boundary.protectedRole;
+    boundary.reason = resolution
+      ? `${boundary.reason} Its material semantic identity is resolved by ${resolution.sourceId}.`
+      : values.length > 1
+        ? `${boundary.reason} Conflicting material semantic identities remain unresolved and are carried with this boundary.`
+        : `${boundary.reason} Its material semantic identity is carried as a dependency.`;
+    boundary.metadata = {
+      ...boundary.metadata,
+      representedAncestorIds: distinct([
+        ...(Array.isArray(boundary.metadata.representedAncestorIds)
+          ? boundary.metadata.representedAncestorIds.filter((id): id is string => typeof id === "string")
+          : []),
+        ...evidenceSourceIds,
+      ]),
+      semanticIdentityDependency: {
+        kind: groupClaims[0].kind,
+        subject,
+        values,
+        status: resolution ? "resolved" : values.length > 1 ? "unresolved_conflict" : "linked",
+        escalation: !resolution && values.length > 1 ? "full_governed_conflict" : null,
+        governingIdentity: resolution?.winner || (values.length === 1 ? values[0] : null),
+        resolutionSourceId: resolution?.sourceId || null,
+        evidenceSourceIds,
+      },
+    };
+  }
+}
+
 function freshnessFor(row: Row, createdAt: string) {
   if (row.superseded_at || row.invalidated_at || row.status === "superseded") return "superseded";
   const validFrom = row.valid_from ? Date.parse(String(row.valid_from)) : Number.NaN;
@@ -285,6 +471,10 @@ async function eventCandidates(db: D1Database, projectId: string): Promise<RawCa
       metadata: {
         conversationId: row.conversation_id,
         sourceMessageIds: parseJson(row.source_message_ids, []),
+        actorId: row.actor_id,
+        sourceSequence: typeof metadata.sourceMessage === "object" && metadata.sourceMessage
+          ? (metadata.sourceMessage as Record<string, unknown>).sequence ?? null
+          : null,
         observedAt: row.observed_at,
         validFrom: row.valid_from,
         validUntil: row.valid_until,
@@ -724,11 +914,15 @@ function collapseGoverningLineage(
         if (typeof eventId === "string") sourceEventIds.add(eventId);
       }
     }
-    const ancestorIds = distinct([sourceFindingId, ...nodeIds, ...sourceEventIds]);
+    const existingAncestors = Array.isArray(mechanism.metadata.representedAncestorIds)
+      ? mechanism.metadata.representedAncestorIds.filter((id): id is string => typeof id === "string")
+      : [];
+    const ancestorIds = distinct([sourceFindingId, ...nodeIds, ...sourceEventIds, ...existingAncestors]);
     mechanism.metadata = { ...mechanism.metadata, representedAncestorIds: ancestorIds };
     for (const ancestorId of ancestorIds) {
       const ancestor = byId.get(ancestorId);
       if (!ancestor || ancestor.sourceId === mechanism.sourceId) continue;
+      if (ancestor.metadata.materializedByDependencySourceId === mechanism.sourceId) continue;
       if (ancestor.protectedRole === "challenge" || ancestor.protectedRole === "conflict") continue;
       if (mechanism.counterevidenceIds.includes(ancestor.sourceId)) continue;
       ancestor.treatment = "Exclude";
@@ -824,6 +1018,7 @@ export async function discoverAndRankCandidates(
   const nodesByCheckpoint = await checkpointNodeIds(db, projectId);
   const candidates = raw.map((candidate) => rankCandidate(candidate, interpretation));
   markRedundancy(candidates);
+  preserveSemanticIdentityDependencies(candidates);
   collapseGoverningLineage(candidates, nodesByCheckpoint);
   preserveNecessaryCorrections(candidates);
   preserveReferencedChallenges(candidates);
