@@ -7262,6 +7262,46 @@ test("Atlas Steward escalates a Light aid into Full through the same reconstruct
   assert.doesNotMatch(full.value.packet.compiledContent, /\[CONSIDER\]|\[EXCLUDE\]/);
 });
 
+test("Full packet rendering uses governed State Truth without Roadway scaffolding when none applies", async () => {
+  const worker = await builtWorker("steward-full-without-roadway");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "workflow", "Workflow Engine");
+  await initializeRoadways(worker, DB, "workflow");
+  const statement = "The current continuity proof must preserve exact source lineage and stop when governed state is missing.";
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:roadway-optional-full",
+    projectId: "workflow",
+    statement,
+  });
+
+  const full = await reconstructionRunRequest(worker, DB, "workflow", {
+    task: statement,
+    requestedOutput: "Prepare a full room transfer.",
+  }, "steward-full-without-roadway");
+  assert.equal(full.response.status, 201, JSON.stringify(full.value));
+  assert.equal(full.value.status, "compiled");
+  assert.equal(full.value.need.level, "full");
+  assert.equal(full.value.roadway.id, null);
+  assert.equal(full.value.roadway.versionId, null);
+  assert.equal(full.value.roadway.name, null);
+  assert.match(full.value.packet.compiledContent, /current continuity proof must preserve exact source lineage/i);
+  assert.doesNotMatch(full.value.packet.compiledContent, /Primary roadway|Required Blueprint checks|\[CHECK\]/i);
+  assert.doesNotMatch(full.value.packet.compiledContent, /Margin \/ Run-Line Value|Outcome \/ Postmortem|Broad Lock-Finding/i);
+  const packetRow = DB.database.prepare(
+    "SELECT primary_roadway_id, primary_roadway_version_id, supporting_modules FROM packets WHERE id = ?",
+  ).get(full.value.packet.id);
+  assert.equal(packetRow.primary_roadway_id, null);
+  assert.equal(packetRow.primary_roadway_version_id, null);
+  assert.deepEqual(JSON.parse(packetRow.supporting_modules), []);
+  const receiptRow = DB.database.prepare(
+    "SELECT selected_roadway_reason, alternative_roadways_considered FROM receipts WHERE packet_id = ?",
+  ).get(full.value.packet.id);
+  assert.deepEqual(JSON.parse(receiptRow.alternative_roadways_considered), []);
+  assert.match(receiptRow.selected_roadway_reason, /No Roadway had positive/i);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 1);
+});
+
 test("V1.7.1 reconstruction/run enforces isolation, server ownership, and complete idempotency", async () => {
   const worker = await builtWorker("v171-slice-b-isolation-idempotency");
   const DB = await sqliteD1();

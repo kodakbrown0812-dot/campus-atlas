@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "phase": "stopped_at_first_packet_content_failure_after_zero_roadway_renderer_repair",
+  "repairBoundary": {
+    "primaryRoadwayOptionalForRendering": true,
+    "roadwayChecksWhenNoRoadway": 0,
+    "roadwayHeaderWhenNoRoadway": false,
+    "placeholderRoadwayCreated": false,
+    "broadRoadwayFallbackUsed": false,
+    "genericBlueprintScaffoldingSupplied": false,
+    "oneApplicableRoadwayBehaviorPreserved": true,
+    "multipleConflictingApplicableRoadwaysStillRequireClarification": true
+  },
+  "stateTruthPreservation": {
+    "discoveryVersion": "slice3-mature-coverage-v1",
+    "candidateConstructionVersion": "slice3-mature-relationships-v4",
+    "discoveryIdentitiesPreserved": true,
+    "selectedSourceSequences": [
+      32,
+      35,
+      42,
+      49,
+      61,
+      78,
+      83,
+      88,
+      89,
+      93,
+      97,
+      102,
+      103,
+      104,
+      105,
+      109,
+      110,
+      113,
+      115,
+      116,
+      117
+    ],
+    "eventsConsidered": 117,
+    "eventsSelected": 21,
+    "candidateCount": 8,
+    "candidateReuse": {
+      "reusedEquivalent": 6,
+      "created": 2,
+      "duplicateCanonicalStorageCreatedForReusedCandidates": false
+    },
+    "governedUseCandidates": 8,
+    "governanceEvents": 8,
+    "canonicalMechanisms": 3,
+    "exactLineageCompleteBeforeDelivery": true,
+    "authorityCreatedDuringAnalysis": false
+  },
+  "roadwayApplicability": {
+    "primaryRoadway": null,
+    "materialAmbiguity": false,
+    "clarificationRequired": false,
+    "applicableRoadwayCount": 0,
+    "candidateRoadwayCount": 0,
+    "excludedRoadwayCount": 3,
+    "governedRelationshipEvidenceUsed": false
+  },
+  "steward": {
+    "reached": true,
+    "need": "full",
+    "reasonCodes": [
+      "explicit_full_room_transfer"
+    ],
+    "httpStatus": 201,
+    "status": "compiled",
+    "effects": {
+      "packetCreated": true,
+      "receiptCreated": true,
+      "handoffCreated": false,
+      "providerCallPerformed": false,
+      "authorityChanged": false
+    }
+  },
+  "frozenPacket": {
+    "packetId": "packet:d3c389d6-bc4a-4597-9eea-7357f572af3f",
+    "receiptId": "receipt:f87ee393-df3d-4a0c-a29f-f0efca7b0ce7",
+    "tokenBudget": 800,
+    "finalTokenCount": 209,
+    "utf8Bytes": 833,
+    "characters": 833,
+    "whitespaceWords": 109,
+    "compiledContentSha256": "bc3fa2e0e6239eae601e5cc4a665752c24182f39cbf75536fef7ea329c3cc7ea",
+    "compiledContent": "# Atlas reconstruction packet v1\nTask: Continue Campus Atlas V1.8 from the accepted state. What exact work should happen now, why is it next, what project truth and constraints must govern it, what remains intentionally deferred, and what evidence should make us stop rather than continue?\nIntent: Prepare a full room transfer for a genuinely fresh destination. Preserve the current State Truth, causal rationale, corrections, supersession, constraints, open work, uncertainty, local terms, and governing connections needed for the literal task. Do not rely on source-room access or lucky reconstruction of omitted private project truth.; task-specific governed continuity.\nScope: project campus-atlas-v18-authentic; case case:transfer:e492a415a31f8cb63fd6fb5b2f36; narrow.\nBudget: 800 tokens (deterministic character approximation).",
+    "primaryRoadwayId": null,
+    "primaryRoadwayVersionId": null,
+    "requiredChecksSupplied": 0,
+    "genericRoadwayScaffoldingPresent": false
+  },
+  "frozenReceipt": {
+    "canonicalJsonSha256": "ca2e322f717ba1100118e08c8e1921010046407f2f60cce46b11a01da29b151d",
+    "treatmentCounts": {
+      "Use": 0,
+      "Consider": 81,
+      "Exclude": 112
+    },
+    "governanceCauses": 3,
+    "canonicalPacketItems": 193,
+    "exactLineageCandidateItems": 118,
+    "governingMechanismsSupplied": 0,
+    "protectedCorrectionsSupplied": 0,
+    "protectedConflictsSupplied": 0,
+    "strongestChallengeSupplied": false,
+    "exactReceiptRemainsLocalPrivate": true
+  },
+  "firstGenuineFailure": {
+    "classification": "zero_roadway_full_packet_contains_no_governed_state_truth",
+    "boundary": "Context Delivery candidate treatment and packet completeness",
+    "expected": "The Roadway-optional Full renderer should compile the governed State Truth needed by the frozen authentic task without Roadway scaffolding.",
+    "actual": "Rendering and canonical packet creation succeeded, but all three governed mechanisms were treated as Consider for indirect mechanism fit. The server-authored compiledContent contains only task, intent, scope, and budget; it supplies none of the eight reviewed State Truth propositions.",
+    "downstreamRepairAttempted": false,
+    "destinationRoomsReached": false,
+    "copyBehaviorReached": false
+  },
+  "frozenEvidence": {
+    "sourceSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "localPreGovernanceEvidenceSha256": "ff9c9093a85e701b58ee223176a9bfc3fac2eb778f45609fa137c8254f0dabc0",
+    "localGovernanceEvidenceSha256": "d670e1ec77c9568cdb4d6f2dd2fa3a3ee7be3d991bed423072021446ed5a1b4b",
+    "localRoadwayDiagnosticSha256": "a172e5fb0e4af70da99010162356190e2ef8ed9f0a29cd4da20b8bd15afabac1",
+    "localStewardPacketReceiptEvidenceSha256": "3e91f152bb3addbe36169351e54b4d73c95a7daa9fba748e9e206ea5ab2ca2d7",
+    "privateTranscriptCommitted": false
+  },
+  "productionChanged": false
+}

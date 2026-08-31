@@ -77,7 +77,8 @@ function compactRenderedStatement(item: PacketItemSnapshot, maximum: number) {
 }
 
 function roadwayChecks(interpretation: TaskInterpretation): PacketItemSnapshot[] {
-  const roadway = interpretation.primaryRoadway!;
+  const roadway = interpretation.primaryRoadway;
+  if (!roadway) return [];
   return roadway.requiredChecks.map((statement, index) => ({
     sourceType: "RoadwayCheck",
     sourceId: `${roadway.versionId}:check:${index + 1}`,
@@ -152,7 +153,9 @@ function renderHeader(
     `# Atlas reconstruction packet v${PACKET_VERSION}`,
     `Task: ${compact(interpretation.literalRequest, 260)}`,
     `Intent: ${interpretation.requestedDecisionOrOutput}; ${interpretation.requiredReasoningMechanism}.`,
-    `Primary roadway: ${interpretation.primaryRoadway!.name} v${interpretation.primaryRoadway!.version}`,
+    ...(interpretation.primaryRoadway
+      ? [`Primary roadway: ${interpretation.primaryRoadway.name} v${interpretation.primaryRoadway.version}`]
+      : []),
     `Scope: project ${projectId}${interpretation.caseId ? `; case ${interpretation.caseId}` : ""}; ${interpretation.scope}.`,
     ...(interpretation.relevantSharedMeanings.length
       ? [`Shared meanings: ${interpretation.relevantSharedMeanings.join("; ")}.`]
@@ -327,7 +330,7 @@ async function comparisonKey(projectId: string, interpretation: TaskInterpretati
     domain: interpretation.domain,
     taskOrMarketType: interpretation.taskOrMarketType,
     scope: interpretation.scope,
-    primaryRoadwayVersionId: interpretation.primaryRoadway!.versionId,
+    primaryRoadwayVersionId: interpretation.primaryRoadway?.versionId ?? null,
   }));
 }
 
@@ -592,8 +595,8 @@ export async function compilePacket(
       interpretation.literalRequest,
       interpretation.requiredReasoningMechanism,
       json(storedInterpretation),
-      interpretation.primaryRoadway!.id,
-      interpretation.primaryRoadway!.versionId,
+      interpretation.primaryRoadway?.id ?? null,
+      interpretation.primaryRoadway?.versionId ?? null,
       json(interpretation.supportingModules),
       budget,
       rendered.finalTokenCount,
