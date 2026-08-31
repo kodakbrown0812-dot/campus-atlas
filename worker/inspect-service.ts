@@ -570,9 +570,16 @@ export async function inspectMechanism(db: D1Database, projectId: string, mechan
     ).bind(projectId, mechanismId)),
     all<Row>(db.prepare(
       `SELECT * FROM governance_events
-       WHERE project_id = ? AND (affected_mechanism_id = ? OR target_id = ?)
+       WHERE project_id = ? AND (
+         affected_mechanism_id = ?
+         OR target_id = ?
+         OR target_id = (
+           SELECT source_finding_id FROM mechanisms
+           WHERE project_id = ? AND id = ?
+         )
+       )
        ORDER BY created_at ASC, rowid ASC`,
-    ).bind(projectId, mechanismId, mechanismId)),
+    ).bind(projectId, mechanismId, mechanismId, projectId, mechanismId)),
     all<Row>(db.prepare(
       "SELECT packet_id, treatment, representation_type, authority_state, inclusion_reason, exclusion_reason FROM packet_items WHERE project_id = ? AND source_id = ?",
     ).bind(projectId, mechanismId)),

@@ -1307,6 +1307,96 @@ test("Transfer Room performs one exact import through review into one governed L
   assert.deepEqual(canonicalMutationCounts(DB), beforeSteward);
 });
 
+test("Transfer Room idempotently materializes an approved durable finding missing its governed mechanism", async () => {
+  const worker = await builtWorker("transfer-room-governed-state-truth-materialization");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "State Truth Materialization");
+  const ownerEnv = {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "server-only-transfer-key",
+    CAMPUS_ATLAS_OWNER_USER_ID: "verified-transfer-owner",
+  };
+  async function ownerRequest(path, { method = "GET", body, key } = {}) {
+    const response = await worker.fetch(new Request(`http://localhost${path}`, {
+      method,
+      headers: {
+        "oai-authenticated-user-id": "verified-transfer-owner",
+        ...(body === undefined ? {} : { "content-type": "application/json" }),
+        ...(key ? { "idempotency-key": key } : {}),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }), ownerEnv, ctx);
+    return { response, value: await response.json() };
+  }
+
+  const statement = "The transfer proof must stop at the first preservation failure and must not repair it during the run.";
+  const started = await ownerRequest("/api/v1/projects/sports/transfers", {
+    method: "POST",
+    key: "state-truth-materialization-start",
+    body: { title: "Legacy governed finding", format: "text", transcript: statement },
+  });
+  assert.equal(started.response.status, 201, JSON.stringify(started.value));
+  assert.equal(started.value.stage, "awaiting_review");
+  const review = started.value.reconciliation[0];
+  const governedAt = "2026-08-30T12:00:00.000Z";
+  DB.database.prepare(
+    `UPDATE findings
+     SET finding_type = 'scope_revision', status = 'approved', authority_state = 'approved_local',
+         review_required = 0, resolved_at = ?
+     WHERE id = ?`,
+  ).run(governedAt, review.findingId);
+  DB.database.prepare(
+    `INSERT INTO governance_events (
+      id, project_id, actor_id, action, target_type, target_id,
+      source_version_id, resulting_version_id, prior_authority, new_authority,
+      prior_status, new_status, prior_scope, new_scope, affected_mechanism_id,
+      reason, retrieval_effect, created_at, idempotency_key
+    ) VALUES (?, 'sports', 'cody', 'approve', 'finding', ?, ?, ?,
+              'proposed', 'approved_local', 'proposed', 'approved', 'local', 'local', NULL,
+              'Preserve the accepted stopping constraint.', 'eligible_local_case', ?, ?)`,
+  ).run(
+    "governance:legacy-state-truth-without-mechanism",
+    review.findingId,
+    review.findingVersionId,
+    review.findingVersionId,
+    governedAt,
+    "legacy-state-truth-without-mechanism",
+  );
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);
+
+  const resumed = await ownerRequest(
+    `/api/v1/projects/sports/transfers/${encodeURIComponent(started.value.id)}/resume`,
+    { method: "POST", key: "state-truth-materialization-resume" },
+  );
+  assert.equal(resumed.response.status, 200, JSON.stringify(resumed.value));
+  assert.equal(resumed.value.stage, "ready_for_steward");
+  assert.equal(resumed.value.reconciliation[0].mechanismId !== null, true);
+  const mechanismId = resumed.value.reconciliation[0].mechanismId;
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanism_versions").get().count, 1);
+  assert.equal(DB.database.prepare(
+    `SELECT v.statement FROM mechanisms m JOIN mechanism_versions v
+       ON v.id = m.current_governing_version_id WHERE m.id = ?`,
+  ).get(mechanismId).statement, statement);
+
+  const replay = await ownerRequest(
+    `/api/v1/projects/sports/transfers/${encodeURIComponent(started.value.id)}/resume`,
+    { method: "POST", key: "state-truth-materialization-replay" },
+  );
+  assert.equal(replay.response.status, 200, JSON.stringify(replay.value));
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanism_versions").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 1);
+  const inspection = await ownerRequest(
+    `/api/v1/projects/sports/inspect/mechanisms/${encodeURIComponent(mechanismId)}`,
+  );
+  assert.equal(inspection.response.status, 200, JSON.stringify(inspection.value));
+  assert.equal(inspection.value.governance.length, 1);
+  assert.equal(inspection.value.sourceEvents.length, 1);
+  assert.equal(inspection.value.sourceEvents[0].representation, "Exact");
+});
+
 test("mature Exact room analysis preserves chronology, bounded signal coverage, atomic candidates, lineage, and replay", async () => {
   const worker = await builtWorker("mature-room-state-truth-coverage");
   const DB = await sqliteD1();
@@ -3410,6 +3500,133 @@ test("Slice 3 Cody revision governs, changes eligibility, and rolls back without
   assert.throws(
     () => DB.database.prepare("DELETE FROM governance_events WHERE target_id = ?").run(finding.id),
     /immutable/i,
+  );
+});
+
+test("governance preserves distinct durable State Truth propositions in canonical mechanisms", async () => {
+  const worker = await builtWorker("slice3-state-truth-promotion");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "sports", "State Truth Promotion");
+  const sourceStatements = [
+    "The Archive First direction was replaced by Migration Continuity because continuity must be proven before scope widens.",
+    "The next action is to run the frozen deterministic continuity proof.",
+    "Stop at the first preservation failure and do not repair it during the run.",
+    "Correction: the accepted interface is frozen; do not reopen interface design during this proof.",
+    "The larger trial remains open and deferred until the deterministic proof closes.",
+  ];
+  const seeded = await seedSlice3Case(
+    worker,
+    DB,
+    "state-truth-promotion",
+    ["correction", "decision", "constraint", "correction", "evidence"],
+    sourceStatements,
+  );
+  const findingCandidates = [
+    {
+      findingType: "supersession",
+      sourceEventIds: [seeded.events[0].id],
+      proposalStatement: sourceStatements[0],
+      proposedScope: "project_wide",
+      supportingEvidence: [seeded.events[0].id],
+      reasonForSurfacing: "The old and current directions plus their causal rationale must remain connected.",
+      expectedRetrievalEffect: "Preserve the current direction and its supersession guard.",
+    },
+    {
+      findingType: "scope_revision",
+      sourceEventIds: [seeded.events[1].id],
+      proposalStatement: sourceStatements[1],
+      proposedScope: "project_wide",
+      supportingEvidence: [seeded.events[1].id],
+      reasonForSurfacing: "The source establishes the exact next action.",
+      expectedRetrievalEffect: "Supply the next action when the proof is continued.",
+    },
+    {
+      findingType: "scope_revision",
+      sourceEventIds: [seeded.events[2].id],
+      proposalStatement: sourceStatements[2],
+      proposedScope: "project_wide",
+      supportingEvidence: [seeded.events[2].id],
+      reasonForSurfacing: "The stopping and no-repair clauses are atomic governing constraints.",
+      expectedRetrievalEffect: "Prevent continuation beyond the first genuine failure.",
+    },
+    {
+      findingType: "correction",
+      sourceEventIds: [seeded.events[3].id],
+      proposalStatement: sourceStatements[3],
+      proposedScope: "project_wide",
+      supportingEvidence: [seeded.events[3].id],
+      reasonForSurfacing: "The correction prevents a completed interface phase from being revived.",
+      expectedRetrievalEffect: "Carry the correction when interface work could be reactivated.",
+    },
+    {
+      findingType: "mechanism_recognition",
+      sourceEventIds: [seeded.events[4].id],
+      proposalStatement: sourceStatements[4],
+      proposedScope: "project_wide",
+      supportingEvidence: [seeded.events[4].id],
+      reasonForSurfacing: "The source preserves one material open and deferred work boundary.",
+      expectedRetrievalEffect: "Keep the larger trial deferred until the proof closes.",
+    },
+  ];
+  const checkpoint = await slice2Request(worker, DB, "/api/v1/projects/sports/checkpoints", {
+    method: "POST",
+    idempotencyKey: "slice3-state-truth-promotion-source",
+    body: {
+      conversationId: seeded.conversationId,
+      caseId: seeded.caseId,
+      source: "explicit_analyzer_candidates",
+      findingCandidates,
+    },
+  });
+  assert.equal(checkpoint.response.status, 201, JSON.stringify(checkpoint.value));
+  assert.equal(checkpoint.value.findings.length, findingCandidates.length);
+
+  const governed = [];
+  for (const finding of checkpoint.value.findings) {
+    const governanceRequest = {
+      method: "POST",
+      idempotencyKey: `slice3-state-truth-promotion:${finding.id}`,
+      body: {
+        action: "approve",
+        actorId: "cody",
+        sourceVersionId: finding.currentVersionId,
+        scope: "project_wide",
+        reason: "Approve this distinct reviewed State Truth proposition without semantic collapse.",
+      },
+    };
+    const route = `/api/v1/projects/sports/findings/${encodeURIComponent(finding.id)}/governance`;
+    const result = await slice2Request(worker, DB, route, governanceRequest);
+    assert.equal(result.response.status, 201, JSON.stringify(result.value));
+    assert.ok(result.value.mechanism?.id, finding.id);
+    assert.equal(result.value.mechanism.statement, finding.proposal);
+    const replay = await slice2Request(worker, DB, route, governanceRequest);
+    assert.equal(replay.response.status, 201, JSON.stringify(replay.value));
+    assert.equal(replay.value.idempotentReplay, true);
+    assert.equal(replay.value.mechanism.id, result.value.mechanism.id);
+    assert.equal(replay.value.mechanism.statement, finding.proposal);
+    governed.push(result.value);
+  }
+  assert.equal(new Set(governed.map((item) => item.mechanism.id)).size, findingCandidates.length);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, findingCandidates.length);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanism_versions").get().count, findingCandidates.length);
+
+  for (const item of governed) {
+    const inspection = await slice2Request(
+      worker,
+      DB,
+      `/api/v1/projects/sports/inspect/mechanisms/${encodeURIComponent(item.mechanism.id)}`,
+    );
+    assert.equal(inspection.response.status, 200, JSON.stringify(inspection.value));
+    assert.equal(inspection.value.sourceEvents.length, 1);
+    assert.equal(inspection.value.sourceEvents[0].representation, "Exact");
+    assert.equal(inspection.value.sourceEvents[0].sourceLinks.length, 1);
+  }
+
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, findingCandidates.length);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanism_versions").get().count, findingCandidates.length);
+  assert.deepEqual(
+    DB.database.prepare("SELECT statement FROM mechanism_versions ORDER BY statement").all().map((row) => row.statement),
+    [...sourceStatements].sort(),
   );
 });
 

@@ -128,7 +128,17 @@ async function mechanismCandidates(db: D1Database, projectId: string): Promise<R
             (
               SELECT g.id FROM governance_events g
               WHERE g.project_id = m.project_id
-                AND g.affected_mechanism_id = m.id
+                AND (
+                  g.affected_mechanism_id = m.id
+                  OR (
+                    g.target_type = 'finding'
+                    AND g.target_id = m.source_finding_id
+                    AND g.resulting_version_id = (
+                      SELECT f.current_version_id FROM findings f
+                      WHERE f.project_id = m.project_id AND f.id = m.source_finding_id
+                    )
+                  )
+                )
               ORDER BY g.created_at DESC, g.rowid DESC LIMIT 1
             ) AS governance_event_id
      FROM mechanisms m

@@ -15,6 +15,12 @@ import {
 
 const GOVERNANCE_ACTIONS = new Set(["approve", "revise", "reject", "defer", "keep_local", "challenge"]);
 const SCOPES = new Set(["local", "project_wide", "cross_project"]);
+const GOVERNED_STATE_TRUTH_FINDING_TYPES = new Set([
+  "correction",
+  "mechanism_recognition",
+  "scope_revision",
+  "supersession",
+]);
 
 async function requireCurrentFinding(db: D1Database, projectId: string, findingId: string) {
   const finding = await first<Row>(db.prepare(
@@ -155,19 +161,27 @@ async function createMechanismStatements(
   db: D1Database,
   projectId: string,
   finding: Row,
-  version: Awaited<ReturnType<typeof reviewedVersion>>,
+  version: {
+    proposalStatement: string;
+    conditions: string[];
+    exclusions: string[];
+    counterevidence: string[];
+    uncertainty: string | null;
+    expectedRetrievalEffect: string;
+  },
   authority: string,
   actorId: string,
   createdAt: string,
+  preferredMechanismVersionId?: string,
 ) {
-  if (finding.finding_type !== "mechanism_recognition") {
+  if (!GOVERNED_STATE_TRUTH_FINDING_TYPES.has(String(finding.finding_type))) {
     return { statements: [] as D1PreparedStatement[], mechanismId: null, mechanismVersionId: null };
   }
   const mechanismId = `mechanism:${(await sha256(`${projectId}\n${finding.id}`)).slice(0, 32)}`;
   const existing = await first<Row>(db.prepare(
     "SELECT * FROM mechanisms WHERE id = ? AND project_id = ? LIMIT 1",
   ).bind(mechanismId, projectId));
-  const mechanismVersionId = canonicalId("mechanism-version");
+  const mechanismVersionId = preferredMechanismVersionId || canonicalId("mechanism-version");
   const statements: D1PreparedStatement[] = [];
   if (!existing) {
     statements.push(db.prepare(
@@ -208,6 +222,68 @@ async function createMechanismStatements(
     ).bind(mechanismVersionId, createdAt, mechanismId, projectId),
   );
   return { statements, mechanismId, mechanismVersionId };
+}
+
+export async function materializeApprovedStateTruthMechanisms(
+  db: D1Database,
+  projectId: string,
+  findingIds: string[],
+) {
+  const requested = new Set(findingIds);
+  if (!requested.size) return [];
+  const findings = await all<Row>(db.prepare(
+    `SELECT f.*, v.proposal_statement, v.conditions, v.exclusions,
+            v.counterevidence, v.uncertainty, v.expected_retrieval_effect,
+            g.actor_id AS governance_actor_id, g.created_at AS governance_created_at
+     FROM findings f
+     JOIN finding_versions v
+       ON v.id = f.current_version_id AND v.project_id = f.project_id
+     JOIN governance_events g
+       ON g.project_id = f.project_id
+      AND g.target_type = 'finding'
+      AND g.target_id = f.id
+      AND g.resulting_version_id = f.current_version_id
+      AND g.new_status = 'approved'
+      AND g.action IN ('approve', 'keep_local')
+     LEFT JOIN mechanisms m
+       ON m.project_id = f.project_id AND m.source_finding_id = f.id
+     WHERE f.project_id = ?
+       AND f.status = 'approved'
+       AND f.authority_state IN ('approved_local', 'approved_project_wide')
+       AND m.id IS NULL
+     ORDER BY g.rowid ASC`,
+  ).bind(projectId));
+  const materialized: Array<{ findingId: string; mechanismId: string; mechanismVersionId: string }> = [];
+  for (const finding of findings) {
+    const findingId = String(finding.id);
+    if (!requested.has(findingId) || !GOVERNED_STATE_TRUTH_FINDING_TYPES.has(String(finding.finding_type))) continue;
+    const versionKey = await sha256(`${projectId}\n${findingId}\n${finding.current_version_id}\ngoverned-state-truth`);
+    const result = await createMechanismStatements(
+      db,
+      projectId,
+      finding,
+      {
+        proposalStatement: String(finding.proposal_statement),
+        conditions: parseJson<string[]>(finding.conditions, []),
+        exclusions: parseJson<string[]>(finding.exclusions, []),
+        counterevidence: parseJson<string[]>(finding.counterevidence, []),
+        uncertainty: optionalString(finding.uncertainty),
+        expectedRetrievalEffect: String(finding.expected_retrieval_effect),
+      },
+      String(finding.authority_state),
+      String(finding.governance_actor_id),
+      String(finding.governance_created_at),
+      `mechanism-version:${versionKey.slice(0, 32)}`,
+    );
+    if (!result.mechanismId || !result.mechanismVersionId || !result.statements.length) continue;
+    await db.batch(result.statements);
+    materialized.push({
+      findingId,
+      mechanismId: result.mechanismId,
+      mechanismVersionId: result.mechanismVersionId,
+    });
+  }
+  return materialized;
 }
 
 async function governanceResponse(db: D1Database, projectId: string, eventId: string, idempotentReplay: boolean) {

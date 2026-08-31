@@ -4,6 +4,7 @@ import {
   runCheckpoint,
 } from "./checkpoint-service";
 import { importConversation } from "./conversation-cases";
+import { materializeApprovedStateTruthMechanisms } from "./governance-service";
 import { ensureExactImportSourceEvents } from "./source-event-materialization";
 import { sha256 } from "./transcript-import";
 import { all, first, json, now, parseJson, requiredString, Row } from "./slice3-support";
@@ -573,7 +574,15 @@ async function orchestrate(db: D1Database, row: Row, imported: Row) {
       selected: checkpoint.selected_count,
     });
 
-    const reconciliation = await reconcile(db, row);
+    let reconciliation = await reconcile(db, row);
+    const materializedStateTruth = await materializeApprovedStateTruthMechanisms(
+      db,
+      String(row.project_id),
+      reconciliation
+        .filter((item) => item.status === "approved" && !item.mechanismId)
+        .map((item) => item.findingId),
+    );
+    if (materializedStateTruth.length) reconciliation = await reconcile(db, row);
     const findingIds = reconciliation.map((item) => item.findingId);
     const mechanismIds = reconciliation.flatMap((item) => item.mechanismId ? [item.mechanismId] : []);
     await saveRunState(db, row, {
@@ -595,6 +604,7 @@ async function orchestrate(db: D1Database, row: Row, imported: Row) {
     });
     await recordStage(db, row, "reconciled", "completed", {
       candidates: reconciliation.length,
+      materializedStateTruth,
       relationships: reconciliation.map((item) => ({
         findingId: item.findingId,
         relationship: item.relationship,

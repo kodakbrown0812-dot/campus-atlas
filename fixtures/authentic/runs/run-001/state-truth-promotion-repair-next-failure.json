@@ -1,0 +1,284 @@
+{
+  "schemaVersion": 1,
+  "runId": "authentic-full-transfer-run-001",
+  "phase": "stopped_at_first_packet_compaction_failure_after_governed_state_truth_promotion_repair",
+  "diagnosis": {
+    "firstSemanticLossBoundary": "candidate_to_governed_mechanism_promotion",
+    "cause": "Governance created canonical mechanisms only for mechanism_recognition findings. Approved supersession and scope_revision findings retained authority as findings but received no affected mechanism or mechanism version, so the Full delivery path had no governed carrier for five reviewed propositions.",
+    "lossDuringApplicability": false,
+    "initialFivePropositionLossDuringPacketProjection": false,
+    "mechanismReuseCollapsedDistinctFindings": false,
+    "relationshipAttachmentCausedLoss": false
+  },
+  "repair": {
+    "durableFindingTypesPromoted": [
+      "correction",
+      "mechanism_recognition",
+      "scope_revision",
+      "supersession"
+    ],
+    "oneCanonicalMechanismPerDistinctReviewedFinding": true,
+    "existingApprovedTransferFindingsMaterializedIdempotently": true,
+    "newGovernanceEventsCreated": false,
+    "existingGovernanceEventsRewritten": false,
+    "candidateStatementsRewritten": false,
+    "packetCompilerChanged": false,
+    "applicabilityChanged": false
+  },
+  "candidateTrace": [
+    {
+      "findingId": "finding:a0608a7b-5d08-4aba-95ea-6ee860ebd720",
+      "findingType": "supersession",
+      "candidateStatement": "Early accepted direction:\n* Build Mock Company retrieval benchmark next.\nExplicit correction:\n* Do not build Mock Company next.\n* Prioritize Room Transfer first.\nRequired rationale:\n* Room Transfer should prove the continuity primitive before widening product scope.\nThe next task is the previously specified first authentic mature-project Full Room Transfer proof.",
+      "reviewDisposition": "approve_project_wide",
+      "preRepairPromotion": "no_mechanism_created",
+      "preRepairSemanticLoss": "The complete old direction, correction, replacement, rationale, and next action had no canonical mechanism representation.",
+      "repairOutcome": "materialized_from_existing_approved_governance",
+      "mechanismId": "mechanism:a6af7209c1c173a4f1bda6d37d510b58",
+      "mechanismVersionId": "mechanism-version:6237f0b2b7c3681183b9281d593bf10c",
+      "mechanismStatementMatchesReviewedCandidate": true,
+      "semanticContentPreserved": [
+        "historical Mock Company direction",
+        "explicit rejection of Mock Company as next",
+        "Room Transfer replacement",
+        "continuity-first rationale",
+        "authentic Full proof next action"
+      ],
+      "relationships": "The old-to-current supersession and its rationale remain explicit in the governed atomic statement and trace to Exact source sequences 42 and 117.",
+      "packetTreatment": "Use",
+      "lossStageAfterRepair": null
+    },
+    {
+      "findingId": "finding:c6ce47af-cd0e-49dd-bdb4-ee0c2bdc39f6",
+      "findingType": "scope_revision",
+      "candidateStatement": "Do not repair anything during the run. Stop at the first genuine failure and preserve the evidence.",
+      "reviewDisposition": "approve_project_wide",
+      "preRepairPromotion": "no_mechanism_created",
+      "preRepairSemanticLoss": "The atomic stopping and no-repair rule had no canonical mechanism representation.",
+      "repairOutcome": "materialized_from_existing_approved_governance",
+      "mechanismId": "mechanism:4fb1a5ac64a33bc6bf4ec59defa7095f",
+      "mechanismVersionId": "mechanism-version:483b1e5909424a818826f586342d951c",
+      "mechanismStatementMatchesReviewedCandidate": true,
+      "semanticContentPreserved": [
+        "stop at first genuine failure",
+        "no repair during the run",
+        "preserve failure evidence"
+      ],
+      "packetTreatment": "Use",
+      "lossStageAfterRepair": null
+    },
+    {
+      "findingId": "finding:ad5629c3-d1c9-4822-9c49-c90752fc39c9",
+      "findingType": "scope_revision",
+      "candidateStatement": "The current product surface is accepted for this proof:\n* Home = steering\n* Steward = Context Delivery\n* Inspect = readable State Truth + proof\n* technical records remain available under Advanced\n* generic Roadway / Blueprint scaffolding is explicitly visible and must be scored rather than pre-repaired",
+      "reviewDisposition": "approve_project_wide",
+      "preRepairPromotion": "no_mechanism_created",
+      "preRepairSemanticLoss": "The accepted UI boundary and visible-scaffolding constraint had no canonical mechanism representation.",
+      "repairOutcome": "materialized_from_existing_approved_governance",
+      "mechanismId": "mechanism:7b80e390b6933b033ea16984e22e5cca",
+      "mechanismVersionId": "mechanism-version:dcb62686eccda8888ee621493bceee01",
+      "mechanismStatementMatchesReviewedCandidate": true,
+      "semanticContentPreserved": [
+        "accepted product surface",
+        "Home, Steward, and Inspect responsibility split",
+        "technical records remain available",
+        "generic scaffolding must be scored rather than hidden or pre-repaired"
+      ],
+      "packetTreatment": "Use",
+      "lossStageAfterRepair": null
+    },
+    {
+      "findingId": "finding:044b4811-7fa3-4028-8663-17f381425f1b",
+      "findingType": "scope_revision",
+      "candidateStatement": "Choose and freeze one real mature project room prospectively, preferably a real Atlas development room if it satisfies the maturity criteria. Freeze the exact continuation task and grading rubric before Steward output exists.",
+      "reviewDisposition": "approve_project_wide",
+      "preRepairPromotion": "no_mechanism_created",
+      "preRepairSemanticLoss": "The exact next action and prospective-freeze protocol had no canonical mechanism representation.",
+      "repairOutcome": "materialized_from_existing_approved_governance",
+      "mechanismId": "mechanism:b1350cee30c334a8a3d96feb9d6bc41a",
+      "mechanismVersionId": "mechanism-version:722287d79d7628d55ee63f381a13bcde",
+      "mechanismStatementMatchesReviewedCandidate": true,
+      "semanticContentPreserved": [
+        "choose one real mature room",
+        "freeze it prospectively",
+        "freeze task and rubric before Steward output"
+      ],
+      "packetTreatment": "Use",
+      "lossStageAfterRepair": null
+    },
+    {
+      "findingId": "finding:75c7ad0a-bc0e-40db-8844-2136621b92f1",
+      "findingType": "scope_revision",
+      "candidateStatement": "UI simplification is frozen at commit 2764bed97db4e02e8684c05b36b103620f0bb942.",
+      "reviewDisposition": "approve_project_wide",
+      "preRepairPromotion": "no_mechanism_created",
+      "preRepairSemanticLoss": "The commit-specific UI freeze had no canonical mechanism representation.",
+      "repairOutcome": "materialized_from_existing_approved_governance",
+      "mechanismId": "mechanism:4196b28d7c7bc036c2014258e6481472",
+      "mechanismVersionId": "mechanism-version:1c1955837d370835e94c8388fb906d2d",
+      "mechanismStatementMatchesReviewedCandidate": true,
+      "semanticContentPreserved": [
+        "commit-specific UI freeze"
+      ],
+      "packetTreatment": "Exclude",
+      "packetReason": "Same project context does not match the selected task mechanism.",
+      "semanticSafetyAssessment": "The broader accepted-product-surface mechanism supplied as Use independently carries the material UI boundary; the commit identity is not required by the literal continuation task.",
+      "lossStageAfterRepair": null
+    },
+    {
+      "findingId": "finding:9ebec8c5-c974-4de7-b7ca-e8cfc901b98b",
+      "findingType": "mechanism_recognition",
+      "candidateStatement": "The proof question is now simply:\nCan Atlas give a genuinely fresh model substantially less context while preserving enough governed project truth to continue a real mature project at least as correctly as the ordinary baseline?",
+      "reviewDisposition": "approve_project_wide",
+      "preRepairPromotion": "mechanism_created",
+      "preRepairSemanticLoss": null,
+      "repairOutcome": "existing_mechanism_preserved",
+      "mechanismId": "mechanism:2d2adc1ab6f8934b9828b1be533eb40d",
+      "mechanismVersionId": "mechanism-version:5b3ca3a5-b3ee-4afb-8425-8f4e3d33f273",
+      "mechanismStatementMatchesReviewedCandidate": true,
+      "semanticContentPreserved": [
+        "fresh-model comparison",
+        "substantially less context",
+        "governed-truth continuity",
+        "ordinary baseline acceptance condition"
+      ],
+      "packetTreatment": "Use",
+      "lossStageAfterRepair": "packet_compaction"
+    },
+    {
+      "findingId": "finding:52bf0093-e836-48ed-9a9d-9a77f837bd4f",
+      "findingType": "mechanism_recognition",
+      "candidateStatement": "Context Delivery answers:\nWhat subset of State Truth does this computation need?",
+      "reviewDisposition": "approve_project_wide",
+      "preRepairPromotion": "mechanism_created",
+      "preRepairSemanticLoss": null,
+      "repairOutcome": "existing_mechanism_preserved",
+      "mechanismId": "mechanism:a0fda2b2c99e2eb6096d8d1682d630e4",
+      "mechanismVersionId": "mechanism-version:a11e41bc-2440-424d-8b0b-2705197f65e4",
+      "mechanismStatementMatchesReviewedCandidate": true,
+      "semanticContentPreserved": [
+        "task-specific Context Delivery definition"
+      ],
+      "packetTreatment": "Use",
+      "lossStageAfterRepair": null
+    },
+    {
+      "findingId": "finding:51ba0cc2-83e0-49f4-9b22-89978903a0d4",
+      "findingType": "mechanism_recognition",
+      "candidateStatement": "State Truth answers:\nWhat is actually true about this project now?",
+      "reviewDisposition": "approve_project_wide",
+      "preRepairPromotion": "mechanism_created",
+      "preRepairSemanticLoss": null,
+      "repairOutcome": "existing_mechanism_preserved",
+      "mechanismId": "mechanism:6e04d5a98da90e56c7be29bd635704e5",
+      "mechanismVersionId": "mechanism-version:85a23e33-8025-4b20-95cb-d4cd3f8b2f84",
+      "mechanismStatementMatchesReviewedCandidate": true,
+      "semanticContentPreserved": [
+        "current governed State Truth definition"
+      ],
+      "packetTreatment": "Use",
+      "lossStageAfterRepair": null
+    }
+  ],
+  "frozenUpstream": {
+    "sourceItems": 117,
+    "sourceEstimatedTokens": 46883,
+    "discoveryVersion": "slice3-mature-coverage-v1",
+    "candidateConstructionVersion": "slice3-mature-relationships-v4",
+    "selectedSourceSequences": [
+      32,
+      35,
+      42,
+      49,
+      61,
+      78,
+      83,
+      88,
+      89,
+      93,
+      97,
+      102,
+      103,
+      104,
+      105,
+      109,
+      110,
+      113,
+      115,
+      116,
+      117
+    ],
+    "candidateCount": 8,
+    "candidateReuse": {
+      "reusedEquivalent": 6,
+      "created": 2
+    },
+    "governanceOutcomes": {
+      "approvedProjectWide": 8,
+      "newGovernanceEventsDuringRepair": 0
+    },
+    "need": "full",
+    "applicableRoadways": 0,
+    "materialRoadwayAmbiguity": false
+  },
+  "frozenDelivery": {
+    "packetId": "packet:7ec2914c-10bb-4456-bf33-5a5a747d3fa3",
+    "receiptId": "receipt:0b13c20d-f3bd-4952-bec6-61d867b35876",
+    "tokenBudget": 800,
+    "packetEstimatedTokens": 734,
+    "sourceEstimatedTokens": 46883,
+    "atlasSourceRatio": 0.01565599471023612,
+    "sourceAtlasCompressionRatio": 63.8732970027248,
+    "percentageReduction": 98.43440052897638,
+    "absoluteEstimatedTokensSaved": 46149,
+    "utf8Bytes": 2937,
+    "characters": 2935,
+    "whitespaceWords": 354,
+    "compiledContentSha256": "d293c7ea2e9ca26e670b277bf142a45178559387f9df6bd2d6a6e6a607c762f7",
+    "packetCanonicalJsonSha256": "8644f4c4bf9d662d1799d3f4bdca8d77cb135a32aaf20c40b14e8f860692ad15",
+    "receiptCanonicalJsonSha256": "ff21cf0467c9f094bf65863933470207e5dd73d9e335e38fe43a244b3194b4e2",
+    "treatmentCounts": {
+      "Use": 7,
+      "Consider": 71,
+      "Exclude": 120
+    },
+    "governingMechanismsSupplied": 7,
+    "genericRoadwayScaffoldingPresent": false,
+    "exactEventCandidatesRetainedForLineage": 117,
+    "useMechanismsWithCompleteFindingNodeExactEventLineage": 7,
+    "exactCompiledContentAndReceiptRemainLocalPrivate": true
+  },
+  "semanticPacketGate": {
+    "currentDirection": "present",
+    "exactNextAction": "present",
+    "stoppingAndNoRepairBoundary": "present",
+    "acceptedUiBoundary": "present_via_accepted_product_surface",
+    "relevantConstraints": "present",
+    "mockCompanyToRoomTransferSupersession": "present",
+    "continuityFirstRationale": "present",
+    "materialOpenOrDeferredWork": "present",
+    "completeProofAcceptanceCondition": "failed_compaction_truncated_ordinary_baseline_clause"
+  },
+  "firstGenuineFailure": {
+    "classification": "packet_compaction_truncates_material_proof_acceptance_condition",
+    "boundary": "Full packet rendering and semantic compaction after successful governed State Truth promotion",
+    "expected": "The supplied proof-question mechanism should retain that the fresh model must continue the mature project at least as correctly as the ordinary baseline.",
+    "actual": "The packet truncates the proof-question statement after 'preserving enough governed projec…', removing the ordinary-baseline comparison that defines proof success.",
+    "stateTruthPromotionRepairPassed": true,
+    "packetCompletenessPassed": false,
+    "downstreamRepairAttempted": false,
+    "copyTestingReached": false,
+    "providerHandoffReached": false,
+    "destinationRoomsReached": false
+  },
+  "frozenEvidence": {
+    "sourceSha256": "ed0b9eb7b30a35146148478cfddd3985783d121bde1c841963232209f8885ca0",
+    "protocolSha256": "44a8c14693429fc676ec3c64322be8d113f3df39279d60f4ecfa6733e3609924",
+    "rubricSha256": "3c5f9cdb3782b3af02d2030510ad54617816e0c4e85e8ada7c40626cfeeb41e6",
+    "sourceManifestSha256": "18458abcaea727db75721f799085e4a2c5360117b52972215e56b47bcaf0f622",
+    "localDatabaseSha256": "77dc2f59a71d4102993e7b51cf43d598d0d8ead7d456f3309d3c8d944b050d25",
+    "localStewardEvidenceSha256": "b6b2d78d3f9aff126fd3327cdc60bc2ae486c5fc71592e44fb3aded7d9714ffc",
+    "privateTranscriptCommitted": false
+  },
+  "productionChanged": false
+}
