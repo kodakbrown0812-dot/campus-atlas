@@ -46,7 +46,7 @@ const MAX_SELECTED_NODES = 7;
 const MAX_MATURE_SELECTED_NODES = 21;
 const MAX_MATURE_FINDINGS = 12;
 export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
-export const CHECKPOINT_CANDIDATE_VERSION = "slice3-mature-relationships-v4";
+export const CHECKPOINT_CANDIDATE_VERSION = "slice3-continuation-closure-v1";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -371,7 +371,7 @@ function normalizedTerms(value: string) {
 }
 
 function mechanismLanguage(value: string) {
-  return /\b(?:require|requires|required|should|must|when|whenever|if|pass|avoid|rerank|check|selected|will)\b/i.test(value);
+  return /\b(?:require|requires|required|should|must|has to|have to|when|whenever|if|pass|avoid|rerank|check|selected|will|current|preferred|reject|reserve|decide|unresolved)\b/i.test(value);
 }
 
 function atomicEnough(value: string) {
@@ -410,30 +410,30 @@ const CONTINUITY_SIGNAL_ORDER: ContinuitySignal[] = [
 
 function continuitySignals(value: string): ContinuitySignal[] {
   const signals: ContinuitySignal[] = [];
-  if (/\b(?:correction|corrected|incorrect|misunderstood|not the right|no longer applies)\b/i.test(value)) {
+  if (/\b(?:correction|corrected|incorrect|misunderstood|mistaken|wrong|not the right|no longer applies|no longer (?:the )?plan|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale)\b/i.test(value)) {
     signals.push("correction");
   }
-  if (/\b(?:supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|previously (?:planned|decided|current|governing)|earlier (?:plan|decision|direction)|historical rather than current|no longer (?:current|governing))\b/i.test(value)) {
+  if (/\b(?:supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|previously (?:planned|decided|current|governing)|earlier (?:plan|decision|direction)|historical rather than current|no longer (?:current|governing|the plan)|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale|instead)\b/i.test(value)) {
     signals.push("supersession");
   }
-  if (/\b(?:must(?: not)?|do not|don't|never|avoid|preserve|required|requires|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/i.test(value)) {
+  if (/\b(?:must(?: not)?|has to|have to|needs? to|do not|does not|don't|never|avoid|preserve|required|requires|under\s+\$?\d|no more than|at most|ceiling|limit|prohibits?|not (?:supplied|provided|allowed)|bring (?:their|your|our|his|her|its) own|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/i.test(value)) {
     signals.push("constraint");
   }
-  if (/\b(?:current (?:direction|plan|work|state|objective|phase|surface)|is now|are now|begins now|prioriti[sz]e|proceed with|the next task is)\b/i.test(value)) {
+  if (/\b(?:current (?:direction|plan|work|state|objective|phase|surface|choice|decision|site|timing|gear|transportation|food)|working choice|preferred (?:choice|option|site|direction)|remains? (?:preferred|current|the plan)|is now|are now|begins now|prioriti[sz]e|proceed with|the next task is|make .{1,80} (?:current|preferred)|responsib(?:le|ility)|will bring)\b/i.test(value)) {
     signals.push("current_direction");
   }
-  if (/\b(?:next action|next step|next task|do next|build next|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after|choose and (?:freeze|continue|begin|start))\b/i.test(value)) {
+  if (/\b(?:next (?:actual )?action|next (?:actual )?step|next task|do next|build next|before anything else|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after|choose and (?:freeze|continue|begin|start)|reserve .{0,100} next|check .{0,100} then (?:reserve|book|continue))\b/i.test(value)) {
     signals.push("next_action");
   }
-  if (/\b(?:uncertain|uncertainty|unresolved|open question|open loop|proof question|unknown|missing state|not yet|provisional|pending evidence|remains to be)\b/i.test(value)
-    || /^(?:can|could|whether|will)\b[^?]{12,}\?$/i.test(value.trim())) {
+  if (/\b(?:uncertain|uncertainty|unresolved|undecided|open question|open loop|proof question|unknown|missing state|not yet|not confirmed|not established|provisional|pending evidence|remains to be|stay on hold|deferred until)\b/i.test(value)
+    || /^(?:could|whether|will)\b[^?]{12,}\?$/i.test(value.trim())) {
     signals.push("uncertainty");
   }
   if (/^[A-Z][A-Za-z0-9 /+_-]{2,48}\s+(?:means|refers to|answers|is defined as)\b/m.test(value)
     || /\b(?:we call this|the term .{1,48} means|local meaning|shared term)\b/i.test(value)) {
     signals.push("shared_term");
   }
-  if (/\b(?:because|therefore|so that|depends on|affects|changes how|materially alters|in order to|the reason|required rationale|rationale|before widening|proof[^.]{0,100}first)\b/i.test(value)) {
+  if (/\b(?:because|therefore|so that|\bso\b|means|depends on|affects|changes how|materially alters|in order to|the reason|required rationale|rationale|caused|before widening|proof[^.]{0,100}first)\b/i.test(value)) {
     signals.push("connection");
   }
   return signals;
@@ -791,9 +791,16 @@ function functionallyRedundant(left: CandidateSeed, right: CandidateSeed) {
   for (const protectedRole of ["correction_guard", "uncertainty", "shared_term"] satisfies CandidateRole[]) {
     if (left.roles.includes(protectedRole) !== right.roles.includes(protectedRole)) return false;
   }
-  const sharedRole = left.roles.some((role) => right.roles.includes(role));
+  const sharedRoles = left.roles.filter((role) => right.roles.includes(role));
+  const roleRatio = sharedRoles.length / Math.max(1, new Set([...left.roles, ...right.roles]).size);
   const overlap = termOverlap(left.unit.statement, right.unit.statement);
-  return sharedRole && overlap.count >= 5 && overlap.ratio >= 0.68;
+  const adjacentParaphrase = Math.abs(left.unit.sequence - right.unit.sequence) <= 1
+    && overlap.count >= 2
+    && overlap.ratio >= 0.4
+    && roleRatio >= 0.5;
+  return sharedRoles.length > 0
+    && roleRatio >= 0.5
+    && ((overlap.count >= 3 && overlap.ratio >= 0.55) || adjacentParaphrase);
 }
 
 function compareForRole(left: MatureUnit, right: MatureUnit, role: CandidateRole, boundary: number) {
@@ -825,16 +832,17 @@ function completeSupersession(unit: MatureUnit) {
   if (unit.clusterKind === "supersession_cluster" || unit.clusterKind === "causal_state_cluster") {
     return completeCausalSupersession(unit.statement);
   }
-  return /\b(?:explicit correction|correction)\b/iu.test(unit.statement)
-    && /\bdo not\b/iu.test(unit.statement)
-    && unit.signals.includes("supersession");
+  const closesPriorState = /\b(?:correction|corrected|wrong|mistaken|supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale|instead)\b/iu.test(unit.statement);
+  const statesResult = /\b(?:current|now|remains?|use|take|leave|bring|reserve|keep|decide|defer|out|scratch|rejected|dropped|obsolete|stale|cannot|do not|don't|not (?:provided|supplied|allowed))\b/iu.test(unit.statement);
+  return closesPriorState && statesResult && unit.signals.includes("supersession");
 }
 
 function completeConstraint(value: string) {
   const directive = value.match(/\b(?:must(?: not)?|do not|don't|never|avoid|preserve|required|requires|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/iu);
   if (!directive) return true;
   const remainder = value.slice((directive.index || 0) + directive[0].length).match(/[A-Za-z0-9][A-Za-z0-9_-]*/gu) || [];
-  return remainder.length >= 3 && !nakedStructuralFragment(value);
+  const relationalBoundary = /^(?:until|unless|only if|only after|before|after)$/iu.test(directive[0]);
+  return remainder.length >= (relationalBoundary ? 1 : 3) && !nakedStructuralFragment(value);
 }
 
 function completeProposition(unit: MatureUnit) {
@@ -936,7 +944,134 @@ function expirationRelationships(events: Row[]) {
 
 function criticalConstraint(unit: MatureUnit) {
   return unit.signals.includes("constraint")
-    && /\b(?:stopping rule|stop at|do not repair|only after|only if|until|unless)\b/iu.test(unit.statement);
+    && /\b(?:stopping rule|stop at|do not repair|only after|only if|until|unless|must|has to|have to|under\s+\$?\d|no more than|at most|ceiling|not (?:provided|supplied|allowed))\b/iu.test(unit.statement);
+}
+
+function explicitSupersessionOf(unit: MatureUnit, possibleReplacement: MatureUnit) {
+  if (possibleReplacement.sequence <= unit.sequence) return false;
+  // Close an older direction when a later event rejects or replaces it. A later
+  // paraphrase of an already-rejected option is corroborating evidence, not a
+  // supersession of the source-grounded rejection and its rationale.
+  if (!unit.signals.includes("current_direction")
+    || unit.signals.includes("correction")
+    || unit.signals.includes("supersession")) return false;
+  if (!possibleReplacement.signals.includes("correction")
+    && !possibleReplacement.signals.includes("supersession")) return false;
+  if (/\b(?:do not|don't|must not)\s+(?:replace|supersede|drop|reject)\b/iu.test(possibleReplacement.statement)
+    || /\b(?:remains?|stays?)\s+(?:preferred|current|the plan)\b/iu.test(possibleReplacement.statement)) return false;
+  const closesPriorState = /\b(?:no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale|superseded by|replaced by)\b/iu.test(possibleReplacement.statement);
+  return closesPriorState && termOverlap(unit.statement, possibleReplacement.statement).count >= 1;
+}
+
+function shortRoomClosureUnits(events: Row[]) {
+  const completedEvents = completionRelationships(events);
+  const expiredEvents = expirationRelationships(events);
+  const supportedUnits = matureUnits(events)
+    .filter((unit) => completeProposition(unit) && !assistantWorkflowStatus(unit))
+    .filter((unit) => !completedEvents.has(String(unit.event.id)) && !expiredEvents.has(String(unit.event.id)))
+    .filter((unit, _index, allUnits) => !allUnits.some((later) => explicitSupersessionOf(unit, later)));
+  const boundary = currentBoundarySequence(supportedUnits);
+  const units = supportedUnits
+    .filter((unit) => !(unit.sequence < boundary
+      && unit.signals.includes("current_direction")
+      && !unit.signals.includes("correction")
+      && !unit.signals.includes("supersession")
+      && !unit.signals.includes("constraint")))
+    .sort(compareMatureUnits);
+  const seeds = units.filter((unit) => (
+    unit.signals.includes("next_action")
+    || unit.signals.includes("current_direction")
+    || unit.signals.includes("uncertainty")
+  )).sort((left, right) => {
+    const priority = (unit: MatureUnit) => Number(unit.signals.includes("next_action")) * 3
+      + Number(unit.signals.includes("current_direction")) * 2
+      + Number(unit.signals.includes("uncertainty"));
+    return priority(right) - priority(left) || right.sequence - left.sequence || compareMatureUnits(left, right);
+  });
+  if (!seeds.length) return [];
+
+  const selected: MatureUnit[] = [];
+  const add = (unit: MatureUnit | undefined) => {
+    if (!unit || selected.includes(unit)) return;
+    const redundant = selected.some((chosen) => functionallyRedundant(
+      { unit, roles: candidateRoles(unit) },
+      { unit: chosen, roles: candidateRoles(chosen) },
+    ));
+    if (!redundant) selected.push(unit);
+  };
+  add(seeds[0]);
+  for (const role of [
+    "current_direction",
+    "correction_guard",
+    "constraint",
+    "next_action",
+    "rationale",
+    "uncertainty",
+    "shared_term",
+  ] satisfies CandidateRole[]) {
+    const candidates = units
+      .filter((unit) => candidateRoles(unit).includes(role))
+      .sort((left, right) => Number(sourceActorType(right.event) === "user") - Number(sourceActorType(left.event) === "user")
+        || Number(right.signals.includes("connection")) - Number(left.signals.includes("connection"))
+        || compareMatureUnits(left, right));
+    const maximum = role === "constraint" ? 4 : role === "uncertainty" ? 2 : 1;
+    let added = 0;
+    for (const candidate of candidates) {
+      if (added >= maximum) break;
+      const connected = selected.some((chosen) => {
+        const relationship = termOverlap(candidate.statement, chosen.statement);
+        return relationship.count >= 1
+          || (Math.abs(candidate.sequence - chosen.sequence) <= 2
+            && ["correction_guard", "rationale", "uncertainty"].includes(role));
+      });
+      const before = selected.length;
+      if (connected) add(candidate);
+      if (selected.length > before) added += 1;
+    }
+  }
+  return selected.sort((left, right) => left.sequence - right.sequence || compareMatureUnits(left, right));
+}
+
+async function shortRoomFindingCandidates(events: Row[]): Promise<CandidateConstruction | null> {
+  const units = shortRoomClosureUnits(events);
+  if (!units.length) return null;
+  const statements = [...new Set(units.map((unit) => unit.statement.trim()))];
+  const statement = statements.join(" ");
+  if (statement.length > 1800) return null;
+  const sourceEventIds = [...new Set(units.flatMap((unit) => unit.evidenceEvents.map((event) => String(event.id))))]
+    .sort((left, right) => {
+      const leftEvent = events.find((event) => String(event.id) === left);
+      const rightEvent = events.find((event) => String(event.id) === right);
+      return leftEvent && rightEvent ? chronologicalEventOrder(leftEvent, rightEvent) : left.localeCompare(right);
+    });
+  const signals = [...new Set(units.flatMap((unit) => unit.signals))] as ContinuitySignal[];
+  const candidate = {
+    findingType: matureFindingType(signals),
+    sourceEventIds,
+    proposalStatement: statement,
+    proposedScope: "local",
+    conditions: [] as string[],
+    exclusions: [] as string[],
+    supportingEvidence: sourceEventIds.slice(0, -1),
+    counterevidence: [] as string[],
+    uncertainty: signals.includes("uncertainty")
+      ? "The Exact source explicitly leaves part of this continuation closure unresolved."
+      : null,
+    reasonForSurfacing: "Several semantically cohesive Exact facts form one minimum complete continuation proposition.",
+    expectedRetrievalEffect: "No retrieval change unless Cody governs this source-grounded continuation closure.",
+  };
+  return {
+    candidates: [{ ...candidate, proposalHash: await sha256(JSON.stringify(candidate)) }],
+    metadata: {
+      version: CHECKPOINT_CANDIDATE_VERSION,
+      strategy: "small_room_semantic_continuation_closure_v1",
+      budget: 1,
+      candidateCount: 1,
+      rolesRepresented: [...new Set(units.flatMap(candidateRoles))],
+      exactSourceEventIds: sourceEventIds,
+      synthesisInventedClauses: false,
+    },
+  };
 }
 
 type EventSelection = {
@@ -1061,13 +1196,28 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     if (completedEvents.has(eventId) || assistantWorkflowStatus(unit)) {
       return unit.signals.includes("shared_term") ? "still_governing_historical" : "completed";
     }
+    if (structurallyCompleteUnits.some((later) => explicitSupersessionOf(unit, later))) return "superseded";
     if (unit.clusterKind === "atomic"
       && causalEvidenceEventIds.has(eventId)
       && historicalDirectionQuality(unit.statement) >= 4
       && replacementDirectionQuality(unit.statement) === 0) return "superseded";
+    if (unit.sequence < boundary
+      && unit.signals.includes("current_direction")
+      && !unit.signals.includes("correction")
+      && !unit.signals.includes("supersession")
+      && !unit.signals.includes("constraint")
+      && !unit.signals.includes("shared_term")) return "superseded";
     if (unit.signals.includes("uncertainty")) return "unresolved";
+    if (explicitCurrentOrientation(unit)
+      || (sourceActorType(unit.event) === "user"
+        && (unit.signals.includes("current_direction") || unit.signals.includes("next_action")))) return "current";
     if (unit.sequence >= boundary) return "current";
-    if (unit.signals.includes("shared_term") || criticalConstraint(unit) || relationshipCount(unit) >= 3) {
+    if (unit.signals.includes("shared_term")
+      || criticalConstraint(unit)
+      || unit.signals.includes("correction")
+      || unit.signals.includes("supersession")
+      || (unit.signals.includes("constraint") && sourceActorType(unit.event) === "user")
+      || relationshipCount(unit) >= 2) {
       return "still_governing_historical";
     }
     return "historical_source_only";
@@ -1117,16 +1267,36 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
         || compareForRole(left, right, role, boundary);
     });
 
-  for (const role of ["current_direction", "next_action"] satisfies CandidateRole[]) add(rankedForRole(role)[0]);
+  for (const role of [
+    "next_action",
+    "current_direction",
+    "constraint",
+    "correction_guard",
+    "rationale",
+    "uncertainty",
+    "shared_term",
+  ] satisfies CandidateRole[]) add(rankedForRole(role)[0]);
+
+  for (const role of ["next_action", "current_direction"] satisfies CandidateRole[]) {
+    let roleCount = 0;
+    for (const unit of rankedForRole(role)) {
+      if (roleCount >= (role === "next_action" ? 2 : 5) || selected.length >= MAX_MATURE_FINDINGS) break;
+      if (add(unit)) roleCount += 1;
+    }
+  }
 
   let currentConstraints = 0;
   for (const unit of rankedForRole("constraint")) {
-    if (currentConstraints >= 4 || selected.length >= MAX_MATURE_FINDINGS) break;
-    if (validityByUnit.get(unit) === "current" && add(unit)) currentConstraints += 1;
+    if (currentConstraints >= 6 || selected.length >= MAX_MATURE_FINDINGS) break;
+    if (["current", "still_governing_historical"].includes(validityByUnit.get(unit) || "") && add(unit)) currentConstraints += 1;
   }
 
   for (const role of ["correction_guard", "rationale", "uncertainty"] satisfies CandidateRole[]) {
-    add(rankedForRole(role)[0]);
+    let roleCount = 0;
+    for (const unit of rankedForRole(role)) {
+      if (roleCount >= 3 || selected.length >= MAX_MATURE_FINDINGS) break;
+      if (add(unit)) roleCount += 1;
+    }
   }
 
   let sharedTerms = 0;
@@ -1286,6 +1456,11 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
 }
 
 async function serverFindingCandidates(selectedEvents: Row[], mature: boolean): Promise<CandidateConstruction> {
+  const sourceEvents = selectedEvents.filter((event) => String(event.event_type).toLowerCase() === "source_message");
+  if (sourceEvents.length <= 10) {
+    const closure = await shortRoomFindingCandidates(selectedEvents);
+    if (closure) return closure;
+  }
   if (mature) return matureFindingCandidates(selectedEvents);
   const primary = selectedEvents.find((event) => {
     const type = String(event.event_type).toLowerCase();
@@ -1539,7 +1714,7 @@ async function analyzeCheckpoint(
     : body.findingCandidates === undefined ? [] : body.findingCandidates;
   if (rawFindings !== null && !Array.isArray(rawFindings)) throw new Error("Finding candidates must be an array.");
   const candidateConstruction = rawFindings === null
-    ? await serverFindingCandidates(selectedEvents, selection.mature)
+    ? await serverFindingCandidates(events, selection.mature)
     : {
       candidates: await Promise.all(rawFindings.map((candidate) => validateFindingCandidate(candidate, allowedEventIds))),
       metadata: {

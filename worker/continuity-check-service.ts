@@ -50,6 +50,8 @@ const STOP_WORDS = new Set([
 
 const FULL_TASK_PATTERN = /\b(best bets?|best option|compare|decision rule|strongest|training|pitcher prop|postmortem|lesson|audit|rerank|enter|wait|choose|plan)\b/i;
 const PRESENTATION_PATTERN = /\b(mobile|codex|transfer|copy[- ]ready|plain[- ]text|presentation|format)\b/i;
+const CONTINUATION_TASK_PATTERN = /\b(?:pick (?:this|it) back up|continue|continuation|resume|carry (?:this|it) forward|what (?:should|do) we do next|what(?:'s| is) next|next action|next step)\b/i;
+const BROAD_CONTINUATION_PATTERN = /\b(?:where (?:are|do) we (?:stand|at)|current (?:project )?state|status and next|recap and continue|everything (?:current|governing)|full room transfer)\b/i;
 
 function words(value: string) {
   return [...new Set(
@@ -88,6 +90,86 @@ function hasProtectedSensitivity(mechanism: CompactMechanism) {
     ...mechanism.scopeConditions,
     ...mechanism.exclusions,
   ].join(" "));
+}
+
+type ContinuationRole = "direction" | "next_action" | "constraint" | "correction" | "rationale" | "conditional" | "unresolved" | "shared_term";
+
+function continuationRoles(value: string): ContinuationRole[] {
+  const roles: ContinuationRole[] = [];
+  if (/\b(?:current|governing|working choice|preferred (?:choice|option|route|site|direction)|remains? (?:preferred|current|the plan)|is now|are now|decision|objective|responsib(?:le|ility)|will bring)\b/i.test(value)) roles.push("direction");
+  if (/\b(?:next (?:action|step|task)|before anything else|begin with|reserve .{0,100} next|then (?:reserve|book|continue))\b/i.test(value)) roles.push("next_action");
+  if (/\b(?:must(?: not)?|has to|have to|needs? to|do not|don't|never|avoid|required|requires|under\s+\$?\d|no more than|at most|ceiling|limit|prohibits?|not (?:provided|supplied|allowed)|until|unless|only if|only after|before|after|defer)\b/i.test(value)) roles.push("constraint");
+  if (/\b(?:correction|corrected|wrong|mistaken|supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|no longer|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale)\b/i.test(value)) roles.push("correction");
+  if (/\b(?:because|therefore|\bso\b|caused|the reason|rationale|depends on|in order to)\b/i.test(value)) roles.push("rationale");
+  if (/\b(?:if|unless|only if|only after|until|subject to|otherwise)\b/i.test(value)) roles.push("conditional");
+  if (/\b(?:unresolved|undecided|open (?:question|item|work)|not (?:yet )?(?:confirmed|established|settled)|pending|deferred|stay on hold|remains to be)\b/i.test(value)) roles.push("unresolved");
+  if (/\b(?:local term|we call this|means|refers to|is defined as)\b/i.test(value)) roles.push("shared_term");
+  return [...new Set(roles)];
+}
+
+function continuationTaskScope(task: string, requestedOutput: string | null) {
+  const context = `${task} ${requestedOutput || ""}`;
+  if (BROAD_CONTINUATION_PATTERN.test(context)) return "broad" as const;
+  if (CONTINUATION_TASK_PATTERN.test(context)) return "continuation" as const;
+  return "narrow" as const;
+}
+
+function mechanismSimilarity(left: CompactMechanism, right: CompactMechanism) {
+  const leftWords = new Set(words(left.statement));
+  const rightWords = new Set(words(right.statement));
+  const smaller = Math.min(leftWords.size, rightWords.size);
+  if (!smaller) return { count: 0, ratio: 0 };
+  let count = 0;
+  for (const word of leftWords) if (rightWords.has(word)) count += 1;
+  return { count, ratio: count / smaller };
+}
+
+function collapseRepeatedMechanisms(mechanisms: CompactMechanism[]) {
+  const selected: CompactMechanism[] = [];
+  for (const mechanism of mechanisms) {
+    const roles = continuationRoles(mechanism.statement);
+    const duplicate = selected.some((existing) => {
+      const sharedRole = roles.some((role) => continuationRoles(existing.statement).includes(role));
+      const similarity = mechanismSimilarity(mechanism, existing);
+      return sharedRole && similarity.count >= 3 && similarity.ratio >= 0.62;
+    });
+    if (!duplicate) selected.push(mechanism);
+  }
+  return selected;
+}
+
+function continuationClosure(
+  context: CompactContext,
+  task: string,
+  requestedOutput: string | null,
+) {
+  const scope = continuationTaskScope(task, requestedOutput);
+  const lexical = context.matchingMechanisms.length
+    ? context.matchingMechanisms
+    : context.caseMechanisms;
+  const source = scope === "narrow"
+    ? lexical
+    : context.caseMechanisms.length ? context.caseMechanisms : lexical;
+  const material = scope === "narrow"
+    ? source
+    : source.filter((mechanism) => continuationRoles(mechanism.statement).length > 0 || overlap(task, mechanism.statement) >= 2);
+  const mechanisms = collapseRepeatedMechanisms(material);
+  const roles = [...new Set(mechanisms.flatMap((mechanism) => continuationRoles(mechanism.statement)))];
+  return {
+    scope,
+    mechanisms,
+    roles,
+    sourceCount: source.length,
+    materialCount: material.length,
+    repeatedCount: Math.max(0, material.length - mechanisms.length),
+    complete: material.every((mechanism) => mechanisms.some((selected) => (
+      selected.id === mechanism.id
+      || (() => {
+        const similarity = mechanismSimilarity(selected, mechanism);
+        return similarity.count >= 3 && similarity.ratio >= 0.62;
+      })()
+    ))),
+  };
 }
 
 async function compactContext(
@@ -269,6 +351,7 @@ function needDecision(
   requestedOutput: string | null,
   context: CompactContext,
   caseId: string | null,
+  closure: ReturnType<typeof continuationClosure>,
 ) {
   const fullTransferRequested = /\bfull room transfer\b/i.test(requestedOutput || "");
   if (fullTransferRequested) {
@@ -278,7 +361,40 @@ function needDecision(
       explanation: "A full governed project-state packet was explicitly requested for room transfer.",
     };
   }
-  const selected = deliveryMechanisms(context);
+  const selected = closure.mechanisms;
+  if (closure.scope !== "narrow" && selected.length) {
+    const scopedConflict = selected.some((left, index) => selected.slice(index + 1).some((right) => (
+      left.scope !== right.scope && overlap(left.statement, right.statement) >= 2
+    )));
+    const protectedDepth = context.correctionOrConflictIndicators > 0
+      || scopedConflict
+      || selected.some((mechanism) => mechanism.counterevidenceIds.length || hasProtectedSensitivity(mechanism));
+    if (closure.scope === "broad" || protectedDepth || selected.length >= 8) {
+      return {
+        level: "full" as const,
+        reasonCodes: [
+          "project_continuation_closure",
+          "closure_completeness_verified",
+          ...(closure.scope === "broad" ? ["broad_continuation_scope"] : []),
+          ...(selected.length >= 8 ? ["multiple_governing_clusters"] : []),
+          ...(protectedDepth ? ["protected_dependency_depth"] : []),
+        ],
+        explanation: "The fresh room needs multiple current governed clusters and their material dependencies, not only the immediate next instruction.",
+      };
+    }
+    if (selected.length >= 2) {
+      return {
+        level: "medium" as const,
+        reasonCodes: ["project_continuation_closure", "closure_completeness_verified", "bounded_dependency_cluster"],
+        explanation: "Several related current facts form the smallest complete continuation closure without requiring broad project reconstruction.",
+      };
+    }
+    return {
+      level: "light" as const,
+      reasonCodes: ["project_continuation_closure", "closure_completeness_verified", "single_coherent_state_truth"],
+      explanation: "One cohesive governed proposition contains the complete bounded continuation state.",
+    };
+  }
   const presentation = PRESENTATION_PATTERN.test(task);
   const compactPresentationIsSafe = presentation
     && selected.length === 1
@@ -352,13 +468,6 @@ function needDecision(
   };
 }
 
-function deliveryMechanisms(context: CompactContext) {
-  const selected = context.matchingMechanisms.length
-    ? context.matchingMechanisms
-    : context.caseMechanisms;
-  return [...new Map(selected.map((mechanism) => [mechanism.id, mechanism])).values()];
-}
-
 function union(left: string[], right: string[]) {
   return [...new Set([...left, ...right])];
 }
@@ -388,7 +497,7 @@ function nextAction(status: string, level: AtlasNeedLevel | null) {
 function compactMechanismView(
   mechanisms: CompactMechanism[],
   literalTask: string,
-  level: "light" | "medium" = "light",
+  level: AtlasNeedLevel = "light",
 ) {
   if (!mechanisms.length) return null;
   const compiledContent = [
@@ -410,7 +519,7 @@ function compactMechanismView(
     scope: mechanism.scope,
     treatment: "Use" as const,
     role: "governing_context" as const,
-    reason: `${level === "light" ? "One" : "Several related"} governed State Truth item${mechanisms.length === 1 ? "" : "s"} matched the continuation task.`,
+    reason: `${level === "light" ? "One" : level === "medium" ? "Several related" : "Multiple governing clusters of"} governed State Truth item${mechanisms.length === 1 ? "" : "s"} matched the continuation task.`,
     compiledContent,
     includedItems: mechanisms.length,
     estimatedTokens: Math.ceil(compiledContent.length / 4),
@@ -443,8 +552,9 @@ export async function checkContinuity(
   const preflightStarted = Date.now();
   const context = await compactContext(db, projectId, caseId, literalTask);
   const preflightLatency = Date.now() - preflightStarted;
-  const need = needDecision(literalTask, request.requestedOutput, context, caseId);
-  const selectedDeliveryMechanisms = deliveryMechanisms(context);
+  const closure = continuationClosure(context, literalTask, request.requestedOutput);
+  const need = needDecision(literalTask, request.requestedOutput, context, caseId, closure);
+  const selectedDeliveryMechanisms = closure.mechanisms;
   const budget = request.tokenBudget;
 
   const common = {
@@ -456,7 +566,7 @@ export async function checkContinuity(
     effects: baseEffects(),
   };
 
-  if (need.level !== "full") {
+  if (need.level !== "full" || need.reasonCodes.includes("project_continuation_closure")) {
     const status = need.level === null ? "clarification_required" : `${need.level}_context_available`;
     return {
       ...common,
@@ -516,6 +626,14 @@ export async function checkContinuity(
         stoppingReason: need.level === null ? "clarification_required" : `${need.level}_delivery_sufficient`,
         wideningCount: 0,
         candidatePreviewInvoked: false,
+        continuationClosure: {
+          scope: closure.scope,
+          roles: closure.roles,
+          sourceCount: closure.sourceCount,
+          materialCount: closure.materialCount,
+          repeatedCount: closure.repeatedCount,
+          complete: closure.complete,
+        },
       },
       next: {
         action: nextAction(status, need.level),

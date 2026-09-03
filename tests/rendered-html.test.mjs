@@ -1743,7 +1743,7 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   for (const category of ["correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty", "shared_term"]) {
     assert.ok(selection.signalCategoriesRepresented.includes(category), category);
   }
-  assert.equal(candidateConstruction.version, "slice3-mature-relationships-v4");
+  assert.equal(candidateConstruction.version, "slice3-continuation-closure-v1");
   assert.equal(candidateConstruction.strategy, "mature_room_complete_current_propositions_v1");
   assert.equal(candidateConstruction.budget, 12);
   assert.ok(candidateConstruction.candidateCount <= 12);
@@ -1785,7 +1785,7 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
     JSON.stringify({ proposals, candidateConstruction }),
   );
   assert.ok(proposals.every((statement) => !/Earlier direction was replaced by:\s*$/i.test(statement)));
-  assert.ok(proposals.some((statement) => /Open question:.*remains unresolved/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Open question:.*remains unresolved/i.test(statement)), JSON.stringify(proposals));
   assert.ok(proposals.filter((statement) => /earlier broad dashboard direction/i.test(statement)).length <= 1);
   assert.ok(firstRun.value.reconciliation.some((item) => item.candidateType === "supersession"));
   assert.ok(firstRun.value.reconciliation.every((item) => item.status === "proposed"));
@@ -1860,7 +1860,7 @@ test("mature proposition construction rejects completed state and leaves unused 
   const proposals = value.reconciliation.map((item) => item.statement);
   assert.ok(proposals.some((statement) => /run the bounded continuity proof now/i.test(statement)));
   assert.ok(proposals.some((statement) => /next action is to freeze the output/i.test(statement)));
-  assert.ok(proposals.some((statement) => /Stopping rule:[\s\S]*do not repair/i.test(statement)));
+  assert.ok(proposals.some((statement) => /Stopping rule:[\s\S]*do not repair/i.test(statement)), JSON.stringify(proposals));
   assert.ok(proposals.some((statement) => /Preserve Exact source lineage/i.test(statement)));
   assert.ok(proposals.every((statement) => !/build the legacy dashboard next/i.test(statement)));
   assert.ok(proposals.every((statement) => !/browser workflow|capture screenshots/i.test(statement)));
@@ -7968,6 +7968,34 @@ test("V1.8 Medium and long-room Full are selected by semantic dependency depth r
     authority: "approved_local",
     supportingCaseIds: [bounded.caseId],
   });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:long-boundary",
+    projectId: "workflow",
+    statement: "Do not begin automated connector work until the manual-copy continuity result is accepted.",
+    authority: "approved_local",
+    supportingCaseIds: [bounded.caseId],
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:long-condition",
+    projectId: "workflow",
+    statement: "If the manual-copy transfer fails, preserve the first output and stop before repair.",
+    authority: "approved_local",
+    supportingCaseIds: [bounded.caseId],
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:long-open",
+    projectId: "workflow",
+    statement: "Destination reconstruction remains unresolved until the first response is frozen and scored.",
+    authority: "approved_local",
+    supportingCaseIds: [bounded.caseId],
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:long-term",
+    projectId: "workflow",
+    statement: "Local term: closure means every material dependency required for correct continuation.",
+    authority: "approved_local",
+    supportingCaseIds: [bounded.caseId],
+  });
   const longRoomTask = {
     task: "Resume the approved work.",
     caseId: bounded.caseId,
@@ -7984,6 +8012,269 @@ test("V1.8 Medium and long-room Full are selected by semantic dependency depth r
   assert.equal(longLargeBudget.value.need.level, "full");
   assert.ok(longSmallBudget.value.need.reasonCodes.includes("multiple_governing_clusters"));
   assert.deepEqual(longSmallBudget.value.need.reasonCodes, longLargeBudget.value.need.reasonCodes);
+});
+
+test("V1.8 continuation closure preserves minimum complete governed context", async (t) => {
+  const worker = await builtWorker("v18-continuation-closure-focused");
+  let fixtureNumber = 0;
+  async function closureFixture(statements) {
+    fixtureNumber += 1;
+    const projectId = `closure-${fixtureNumber}`;
+    const DB = await sqliteD1();
+    await seedCanonicalProject(worker, DB, projectId, `Closure ${fixtureNumber}`);
+    const active = await createContinuityCase(
+      worker,
+      DB,
+      projectId,
+      `fixture-${fixtureNumber}`,
+      "Continue the accepted release-planning state correctly.",
+    );
+    const mechanisms = statements.map((statement, index) => seedSlice4Mechanism(DB, {
+      id: `mechanism:${projectId}:${index + 1}`,
+      projectId,
+      statement,
+      authority: "approved_local",
+      supportingCaseIds: [active.caseId],
+    }));
+    return { DB, projectId, caseId: active.caseId, mechanisms };
+  }
+  async function reconstruct(statements, task = "Okay, pick this back up. What should we do next?", key = "run") {
+    const fixture = await closureFixture(statements);
+    const result = await reconstructionRunRequest(worker, fixture.DB, fixture.projectId, {
+      task,
+      caseId: fixture.caseId,
+      tokenBudget: 800,
+    }, `${fixture.projectId}-${key}`);
+    assert.equal(result.response.status, 201, JSON.stringify(result.value));
+    assert.equal(result.value.status, "compiled", JSON.stringify(result.value));
+    return { ...fixture, result };
+  }
+
+  await t.test("1 small coherent room produces a durable synthesized candidate", async () => {
+    const DB = await sqliteD1();
+    const projectId = "closure-small-room";
+    await seedCanonicalProject(worker, DB, projectId, "Small Room Closure");
+    const messages = [
+      { role: "user", content: "Route Red is our working release choice." },
+      { role: "assistant", content: "We should verify the release conditions before committing." },
+      { role: "user", content: "Route Red cannot meet the accessibility requirement, so scratch Red." },
+      { role: "assistant", content: "Route Red is out; Route Blue is the viable replacement." },
+      { role: "user", content: "Route Blue is the current choice, and launch cost must stay under $500." },
+      { role: "assistant", content: "Current decision: Route Blue with a hard $500 ceiling." },
+      { role: "user", content: "The logo joke can wait until later." },
+      { role: "assistant", content: "The next actual step is to verify Route Blue and approve it under the $500 limit." },
+    ];
+    const response = await worker.fetch(new Request(`http://localhost/api/v1/projects/${projectId}/transfers`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "closure-small-room-import",
+        "oai-authenticated-user-id": "closure-owner",
+      },
+      body: JSON.stringify({ title: "Small coherent release room", format: "json", transcript: JSON.stringify({ messages }) }),
+    }), {
+      DB,
+      ASSETS: assets,
+      CAMPUS_ATLAS_ACTION_KEY: "closure-key",
+      CAMPUS_ATLAS_OWNER_USER_ID: "closure-owner",
+    }, ctx);
+    const value = await response.json();
+    assert.equal(response.status, 201, JSON.stringify(value));
+    assert.equal(value.stage, "awaiting_review", JSON.stringify(value));
+    assert.equal(value.actualCounts.durableCandidates, 1);
+    assert.match(value.reconciliation[0].statement, /Route Red cannot meet the accessibility requirement/i);
+    assert.match(value.reconciliation[0].statement, /Route Blue is the current choice/i);
+    assert.match(value.reconciliation[0].statement, /under (?:the )?\$500 limit|\$500 ceiling/i);
+    assert.doesNotMatch(value.reconciliation[0].statement, /logo joke/i);
+  });
+
+  await t.test("2 current decision expands to its hard constraint", async () => {
+    const decision = "The current release decision is Route Blue.";
+    const constraint = "The release must remain under the approved $500 ceiling.";
+    const { result } = await reconstruct([decision, constraint]);
+    assert.equal(result.value.need.level, "medium");
+    assert.match(result.value.packet.compiledContent, new RegExp(decision.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(result.value.packet.compiledContent, /approved \$500 ceiling/i);
+  });
+
+  await t.test("3 superseded alternative travels with the current decision", async () => {
+    const { result } = await reconstruct([
+      "The current release decision is Route Blue.",
+      "Route Red is rejected because it cannot satisfy the accepted accessibility requirement.",
+    ]);
+    assert.match(result.value.packet.compiledContent, /Route Blue/);
+    assert.match(result.value.packet.compiledContent, /Route Red is rejected/);
+  });
+
+  await t.test("4 causal rationale survives when it prevents reversal", async () => {
+    const { result } = await reconstruct([
+      "The current review begins Monday morning.",
+      "Monday is required because the compliance owner is unavailable Friday.",
+    ]);
+    assert.match(result.value.packet.compiledContent, /compliance owner is unavailable Friday/i);
+  });
+
+  await t.test("5 conditional backup logic remains atomic", async () => {
+    const condition = "Use Route Green only if Route Blue fails the accessibility verification.";
+    const { result } = await reconstruct(["Route Blue remains the current release choice.", condition]);
+    assert.match(result.value.packet.compiledContent, new RegExp(condition.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  });
+
+  await t.test("6 unresolved state remains explicitly unresolved", async () => {
+    const { result } = await reconstruct([
+      "Route Blue remains the current release choice.",
+      "The launch date remains unresolved until accessibility verification is complete.",
+    ]);
+    assert.match(result.value.packet.compiledContent, /launch date remains unresolved/i);
+  });
+
+  await t.test("7 irrelevant connected chatter is pruned", async () => {
+    const { result } = await reconstruct([
+      "Route Blue remains the current release choice.",
+      "The team laughed about purple mugs during the Route Blue meeting.",
+    ]);
+    assert.match(result.value.packet.compiledContent, /Route Blue remains/);
+    assert.doesNotMatch(result.value.packet.compiledContent, /purple mugs/i);
+  });
+
+  await t.test("8 repeated governed evidence collapses", async () => {
+    const fixture = await closureFixture([
+      "The current launch decision is Route Blue; Route Red is obsolete.",
+      "Current launch decision: use Route Blue because Route Red is obsolete.",
+    ]);
+    const result = await continuityRequest(worker, fixture.DB, fixture.projectId, {
+      task: "Pick this back up and continue.",
+      caseId: fixture.caseId,
+    });
+    assert.equal(result.value.deliveryItems.length, 1, JSON.stringify(result.value.diagnostics));
+  });
+
+  await t.test("9 transitive dependencies expand from action through rationale", async () => {
+    const { result } = await reconstruct([
+      "The next action is to verify the Monday release window.",
+      "The Monday window must be verified before launch approval.",
+      "Monday is required because the compliance owner is unavailable Friday.",
+    ]);
+    for (const phrase of ["next action", "before launch approval", "unavailable Friday"]) {
+      assert.match(result.value.packet.compiledContent, new RegExp(phrase, "i"));
+    }
+  });
+
+  await t.test("10 closure stops before non-material state", async () => {
+    const { result } = await reconstruct([
+      "The next action is to verify Route Blue.",
+      "Route Blue must pass accessibility verification before approval.",
+      "A designer once preferred rounded stickers for conference badges.",
+    ]);
+    assert.doesNotMatch(result.value.packet.compiledContent, /rounded stickers/i);
+  });
+
+  await t.test("11 broad continuation receives more orientation than narrow execution", async () => {
+    const fixture = await closureFixture([
+      "The current release decision is Route Blue.",
+      "The release email must use the approved subject line.",
+      "The launch date remains unresolved until accessibility verification finishes.",
+    ]);
+    const narrow = await continuityRequest(worker, fixture.DB, fixture.projectId, {
+      task: "Write the release email with the approved subject line.",
+      caseId: fixture.caseId,
+    });
+    const broad = await continuityRequest(worker, fixture.DB, fixture.projectId, {
+      task: "Where are we at and what should we do next?",
+      caseId: fixture.caseId,
+    });
+    assert.ok(broad.value.deliveryItems.length > (narrow.value.compactCapsule?.includedItems || 0));
+    assert.equal(broad.value.need.level, "full");
+  });
+
+  await t.test("12 Light is complete with one compact cohesive proposition", async () => {
+    const { result } = await reconstruct([
+      "Route Blue is current; Route Red is rejected for accessibility failure; keep cost under $500; verify Blue next.",
+    ]);
+    assert.equal(result.value.need.level, "light");
+    assert.ok(result.value.packet.finalTokenCount < 120);
+  });
+
+  await t.test("13 Medium preserves several dependencies without becoming Full", async () => {
+    const { result } = await reconstruct([
+      "The current release decision is Route Blue.",
+      "Route Red is rejected because accessibility verification failed.",
+      "The release must remain under the approved $500 ceiling.",
+      "The launch date remains unresolved until verification finishes.",
+    ]);
+    assert.equal(result.value.need.level, "medium");
+    assert.equal(result.value.receipt.treatmentCounts.Use, 4);
+  });
+
+  await t.test("14 Full preserves multiple governing clusters", async () => {
+    const statements = [
+      "The current release decision is Route Blue.",
+      "Route Red is rejected because accessibility verification failed.",
+      "The release must remain under the approved $500 ceiling.",
+      "The current review begins Monday morning.",
+      "Monday is required because the compliance owner is unavailable Friday.",
+      "Use Route Green only if Route Blue fails verification.",
+      "The launch date remains unresolved until verification finishes.",
+      "The next action is to verify Route Blue and freeze the result.",
+    ];
+    const { result } = await reconstruct(statements);
+    assert.equal(result.value.need.level, "full");
+    for (const statement of statements) assert.ok(result.value.packet.compiledContent.includes(statement));
+  });
+
+  await t.test("15 packet rendering preserves every closure-required clause", async () => {
+    const conditional = "If verification fails, use Route Green only after the compliance owner approves the $500 ceiling.";
+    const { result } = await reconstruct(["Route Blue remains the current release choice.", conditional]);
+    assert.ok(result.value.packet.compiledContent.includes(conditional));
+    assert.doesNotMatch(result.value.packet.compiledContent, /If verification fails.*…/i);
+  });
+
+  await t.test("16 synthesized closure lineage reaches every Exact source proposition", async () => {
+    const DB = await sqliteD1();
+    const projectId = "sports";
+    await seedCanonicalProject(worker, DB, projectId, "Closure Lineage");
+    const seeded = await seedSlice3Case(worker, DB, "closure-lineage", ["source_message", "source_message", "source_message"], [
+      "Route Red is rejected because it fails accessibility.",
+      "Route Blue is the current decision and must stay under $500.",
+      "The next action is to verify Route Blue before approval.",
+    ]);
+    const checkpoint = await slice2Request(worker, DB, `/api/v1/projects/${projectId}/checkpoints`, {
+      method: "POST",
+      idempotencyKey: "closure-lineage-checkpoint",
+      body: { conversationId: seeded.conversationId, caseId: seeded.caseId, source: "canonical_case_events" },
+    });
+    assert.equal(checkpoint.response.status, 201, JSON.stringify(checkpoint.value));
+    const finding = DB.database.prepare("SELECT source_event_ids FROM findings WHERE project_id = ?").get(projectId);
+    assert.equal(JSON.parse(finding.source_event_ids).length, 3, JSON.stringify({
+      checkpoint: checkpoint.value,
+      finding,
+      events: seeded.events.map((event) => ({ id: event.id, exact_source_span: event.exact_source_span })),
+    }));
+  });
+
+  await t.test("17 closure does not invent unsupported continuity", async () => {
+    const statements = [
+      "Route Blue remains the current release choice.",
+      "The release must remain under the approved $500 ceiling.",
+    ];
+    const { result } = await reconstruct(statements);
+    const bullets = result.value.packet.compiledContent.split("\n").filter((line) => line.startsWith("- ")).map((line) => line.slice(2));
+    assert.deepEqual(bullets, statements);
+  });
+
+  await t.test("18 identical source and task produce deterministic closure", async () => {
+    const fixture = await closureFixture([
+      "Route Blue remains the current release choice.",
+      "The release must remain under the approved $500 ceiling.",
+      "The next action is to verify Route Blue before approval.",
+    ]);
+    const body = { task: "Pick this back up and continue.", caseId: fixture.caseId };
+    const first = await continuityRequest(worker, fixture.DB, fixture.projectId, body);
+    const second = await continuityRequest(worker, fixture.DB, fixture.projectId, body);
+    assert.deepEqual(first.value.deliveryItems, second.value.deliveryItems);
+    assert.deepEqual(first.value.need, second.value.need);
+    assert.deepEqual(first.value.diagnostics.continuationClosure, second.value.diagnostics.continuationClosure);
+  });
 });
 
 test("V1.8 product copy presents room transfer and immutable Light/Medium/Full packets without a fake connector", async () => {

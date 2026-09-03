@@ -213,7 +213,8 @@ export async function runReconstruction(
     return stoppedResult(preflight);
   }
 
-  if (preflight.need.level === "light" || preflight.need.level === "medium") {
+  const continuationClosureDelivery = preflight.need.reasonCodes.includes("project_continuation_closure");
+  if (preflight.need.level === "light" || preflight.need.level === "medium" || continuationClosureDelivery) {
     if (preflight.status !== `${preflight.need.level}_context_available`) {
       return stoppedResult(preflight);
     }

@@ -500,7 +500,7 @@ export async function compileGovernedDeliveryPacket(
     requestedOutput: string | null;
     caseId: string | null;
     tokenBudget: number;
-    level: Exclude<ContextDeliveryLevel, "full">;
+    level: ContextDeliveryLevel;
     reasonCodes: string[];
     explanation: string;
     items: GovernedDeliveryItem[];
