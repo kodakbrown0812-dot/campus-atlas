@@ -705,7 +705,7 @@ function openApi(origin: string) {
         post: {
           operationId: "checkCanonicalContinuity",
           tags: ["Canonical V1.7.1"],
-          summary: "Determine whether a task needs none, light, or full governed continuity",
+          summary: "Determine whether a task needs Light, Medium, or Full governed continuity",
           description: "A read-only canonical façade. It creates no packet, receipt, handoff, answer, provider call, authority change, or retrieval-eligibility change.",
           parameters: [{
             name: "projectId",
@@ -852,14 +852,14 @@ function openApi(origin: string) {
               type: "object",
               required: ["level", "reasonCodes", "explanation"],
               properties: {
-                level: { type: "string", enum: ["none", "light", "full"] },
+                level: { type: ["string", "null"], enum: ["light", "medium", "full", null] },
                 reasonCodes: { type: "array", items: { type: "string" } },
                 explanation: { type: "string" },
               },
             },
             status: {
               type: "string",
-              enum: ["not_needed", "light_context_available", "ready", "clarification_required", "missing_required_state", "unsafe_under_selected_budget"],
+              enum: ["light_context_available", "medium_context_available", "ready", "clarification_required", "missing_required_state", "unsafe_under_selected_budget"],
             },
             interpretation: { type: ["object", "null"] },
             roadway: { type: "object" },
@@ -970,7 +970,7 @@ function openApi(origin: string) {
             apiVersion: { type: "string", const: "v1.7.1" },
             status: {
               type: "string",
-              enum: ["clarification_required", "atlas_not_needed", "light_continuity_only", "missing_required_state", "unsafe_under_selected_budget"],
+              enum: ["clarification_required", "missing_required_state", "unsafe_under_selected_budget"],
             },
             projectId: { type: "string" },
             caseId: { type: ["string", "null"] },
@@ -979,7 +979,7 @@ function openApi(origin: string) {
             roadway: { type: "object" },
             capsule: {
               type: ["object", "null"],
-              description: "Present only for light_continuity_only. Its compiledContent is the exact server-produced current-room deliverable.",
+              description: "Optional read-only preview of bounded governed state; successful reconstruction persists an immutable packet.",
             },
             preflight: { type: "object" },
             packet: { type: "null" },
@@ -996,7 +996,7 @@ function openApi(origin: string) {
           type: "object",
           required: ["level", "reasonCodes", "explanation"],
           properties: {
-            level: { type: "string", enum: ["none", "light", "full"] },
+            level: { type: ["string", "null"], enum: ["light", "medium", "full", null] },
             reasonCodes: { type: "array", items: { type: "string" } },
             explanation: { type: "string" },
           },

@@ -19,6 +19,16 @@ import {
 export const PACKET_VERSION = 1;
 export const SUPPORTED_TOKEN_BUDGETS = CONTINUITY_TOKEN_BUDGETS;
 
+export type ContextDeliveryLevel = "light" | "medium" | "full";
+
+export type GovernedDeliveryItem = {
+  id: string;
+  versionId: string;
+  statement: string;
+  authority: string;
+  scope: string;
+};
+
 type PacketItemSnapshot = {
   sourceType: string;
   sourceId: string;
@@ -480,6 +490,207 @@ function packetRequiresRoadwayClarification(interpretation: TaskInterpretation) 
     && interpretation.applicability.applicableRoadwayIds.length === 0;
   return interpretation.clarificationRequired
     || (!interpretation.primaryRoadway && !zeroApplicableRoadways);
+}
+
+export async function compileGovernedDeliveryPacket(
+  db: D1Database,
+  projectId: string,
+  request: {
+    literalTask: string;
+    requestedOutput: string | null;
+    caseId: string | null;
+    tokenBudget: number;
+    level: Exclude<ContextDeliveryLevel, "full">;
+    reasonCodes: string[];
+    explanation: string;
+    items: GovernedDeliveryItem[];
+  },
+  idempotencyKey: string,
+) {
+  const replay = await first<Row>(db.prepare(
+    "SELECT id, task, token_budget FROM packets WHERE project_id = ? AND idempotency_key = ? LIMIT 1",
+  ).bind(projectId, idempotencyKey));
+  if (replay) {
+    if (replay.task !== request.literalTask || Number(replay.token_budget) !== request.tokenBudget) {
+      throw new Error("Idempotency key conflicts with a different packet request.");
+    }
+    return { ...(await packetDetail(db, projectId, String(replay.id))), idempotentReplay: true };
+  }
+  if (!SUPPORTED_TOKEN_BUDGETS.has(request.tokenBudget)) {
+    throw new Error("Token budget must be exactly 400, 800, or 1600.");
+  }
+  if (!request.items.length) {
+    return {
+      status: "clarification_required",
+      packet: null,
+      receipt: null,
+      idempotentReplay: false,
+      failure: { reason: "source_grounded_state_unavailable" },
+    };
+  }
+
+  const content = [
+    `# Atlas transfer packet v${PACKET_VERSION}`,
+    `Delivery: ${request.level.toUpperCase()}`,
+    `Continue: ${request.literalTask}`,
+    "",
+    "## Current working state",
+    ...request.items.map((item) => `- ${item.statement.replace(/\s+/g, " ").trim()}`),
+  ].join("\n");
+  const finalTokenCount = tokenCount(content);
+  if (finalTokenCount > request.tokenBudget) {
+    return {
+      status: "unsafe_under_selected_budget",
+      packet: null,
+      receipt: null,
+      idempotentReplay: false,
+      failure: {
+        reason: `minimum_safe_packet_exceeds_budget:${finalTokenCount}>${request.tokenBudget}`,
+        estimatedSafeMinimum: finalTokenCount,
+        selectedBudget: request.tokenBudget,
+      },
+    };
+  }
+
+  const snapshots: PacketItemSnapshot[] = request.items.map((item, index) => ({
+    sourceType: "Mechanism",
+    sourceId: item.id,
+    sourceVersionId: item.versionId,
+    statement: item.statement,
+    treatment: "Use",
+    representation: "Compressed",
+    scope: item.scope,
+    authority: item.authority,
+    freshness: "governing",
+    reason: `${request.level[0].toUpperCase()}${request.level.slice(1)} delivery selected this source-grounded governed state for the continuation task.`,
+    sequenceOrder: index + 1,
+    protectedRole: null,
+    governanceEventId: null,
+    counterevidenceIds: [],
+    metadata: {
+      contextDeliveryLevel: request.level,
+      semanticDepthReasonCodes: request.reasonCodes,
+    },
+  }));
+  const comparison = await sha256(json({
+    projectId,
+    caseId: request.caseId,
+    contextDeliveryLevel: request.level,
+  }));
+  const prior = await priorPacket(db, projectId, comparison);
+  const priorPacketId = prior ? String(prior.id) : null;
+  const difference = packetDifference(
+    await priorItems(db, projectId, priorPacketId),
+    snapshots,
+  );
+  const summary = treatmentSummary(snapshots);
+  const interpretation = {
+    literalRequest: request.literalTask,
+    requestedDecisionOrOutput: request.requestedOutput || "Continue the requested work.",
+    activeProjectId: projectId,
+    caseId: request.caseId,
+    caseObjective: null,
+    caseContextUsedForMatching: Boolean(request.caseId),
+    domain: "room_continuation",
+    taskOrMarketType: "room_transfer",
+    timeSensitivity: "source_governed",
+    scope: request.caseId ? "case" : "project",
+    requiredReasoningMechanism: "Apply the minimum source-grounded current state needed for the task.",
+    relevantSharedMeanings: [],
+    materialAmbiguity: false,
+    clarificationRequired: false,
+    ambiguityReason: null,
+    primaryRoadway: null,
+    candidateInterpretations: [],
+    supportingModules: [],
+    requiredLiveState: [],
+    selectionReason: request.explanation,
+    userSelectedOverride: false,
+    applicability: { applicableRoadwayIds: [], nonApplicableRoadways: [] },
+    contextDeliveryLevel: request.level,
+    semanticDepthReasonCodes: request.reasonCodes,
+    stateTruthPrecedesTaskSelection: true,
+    reconstructionRunRequest: {
+      requestedOutput: request.requestedOutput,
+      roadwayOverride: null,
+    },
+  };
+  const packetId = canonicalId("packet");
+  const receiptId = canonicalId("receipt");
+  const createdAt = now();
+  const statements: D1PreparedStatement[] = [
+    db.prepare(
+      `INSERT INTO packets (
+        id, project_id, case_id, task, inferred_intent, interpretation,
+        primary_roadway_id, primary_roadway_version_id, supporting_modules,
+        token_budget, final_token_count, compiled_content,
+        prior_comparable_packet_id, comparison_key, status, compilation_error,
+        idempotency_key, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, '[]', ?, ?, ?, ?, ?, 'compiled', NULL, ?, ?)`,
+    ).bind(
+      packetId,
+      projectId,
+      request.caseId,
+      request.literalTask,
+      "Continue with the minimum source-grounded current room state.",
+      json(interpretation),
+      request.tokenBudget,
+      finalTokenCount,
+      content,
+      priorPacketId,
+      comparison,
+      idempotencyKey,
+      createdAt,
+    ),
+  ];
+  for (const item of snapshots) {
+    statements.push(db.prepare(
+      `INSERT INTO packet_items (
+        id, project_id, packet_id, source_type, source_id, source_version_id,
+        treatment, representation_type, scope, authority_state, freshness,
+        inclusion_reason, exclusion_reason, sequence_order
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+    ).bind(
+      canonicalId("packet-item"),
+      projectId,
+      packetId,
+      item.sourceType,
+      item.sourceId,
+      item.sourceVersionId,
+      item.treatment,
+      item.representation,
+      item.scope,
+      item.authority,
+      item.freshness,
+      item.reason,
+      item.sequenceOrder,
+    ));
+  }
+  statements.push(db.prepare(
+    `INSERT INTO receipts (
+      id, project_id, packet_id, selected_roadway_reason,
+      alternative_roadways_considered, candidate_treatment_summary,
+      governance_causes, freshness_summary, inference_disclosure,
+      unresolved_conflicts, diff_summary, created_at
+    ) VALUES (?, ?, ?, ?, '[]', ?, '[]', ?, ?, '[]', ?, ?)`,
+  ).bind(
+    receiptId,
+    projectId,
+    packetId,
+    `No Roadway is required for ${request.level} task-specific delivery.`,
+    json({
+      ...summary,
+      treatmentOrder: ["Use", "Consider", "Exclude"],
+      semanticDepthReasonCodes: request.reasonCodes,
+      stateTruthPrecedesTaskSelection: true,
+    }),
+    json({ required: [], missing: [], safeToCompile: true }),
+    "Atlas selected a minimal source-grounded subset from already governed State Truth. Delivery depth reflects dependency structure, not source or packet length.",
+    json(difference),
+    createdAt,
+  ));
+  await db.batch(statements);
+  return { ...(await packetDetail(db, projectId, packetId)), idempotentReplay: false };
 }
 
 export async function compilePacket(

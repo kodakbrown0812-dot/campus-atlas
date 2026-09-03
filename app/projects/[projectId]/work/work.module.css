@@ -711,6 +711,49 @@
   flex-wrap: wrap;
 }
 
+.roomReady {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid rgba(39, 212, 199, .22);
+  border-radius: 11px;
+  background: rgba(39, 212, 199, .045);
+}
+
+.roomReady h3 {
+  margin: 4px 0 0;
+  font-size: 17px;
+}
+
+.roomStateSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 9px;
+  margin: 0;
+}
+
+.roomStateSummary div {
+  padding: 11px;
+  border: 1px solid rgba(137, 160, 197, .13);
+  border-radius: 9px;
+  background: rgba(3, 14, 29, .34);
+}
+
+.roomStateSummary dt {
+  color: #7186a6;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.roomStateSummary dd {
+  margin: 6px 0 0;
+  color: #c9d6e8;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .reviewActions button:nth-child(2),
 .reviewActions button:nth-child(3),
 .transferFailure button {

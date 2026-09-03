@@ -159,11 +159,12 @@ async function packetSource(db: D1Database, projectId: string, packetId: string)
     throw new Error("Failed or incomplete packets cannot be handed off.");
   }
   const interpretation = parseJson<Record<string, unknown>>(packet.interpretation, {});
+  const compactDelivery = interpretation.contextDeliveryLevel === "light"
+    || interpretation.contextDeliveryLevel === "medium";
   if (
     interpretation.clarificationRequired === true
     || interpretation.materialAmbiguity === true
-    || !packet.primary_roadway_id
-    || !packet.primary_roadway_version_id
+    || (!compactDelivery && (!packet.primary_roadway_id || !packet.primary_roadway_version_id))
   ) {
     throw new Error("Ambiguous reconstruction requests cannot be handed off.");
   }

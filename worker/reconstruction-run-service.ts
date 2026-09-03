@@ -5,7 +5,7 @@ import {
   ValidatedContinuityRequest,
   validateContinuityRequest,
 } from "./continuity-request-contract";
-import { compilePacket, getPacket } from "./packet-service";
+import { compileGovernedDeliveryPacket, compilePacket, getPacket } from "./packet-service";
 import {
   first,
   Row,
@@ -16,8 +16,7 @@ type PacketDetail = Awaited<ReturnType<typeof getPacket>>;
 const HONESTY_STATEMENT = "Atlas records what governed context it supplied; it does not establish outcome correctness.";
 
 function stoppedStatus(preflight: Awaited<ReturnType<typeof checkContinuity>>) {
-  if (preflight.need.level === "none") return "atlas_not_needed";
-  if (preflight.need.level === "light") return "light_continuity_only";
+  if (preflight.need.level === null) return "clarification_required";
   return preflight.status;
 }
 
@@ -33,7 +32,7 @@ function stoppedResult(
     literalTask: preflight.literalTask,
     need: preflight.need,
     roadway: preflight.roadway,
-    capsule: preflight.need.level === "light" ? preflight.compactCapsule : null,
+    capsule: preflight.compactCapsule,
     preflight: {
       status: preflight.status,
       freshness: preflight.freshness,
@@ -126,7 +125,7 @@ function compactProjection(
     caseId: detail.packet.caseId,
     literalTask: detail.packet.task,
     need: preflight?.need ?? {
-      level: "full",
+      level: (detail.packet.interpretation as Row).contextDeliveryLevel || "full",
       reasonCodes: ["idempotent_saved_reconstruction"],
       explanation: "The previously compiled immutable reconstruction is being returned without current-state reevaluation.",
     },
@@ -210,9 +209,31 @@ export async function runReconstruction(
 
   const preflight = await checkContinuity(db, projectId, input);
 
-  if (preflight.need.level !== "full" || preflight.status !== "ready") {
+  if (preflight.need.level === null) {
     return stoppedResult(preflight);
   }
+
+  if (preflight.need.level === "light" || preflight.need.level === "medium") {
+    if (preflight.status !== `${preflight.need.level}_context_available`) {
+      return stoppedResult(preflight);
+    }
+    const compiled = await compileGovernedDeliveryPacket(db, projectId, {
+      literalTask: preflight.literalTask,
+      requestedOutput: request.requestedOutput,
+      caseId: request.caseId,
+      tokenBudget: request.tokenBudget,
+      level: preflight.need.level,
+      reasonCodes: preflight.need.reasonCodes,
+      explanation: preflight.need.explanation,
+      items: "deliveryItems" in preflight ? preflight.deliveryItems : [],
+    }, idempotencyKey);
+    if (!compiled.packet || !compiled.receipt) {
+      return stoppedResult(preflight, String(compiled.status));
+    }
+    return compactProjection(compiled, preflight, compiled.idempotentReplay);
+  }
+
+  if (preflight.status !== "ready") return stoppedResult(preflight);
 
   const compileInput = canonicalContinuityInput(request);
   const compiled = await compilePacket(db, projectId, compileInput, idempotencyKey, {

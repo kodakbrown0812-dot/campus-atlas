@@ -4,8 +4,7 @@ import { useState } from "react";
 import { HandoffResult, PreparedContext, ReceivingModel } from "./ask-types";
 import styles from "./ask.module.css";
 
-type CopyDestination = "aid" | "transfer";
-type CopyState = { destination: CopyDestination; status: "copied" | "failed" } | null;
+type CopyState = "copied" | "failed" | null;
 
 function selectPreparedContext() {
   const node = document.getElementById("prepared-context-content");
@@ -25,39 +24,34 @@ export default function HandoffPresentation({
 }) {
   const [copyState, setCopyState] = useState<CopyState>(null);
 
-  async function copy(destination: CopyDestination) {
+  async function copy() {
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable.");
       await navigator.clipboard.writeText(context.packet.compiledContent);
-      setCopyState({ destination, status: "copied" });
+      setCopyState("copied");
     } catch {
-      setCopyState({ destination, status: "failed" });
+      setCopyState("failed");
     }
   }
 
   return (
     <section className={styles.continuationActions} aria-label="Prepared context destinations">
-      <h3>Continue with this context</h3>
+      <h3>Ready for a fresh room</h3>
       <div className={styles.destinationGrid}>
         <article className={styles.primaryDestination}>
-          <strong>This room</strong>
-          <p>Paste the prepared context into the conversation already in progress.</p>
-          <button onClick={() => void copy("aid")} type="button">Copy for this room</button>
-        </article>
-        <article>
-          <strong>A new room</strong>
-          <p>Start a fresh conversation with the same prepared project state.</p>
-          <button onClick={() => void copy("transfer")} type="button">Copy for a new room</button>
+          <strong>Transfer packet</strong>
+          <p>Paste this exact packet into the fresh conversation before continuing the work.</p>
+          <button onClick={() => void copy()} type="button">Copy for fresh room</button>
         </article>
       </div>
 
-      {copyState?.status === "copied" ? (
+      {copyState === "copied" ? (
         <div className={styles.copySuccess} role="status">
-          <strong>{copyState.destination === "aid" ? "Context aid copied" : "New-room context copied"}</strong>
-          <span>{copyState.destination === "aid" ? "Paste it into the conversation already in progress." : "Paste it into the new conversation before continuing the work."}</span>
+          <strong>Transfer packet copied</strong>
+          <span>Paste it into the fresh room before continuing the work.</span>
         </div>
       ) : null}
-      {copyState?.status === "failed" ? (
+      {copyState === "failed" ? (
         <div className={styles.copyFailure} role="alert">
           <strong>Automatic copy was unavailable.</strong>
           <span>Select the exact prepared context, then copy it manually.</span>
@@ -65,7 +59,7 @@ export default function HandoffPresentation({
         </div>
       ) : null}
 
-      <p className={styles.resultExplanation}>Both actions copy the identical context returned by Atlas.</p>
+      <p className={styles.resultExplanation}>The copied text is the exact immutable packet returned by Atlas.</p>
     </section>
   );
 }

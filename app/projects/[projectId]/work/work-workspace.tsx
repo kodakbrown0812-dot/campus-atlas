@@ -232,7 +232,7 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         <div>
           <span className={styles.eyebrow}>Start here</span>
           <h2>Transfer an existing room</h2>
-          <p>Paste your mature room or import its export. Atlas will preserve the source, reconstruct what still governs, and stop only if it truly needs your decision.</p>
+          <p>Paste any existing room. Atlas will preserve the source, reconstruct what is current, and stop only if it truly needs your decision.</p>
         </div>
         <button
           aria-expanded={mode === "transfer"}

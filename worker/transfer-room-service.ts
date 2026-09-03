@@ -3,11 +3,11 @@ import {
   CHECKPOINT_EXTRACTION_VERSION,
   runCheckpoint,
 } from "./checkpoint-service";
-import { importConversation } from "./conversation-cases";
+import { ingestRoomSource } from "./canonical-conversation-intake";
 import { materializeApprovedStateTruthMechanisms } from "./governance-service";
 import { ensureExactImportSourceEvents } from "./source-event-materialization";
 import { sha256 } from "./transcript-import";
-import { all, first, json, now, parseJson, requiredString, Row } from "./slice3-support";
+import { all, first, json, now, parseJson, Row } from "./slice3-support";
 
 export const TRANSFER_STAGES = [
   "received",
@@ -423,6 +423,33 @@ async function failRun(db: D1Database, row: Row, reason: string) {
   await recordStage(db, row, "failed", "failed", { reason, retrySafe: true });
 }
 
+function reconstructedRoomState(items: ReconciliationItem[]) {
+  const current = items.filter((item) => (
+    item.status === "approved" && item.mechanismId && item.proposedTreatment === "Use"
+  ) || (
+    item.relationship === "supporting_evidence" && item.relatedMechanismId
+  ));
+  const statements = [...new Set(current.map((item) => item.statement))];
+  const constraints = statements.filter((statement) => (
+    /\b(must|must not|do not|never|only|unless|until|before|after|required?|constraint)\b/i.test(statement)
+  ));
+  const changed = current
+    .filter((item) => /correction|supersed|replacement|revision/i.test(`${item.candidateType} ${item.relationship}`))
+    .map((item) => item.statement);
+  const nextAction = statements.find((statement) => (
+    /\b(next action|next step|proceed|continue by|will now|should now|begin)\b/i.test(statement)
+  )) || null;
+  return {
+    status: statements.length ? "ready" : items.some((item) => item.reviewRequired) ? "needs_review" : "insufficient",
+    currentDirection: statements[0] || null,
+    nextAction,
+    importantConstraints: constraints.slice(0, 3),
+    changedOrReplaced: changed.slice(0, 3),
+    governedStatementCount: statements.length,
+    stateTruthPrecedesTaskSelection: true,
+  };
+}
+
 async function view(db: D1Database, projectId: string, row: Row) {
   const [conversation, imported, history] = await Promise.all([
     first<Row>(db.prepare(
@@ -438,6 +465,7 @@ async function view(db: D1Database, projectId: string, row: Row) {
        ORDER BY created_at ASC, rowid ASC`,
     ).bind(projectId, row.id)),
   ]);
+  const reconciliation = parseJson<ReconciliationItem[]>(row.reconciliation, []);
   return {
     id: row.id,
     projectId: row.project_id,
@@ -453,7 +481,8 @@ async function view(db: D1Database, projectId: string, row: Row) {
     expectedCounts: parseJson(row.expected_counts, {}),
     actualCounts: parseJson(row.actual_counts, {}),
     generatedRecordIds: parseJson(row.generated_record_ids, {}),
-    reconciliation: parseJson<ReconciliationItem[]>(row.reconciliation, []),
+    reconciliation,
+    reconstructedState: reconstructedRoomState(reconciliation),
     blockedReason: row.blocked_reason,
     failureReason: row.failure_reason,
     retrySafe: ["blocked", "failed"].includes(String(row.status)),
@@ -656,17 +685,12 @@ export async function beginTransfer(
   if (typeof body.conversationId === "string" && body.conversationId.trim()) {
     conversationId = body.conversationId.trim();
   } else {
-    const result = await importConversation(db, projectId, {
-      title: requiredString(body.title, "Source title"),
-      sourceName: requiredString(body.title, "Source title"),
-      sourceType: "explicit_transcript_import",
-      representationType: "Exact",
-      authorityState: "observed",
-      format: typeof body.format === "string" ? body.format : "text",
-      transcript: body.transcript,
-      provenance: { importedFrom: "transfer_room_v01" },
-      metadata: { interface: "transfer_room_v01" },
-    }, `transfer-import:${idempotencyKey}`);
+    const result = await ingestRoomSource(
+      db,
+      projectId,
+      body,
+      `transfer-import:${idempotencyKey}`,
+    );
     conversationId = String(result.conversation.id);
   }
   const { row, imported } = await ensureRun(db, projectId, conversationId, origin);

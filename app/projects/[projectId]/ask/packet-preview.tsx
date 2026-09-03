@@ -70,7 +70,7 @@ export default function PacketPreview({
       <details className={styles.technicalDetails}>
         <summary>Advanced details</summary>
         <dl className={styles.resultMetadata}>
-          <div><dt>Need level</dt><dd>Full</dd></div>
+          <div><dt>Delivery level</dt><dd>{run.need?.level ? `${run.need.level[0].toUpperCase()}${run.need.level.slice(1)}` : "Available in Inspect"}</dd></div>
           <div><dt>Reason codes</dt><dd>{run.need?.reasonCodes?.join(", ") || "Available in Inspect"}</dd></div>
           <div><dt>Roadway</dt><dd>{run.roadway?.primary?.name || run.roadway?.name || "Available in Inspect"}</dd></div>
           <div><dt>Included items</dt><dd>{includedItems}</dd></div>

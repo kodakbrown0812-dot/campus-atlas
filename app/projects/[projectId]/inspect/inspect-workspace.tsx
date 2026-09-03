@@ -469,24 +469,7 @@ function CollaborationSignals({
 }
 
 function DeliverySummary({ delivery, latestPacket, projectId }: { delivery: ReturnType<typeof useStewardTask>["recentDelivery"]; latestPacket: PacketDetail | null; projectId: string }) {
-  if (delivery?.projectId === projectId) {
-    if (delivery.need.level === "none") {
-      return <article className={styles.deliveryCard}><span>No added context · current session</span><h3>{delivery.literalTask}</h3><p>Atlas found no preserved project context that needed to be added for this task.</p><small>The task can be copied without an Atlas context packet.</small></article>;
-    }
-    if (delivery.need.level === "light" && delivery.capsule) {
-      const sourceLink = delivery.capsule.sourceType === "mechanism" ? detailHref(projectId, "mechanisms", delivery.capsule.sourceId) : `/projects/${encodeURIComponent(projectId)}/inspect`;
-      return (
-        <article className={styles.deliveryCard}>
-          <span>Compact context · current session</span>
-          <h3>{delivery.literalTask}</h3>
-          <p>Atlas supplied {delivery.capsule.includedItems === 1 ? "one preserved item" : `${delivery.capsule.includedItems} preserved items`} because it materially affected this task.</p>
-          <pre>{delivery.capsule.compiledContent}</pre>
-          <Link href={sourceLink}>See where this came from</Link>
-          <small>This compact result is available for the current app session.</small>
-        </article>
-      );
-    }
-  }
+  void delivery;
   if (latestPacket) {
     const governingUsed = latestPacket.items.filter((item) => item.treatment === "Use" && item.sourceType === "Mechanism");
     return <article className={styles.deliveryCard}><span>Saved transfer packet</span><h3>{latestPacket.packet.task}</h3><p>Atlas supplied {governingUsed.length} preserved project {governingUsed.length === 1 ? "item" : "items"} for this task.</p><Link href={detailHref(projectId, "packets", latestPacket.packet.id)}>Inspect this packet</Link><small>This is a task-specific selection, not a replacement for the full project record.{latestPacket.packet.finalTokenCount ? ` Estimated size: ${latestPacket.packet.finalTokenCount} tokens.` : ""}</small></article>;

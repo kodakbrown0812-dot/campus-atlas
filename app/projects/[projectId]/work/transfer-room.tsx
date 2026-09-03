@@ -42,6 +42,15 @@ type Transfer = {
   expectedCounts: Record<string, number>;
   actualCounts: Record<string, number>;
   reconciliation: ReconciliationItem[];
+  reconstructedState: {
+    status: "ready" | "needs_review" | "insufficient";
+    currentDirection: string | null;
+    nextAction: string | null;
+    importantConstraints: string[];
+    changedOrReplaced: string[];
+    governedStatementCount: number;
+    stateTruthPrecedesTaskSelection: true;
+  };
   blockedReason: string | null;
   failureReason: string | null;
   retrySafe: boolean;
@@ -238,8 +247,8 @@ export default function TransferRoom({
     <section className={styles.transferRoom}>
       <header>
         <span className={styles.eyebrow}>Room transfer</span>
-        <h2>Bring in an existing conversation</h2>
-        <p>Atlas will preserve the conversation, identify what still matters, and make it ready for future work.</p>
+        <h2>What room do you want to continue?</h2>
+        <p>Paste the conversation. Atlas will preserve it exactly, reconstruct what is current, and prepare it for a fresh room.</p>
       </header>
 
       <form className={styles.transferForm} onSubmit={submit}>
@@ -248,10 +257,10 @@ export default function TransferRoom({
           <input name="title" placeholder="What work is this room preserving?" required />
         </label>
         <label>
-          How are you bringing it in?
+          Current method
           <select defaultValue="text" name="format">
-            <option value="text">Pasted conversation</option>
-            <option value="json">ChatGPT or structured export</option>
+            <option value="text">Paste conversation</option>
+            <option value="json">Paste structured export</option>
           </select>
         </label>
         <label className={styles.transferTranscript}>
@@ -337,14 +346,36 @@ export default function TransferRoom({
           )}
 
           {current.stage === "ready_for_steward" && (
-            <div className={styles.transferReady}>
-              <strong>This room is ready for its transfer packet.</strong>
-              <Link
-                href={`/projects/${encodeURIComponent(projectId)}/ask`}
-                onClick={() => carryTask(projectId, "", current.caseId)}
-              >
-                Prepare transfer packet
-              </Link>
+            <div className={styles.roomReady}>
+              <header>
+                <span className={styles.eyebrow}>Room ready</span>
+                <h3>Atlas reconstructed the current state of this work.</h3>
+              </header>
+              <dl className={styles.roomStateSummary}>
+                <div>
+                  <dt>Current direction</dt>
+                  <dd>{current.reconstructedState.currentDirection || "No accepted direction was established."}</dd>
+                </div>
+                {current.reconstructedState.nextAction ? <div><dt>Next action</dt><dd>{current.reconstructedState.nextAction}</dd></div> : null}
+                <div>
+                  <dt>Important constraints</dt>
+                  <dd>{current.reconstructedState.importantConstraints.length
+                    ? current.reconstructedState.importantConstraints.join(" ")
+                    : "No separate governing constraint was established."}</dd>
+                </div>
+                {current.reconstructedState.changedOrReplaced.length ? (
+                  <div><dt>Changed or replaced</dt><dd>{current.reconstructedState.changedOrReplaced.join(" ")}</dd></div>
+                ) : null}
+              </dl>
+              <div className={styles.transferReady}>
+                <Link
+                  href={`/projects/${encodeURIComponent(projectId)}/ask`}
+                  onClick={() => carryTask(projectId, "", current.caseId)}
+                >
+                  Prepare transfer
+                </Link>
+                <Link href={`/projects/${encodeURIComponent(projectId)}/inspect/transfers/${encodeURIComponent(current.id)}`}>Inspect what Atlas preserved</Link>
+              </div>
             </div>
           )}
           {["blocked", "failed"].includes(current.stage) && (

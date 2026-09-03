@@ -1,4 +1,4 @@
-import { previewPacketCandidates } from "./packet-service";
+import { previewPacketCandidates, type GovernedDeliveryItem } from "./packet-service";
 import {
   canonicalContinuityInput,
   ContinuityRequestInput,
@@ -13,7 +13,7 @@ import {
   Row,
 } from "./slice3-support";
 
-export type AtlasNeedLevel = "none" | "light" | "full";
+export type AtlasNeedLevel = "light" | "medium" | "full";
 
 type CompactMechanism = {
   id: string;
@@ -36,6 +36,7 @@ type CompactContext = {
   } | null;
   mechanisms: CompactMechanism[];
   matchingMechanisms: CompactMechanism[];
+  caseMechanisms: CompactMechanism[];
   correctionOrConflictIndicators: number;
   recordsScanned: number;
 };
@@ -158,6 +159,9 @@ async function compactContext(
     caseRecord,
     mechanisms,
     matchingMechanisms: mechanisms.filter((mechanism) => mechanismMatchesTask(task, mechanism, caseId)),
+    caseMechanisms: caseId
+      ? mechanisms.filter((mechanism) => mechanism.caseIds.includes(caseId))
+      : [],
     correctionOrConflictIndicators: Number(indicator?.count || 0),
     recordsScanned: 1 + (caseRecord ? 1 : 0) + mechanisms.length + Number(indicator?.count || 0),
   };
@@ -229,7 +233,7 @@ async function assessRoadwayConvergence(
       requiredLiveState: taskActivatedRoadwayRequirements
         ? stableList(candidate.requiredLiveState)
         : [],
-      compiledContent: compactMechanismView(mechanism, request.literalTask)?.compiledContent,
+      compiledContent: compactMechanismView([mechanism], request.literalTask)?.compiledContent,
     });
   }));
   const converged = outcomes.every((outcome) => outcome === outcomes[0]);
@@ -274,11 +278,12 @@ function needDecision(
       explanation: "A full governed project-state packet was explicitly requested for room transfer.",
     };
   }
+  const selected = deliveryMechanisms(context);
   const presentation = PRESENTATION_PATTERN.test(task);
   const compactPresentationIsSafe = presentation
-    && context.matchingMechanisms.length === 1
+    && selected.length === 1
     && context.correctionOrConflictIndicators === 0
-    && context.matchingMechanisms[0].counterevidenceIds.length === 0;
+    && selected[0].counterevidenceIds.length === 0;
   if (compactPresentationIsSafe) {
     return {
       level: "light" as const,
@@ -286,43 +291,72 @@ function needDecision(
       explanation: "A bounded governed presentation preference applies, but full reconstruction is not justified.",
     };
   }
-  if (presentation && context.matchingMechanisms.length) {
+  const scopedConflict = selected.some((left, index) => selected.slice(index + 1).some((right) => (
+    left.scope !== right.scope && overlap(left.statement, right.statement) >= 2
+  )));
+  const protectedDepth = context.correctionOrConflictIndicators > 0
+    || scopedConflict
+    || selected.some((mechanism) => mechanism.counterevidenceIds.length || hasProtectedSensitivity(mechanism));
+  if (selected.length && (protectedDepth || selected.length >= 4)) {
     return {
       level: "full" as const,
       reasonCodes: [
-        "conditional_presentation_context",
-        ...(context.matchingMechanisms.length > 1 ? ["multiple_governing_matches"] : []),
-        ...(context.matchingMechanisms.some((mechanism) => mechanism.counterevidenceIds.length)
+        "broad_dependency_reconstruction",
+        ...(selected.length >= 4 ? ["multiple_governing_clusters"] : []),
+        ...(selected.some((mechanism) => mechanism.counterevidenceIds.length)
           ? ["linked_counterevidence_requires_full_governance"]
           : []),
         ...(context.correctionOrConflictIndicators ? ["correction_or_conflict_requires_full_governance"] : []),
+        ...(scopedConflict ? ["scope_specific_state_conflict_requires_full_governance"] : []),
+        ...(selected.some(hasProtectedSensitivity) ? ["protected_sensitivity_requires_full_governance"] : []),
       ],
-      explanation: "Applicable context requires full treatment so corrections, counterevidence, or multiple governing matches are not silently omitted.",
+      explanation: "Broad governed reconstruction is required so connected state, corrections, counterevidence, or protected constraints are not silently omitted.",
+    };
+  }
+  if (selected.length >= 2) {
+    return {
+      level: "medium" as const,
+      reasonCodes: ["multiple_related_state_truth_items", "bounded_dependency_cluster"],
+      explanation: "Several related pieces of governed State Truth are needed, but broad project reconstruction is unnecessary.",
+    };
+  }
+  if (selected.length === 1 && (!FULL_TASK_PATTERN.test(task) || presentation)) {
+    return {
+      level: "light" as const,
+      reasonCodes: ["single_governed_orientation", "bounded_dependency_cluster"],
+      explanation: "One source-grounded governing statement is sufficient to orient the fresh room.",
     };
   }
   const caseObjectiveMatch = Boolean(
     caseId && context.caseRecord && overlap(task, context.caseRecord.objective) >= 2,
   );
-  if (FULL_TASK_PATTERN.test(task) || context.matchingMechanisms.length || caseObjectiveMatch) {
+  if (FULL_TASK_PATTERN.test(task) || selected.length || caseObjectiveMatch) {
     return {
       level: "full" as const,
       reasonCodes: [
         ...(FULL_TASK_PATTERN.test(task) ? ["reasoning_or_decision_task"] : []),
         ...(caseObjectiveMatch ? ["active_case_context_match"] : []),
-        ...(context.matchingMechanisms.length ? ["approved_mechanism_match"] : []),
+        ...(selected.length ? ["approved_mechanism_match"] : []),
       ],
       explanation: "Governed continuity can materially affect the reasoning, scope, constraints, or requested output.",
     };
   }
   return {
-    level: "none" as const,
+    level: null,
     reasonCodes: [
-      "no_applicable_governed_use",
+      "insufficient_source_grounded_state",
       ...(caseId ? ["bounded_case_did_not_match_task"] : []),
       ...(context.correctionOrConflictIndicators ? ["non_applicable_correction_or_conflict_only"] : []),
     ],
-    explanation: "No applicable governed Use material was found for this task.",
+    explanation: "Atlas cannot establish enough source-grounded current state to prepare a truthful handoff. Clarify what the fresh room should continue or review the transferred room first.",
   };
+}
+
+function deliveryMechanisms(context: CompactContext) {
+  const selected = context.matchingMechanisms.length
+    ? context.matchingMechanisms
+    : context.caseMechanisms;
+  return [...new Map(selected.map((mechanism) => [mechanism.id, mechanism])).values()];
 }
 
 function union(left: string[], right: string[]) {
@@ -342,23 +376,30 @@ function baseEffects() {
   };
 }
 
-function nextAction(status: string, level: AtlasNeedLevel) {
-  if (level === "none") return "proceed_without_atlas";
-  if (level === "light") return "review_compact_continuity";
+function nextAction(status: string, level: AtlasNeedLevel | null) {
+  if (level === null || status === "clarification_required") return "clarify_continuation_task_or_review_room";
+  if (level === "light" || level === "medium") return "compile_immutable_transfer_packet";
   if (status === "clarification_required") return "clarify_or_select_a_current_run_roadway";
   if (status === "missing_required_state") return "supply_or_refresh_required_state";
   if (status === "unsafe_under_selected_budget") return "increase_budget_or_narrow_scope";
   return "review_then_request_reconstruction_run";
 }
 
-function compactMechanismView(mechanism: CompactMechanism | undefined, literalTask: string) {
-  if (!mechanism) return null;
+function compactMechanismView(
+  mechanisms: CompactMechanism[],
+  literalTask: string,
+  level: "light" | "medium" = "light",
+) {
+  if (!mechanisms.length) return null;
   const compiledContent = [
-    "# Atlas context aid",
-    `Task: ${literalTask}`,
+    "# Atlas transfer packet preview",
+    `Delivery: ${level.toUpperCase()}`,
+    `Continue: ${literalTask}`,
     "",
-    `- [USE] ${mechanism.statement} [Mechanism:${mechanism.id}; Compressed; ${mechanism.authority}]`,
+    "## Current working state",
+    ...mechanisms.map((mechanism) => `- ${mechanism.statement.replace(/\s+/g, " ").trim()}`),
   ].join("\n");
+  const mechanism = mechanisms[0];
   return {
     sourceType: "Mechanism",
     sourceId: mechanism.id,
@@ -369,10 +410,17 @@ function compactMechanismView(mechanism: CompactMechanism | undefined, literalTa
     scope: mechanism.scope,
     treatment: "Use" as const,
     role: "governing_context" as const,
-    reason: "Compact governed continuity matched the current presentation context.",
+    reason: `${level === "light" ? "One" : "Several related"} governed State Truth item${mechanisms.length === 1 ? "" : "s"} matched the continuation task.`,
     compiledContent,
-    includedItems: 1,
+    includedItems: mechanisms.length,
     estimatedTokens: Math.ceil(compiledContent.length / 4),
+    items: mechanisms.map((item): GovernedDeliveryItem => ({
+      id: item.id,
+      versionId: item.versionId,
+      statement: item.statement,
+      authority: item.authority,
+      scope: item.scope,
+    })),
   };
 }
 
@@ -396,6 +444,7 @@ export async function checkContinuity(
   const context = await compactContext(db, projectId, caseId, literalTask);
   const preflightLatency = Date.now() - preflightStarted;
   const need = needDecision(literalTask, request.requestedOutput, context, caseId);
+  const selectedDeliveryMechanisms = deliveryMechanisms(context);
   const budget = request.tokenBudget;
 
   const common = {
@@ -408,7 +457,7 @@ export async function checkContinuity(
   };
 
   if (need.level !== "full") {
-    const status = need.level === "none" ? "not_needed" : "light_context_available";
+    const status = need.level === null ? "clarification_required" : `${need.level}_context_available`;
     return {
       ...common,
       status,
@@ -416,13 +465,24 @@ export async function checkContinuity(
       roadway: {
         primary: null,
         candidates: [],
+        interpretiveAmbiguity: false,
         materialAmbiguity: false,
+        outcomeEquivalent: false,
+        convergedMechanismIds: [],
+        convergenceReason: null,
       },
-      compactCapsule: need.level === "light"
-        ? compactMechanismView(context.matchingMechanisms[0], literalTask)
+      compactCapsule: need.level === "light" || need.level === "medium"
+        ? compactMechanismView(selectedDeliveryMechanisms, literalTask, need.level)
         : null,
+      deliveryItems: selectedDeliveryMechanisms.map((item): GovernedDeliveryItem => ({
+        id: item.id,
+        versionId: item.versionId,
+        statement: item.statement,
+        authority: item.authority,
+        scope: item.scope,
+      })),
       continuity: {
-        governingMechanisms: need.level === "light" && context.matchingMechanisms.length ? 1 : 0,
+        governingMechanisms: need.level ? selectedDeliveryMechanisms.length : 0,
         requiredChecks: 0,
         considerItems: 0,
         auditOnlyProvenance: 0,
@@ -447,19 +507,19 @@ export async function checkContinuity(
         recordsSurvivingEachGate: {
           projectBoundary: context.recordsScanned,
           caseBoundary: context.caseRecord ? 1 : 0,
-          compactApprovedMatch: context.matchingMechanisms.length,
+          compactApprovedMatch: selectedDeliveryMechanisms.length,
           candidateRanking: 0,
           exactSourceExpansion: 0,
         },
         exactSourcesOpened: 0,
         latencyMs: { preflight: preflightLatency, interpretation: 0, candidatePreview: 0 },
-        stoppingReason: need.level === "none" ? "need_none" : "light_capsule_sufficient",
+        stoppingReason: need.level === null ? "clarification_required" : `${need.level}_delivery_sufficient`,
         wideningCount: 0,
         candidatePreviewInvoked: false,
       },
       next: {
         action: nextAction(status, need.level),
-        reconstructionRunAvailable: false,
+        reconstructionRunAvailable: need.level !== null,
       },
     };
   }
@@ -507,7 +567,14 @@ export async function checkContinuity(
         convergedMechanismIds: convergence.mechanismIds,
         convergenceReason: convergence.reason,
       },
-      compactCapsule: compactMechanismView(context.matchingMechanisms[0], literalTask),
+      compactCapsule: compactMechanismView([context.matchingMechanisms[0]], literalTask),
+      deliveryItems: [context.matchingMechanisms[0]].map((item): GovernedDeliveryItem => ({
+        id: item.id,
+        versionId: item.versionId,
+        statement: item.statement,
+        authority: item.authority,
+        scope: item.scope,
+      })),
       continuity: {
         governingMechanisms: 1,
         requiredChecks: 0,

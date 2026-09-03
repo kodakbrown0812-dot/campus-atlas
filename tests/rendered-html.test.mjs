@@ -1326,7 +1326,7 @@ test("Analyze records an honest blocked checkpoint when an eligible Exact source
   assert.match(workspace, /Analysis stopped before candidate selection\. No authority changed\./);
 });
 
-test("Transfer Room performs one exact import through review into one governed Light capsule without duplicate records", async () => {
+test("Transfer Room performs one exact import through review into one immutable governed Light packet", async () => {
   const worker = await builtWorker("transfer-room-v01-loop");
   const DB = await sqliteD1();
   await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
@@ -1447,8 +1447,16 @@ test("Transfer Room performs one exact import through review into one governed L
   assert.equal(resumed.value.caseId, started.value.caseId);
   assert.equal(resumed.value.reconciliation[0].status, "approved");
   assert.ok(resumed.value.reconciliation[0].mechanismId);
+  assert.equal(resumed.value.reconstructedState.status, "ready");
+  assert.equal(resumed.value.reconstructedState.currentDirection, transcript);
+  assert.equal(resumed.value.reconstructedState.stateTruthPrecedesTaskSelection, true);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 1);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 1);
+  const intakeProvenance = JSON.parse(DB.database.prepare(
+    "SELECT provenance FROM conversation_imports WHERE conversation_id = ?",
+  ).get(resumed.value.conversationId).provenance);
+  assert.equal(intakeProvenance.sourceAdapter, "manual_paste");
+  assert.equal(intakeProvenance.importedFrom, "canonical_conversation_intake_v1");
 
   const inspection = await worker.fetch(new Request(
     `http://localhost/api/v1/projects/sports/inspect/transfers/${encodeURIComponent(started.value.id)}`,
@@ -1487,24 +1495,22 @@ test("Transfer Room performs one exact import through review into one governed L
     key: "transfer-room-light-proof",
     body: { task, caseId: resumed.value.caseId, tokenBudget: 800 },
   });
-  assert.equal(light.response.status, 422, JSON.stringify(light.value));
-  assert.equal(light.value.status, "light_continuity_only");
+  assert.equal(light.response.status, 201, JSON.stringify(light.value));
+  assert.equal(light.value.status, "compiled");
   assert.equal(light.value.need.level, "light");
   assert.equal(light.value.literalTask, task);
   assert.equal(light.value.caseId, resumed.value.caseId);
-  assert.equal(light.value.roadway.interpretiveAmbiguity, false);
-  assert.equal(light.value.roadway.materialAmbiguity, false);
-  assert.equal(light.value.roadway.outcomeEquivalent, true);
-  assert.deepEqual(light.value.roadway.convergedMechanismIds, [resumed.value.reconciliation[0].mechanismId]);
-  assert.match(light.value.capsule.compiledContent, /Friday afternoon/);
-  assert.match(light.value.capsule.compiledContent, /Monday and Wednesday were considered/);
-  assert.match(light.value.capsule.compiledContent, /Thursday evening/);
-  assert.doesNotMatch(light.value.capsule.compiledContent, /(?:Monday|Wednesday) (?:is|was|will be) (?:selected|delivered)/i);
-  assert.equal(light.value.packet, null);
-  assert.equal(light.value.receipt, null);
-  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
-  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 0);
-  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
+  assert.equal(light.value.roadway.id, null);
+  assert.match(light.value.packet.compiledContent, /Delivery: LIGHT/);
+  assert.match(light.value.packet.compiledContent, /Friday afternoon/);
+  assert.match(light.value.packet.compiledContent, /Monday and Wednesday were considered/);
+  assert.match(light.value.packet.compiledContent, /Thursday evening/);
+  assert.doesNotMatch(light.value.packet.compiledContent, /(?:Monday|Wednesday) (?:is|was|will be) (?:selected|delivered)/i);
+  assert.ok(light.value.packet.id);
+  assert.ok(light.value.receipt.id);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 1);
 
   const wrongProjectCase = await ownerRequest("/api/v1/projects/hockey/reconstruction/run", {
     method: "POST",
@@ -1519,8 +1525,9 @@ test("Transfer Room performs one exact import through review into one governed L
     key: "transfer-room-direct-project-scope",
     body: { task, tokenBudget: 800 },
   });
-  assert.equal(directSteward.response.status, 422, JSON.stringify(directSteward.value));
-  assert.equal(directSteward.value.status, "atlas_not_needed");
+  assert.equal(directSteward.response.status, 409, JSON.stringify(directSteward.value));
+  assert.equal(directSteward.value.status, "clarification_required");
+  assert.equal(directSteward.value.need.level, null);
   assert.equal(directSteward.value.caseId, null);
   assert.equal(directSteward.value.capsule, null);
 
@@ -1537,9 +1544,12 @@ test("Transfer Room performs one exact import through review into one governed L
     key: "transfer-room-light-proof-navigation-retry",
     body: { task, caseId: resumed.value.caseId, tokenBudget: 800 },
   });
-  assert.equal(retriedLight.value.status, "light_continuity_only");
-  assert.equal(retriedLight.value.capsule.compiledContent, light.value.capsule.compiledContent);
-  assert.deepEqual(canonicalMutationCounts(DB), beforeSteward);
+  assert.equal(retriedLight.value.status, "compiled");
+  assert.equal(retriedLight.value.packet.compiledContent, light.value.packet.compiledContent);
+  const afterSteward = canonicalMutationCounts(DB);
+  for (const [table, count] of Object.entries(beforeSteward)) {
+    if (!["packets", "packet_items", "receipts"].includes(table)) assert.equal(afterSteward[table], count, table);
+  }
 });
 
 test("Transfer Room idempotently materializes an approved durable finding missing its governed mechanism", async () => {
@@ -1920,7 +1930,7 @@ test("Transfer Room resumes after a controlled stage failure and treats sensitiv
   assert.equal((await publicRead.json()).attemptCount, 2);
 });
 
-test("Roadway outcome equivalence collapses only one safe governed mechanism", async () => {
+test("One safe governed mechanism produces a bounded immutable Light packet", async () => {
   const worker = await builtWorker("part-2a-roadway-outcome-equivalence");
 
   {
@@ -1938,20 +1948,18 @@ test("Roadway outcome equivalence collapses only one safe governed mechanism", a
     });
     const task = "Prepare the project update timing and rationale.";
     const result = await reconstructionRunRequest(worker, DB, "sports", { task }, "part-2a-equivalent");
-    assert.equal(result.response.status, 422, JSON.stringify(result.value));
+    assert.equal(result.response.status, 201, JSON.stringify(result.value));
     assert.equal(result.value.need.level, "light");
     assert.equal(result.value.literalTask, task);
-    assert.equal(result.value.roadway.interpretiveAmbiguity, false);
-    assert.equal(result.value.roadway.materialAmbiguity, false);
-    assert.equal(result.value.roadway.outcomeEquivalent, true);
-    assert.match(result.value.capsule.compiledContent, /Friday afternoon/);
-    assert.match(result.value.capsule.compiledContent, /Thursday evening/);
-    assert.doesNotMatch(result.value.capsule.compiledContent, /Wednesday morning/);
-    assert.equal(result.value.packet, null);
-    assert.equal(result.value.receipt, null);
-    assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 0);
-    assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 0);
-    assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 0);
+    assert.equal(result.value.roadway.id, null);
+    assert.match(result.value.packet.compiledContent, /Friday afternoon/);
+    assert.match(result.value.packet.compiledContent, /Thursday evening/);
+    assert.doesNotMatch(result.value.packet.compiledContent, /Wednesday morning/);
+    assert.ok(result.value.packet.id);
+    assert.ok(result.value.receipt.id);
+    assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 1);
+    assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 1);
+    assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 1);
 
     const registry = await slice2Request(worker, DB, "/api/v1/projects/sports/roadways");
     const broadRoadway = registry.value.roadways.find((roadway) => roadway.name === "Broad Lock-Finding");
@@ -1980,9 +1988,11 @@ test("Roadway outcome equivalence collapses only one safe governed mechanism", a
     const multiple = await reconstructionRunRequest(worker, DB, "sports", {
       task: "Compare the best option and explain why the prior outcome failed while preparing the project update timing and rationale.",
     }, "part-2a-multiple");
-    assert.equal(multiple.value.need.level, "full");
-    assert.equal(multiple.value.roadway.materialAmbiguity, true);
-    assert.equal(multiple.value.roadway.outcomeEquivalent, false);
+    assert.equal(multiple.response.status, 201, JSON.stringify(multiple.value));
+    assert.equal(multiple.value.need.level, "medium");
+    assert.match(multiple.value.packet.compiledContent, /Delivery: MEDIUM/);
+    assert.match(multiple.value.packet.compiledContent, /Friday afternoon/);
+    assert.match(multiple.value.packet.compiledContent, /Thursday operating close/);
     assert.equal(multiple.value.capsule, null);
   }
 
@@ -2044,11 +2054,12 @@ test("Roadway outcome equivalence collapses only one safe governed mechanism", a
       statement: "The project update timing might be Friday afternoon.",
       authority: "proposed",
     });
-    const none = await reconstructionRunRequest(worker, DB, "sports", {
+    const insufficient = await reconstructionRunRequest(worker, DB, "sports", {
       task: "Prepare the project update timing context.",
     }, "part-2a-no-governing-use");
-    assert.equal(none.value.need.level, "none");
-    assert.equal(none.value.capsule, null);
+    assert.equal(insufficient.value.need.level, null);
+    assert.equal(insufficient.value.status, "clarification_required");
+    assert.equal(insufficient.value.capsule, null);
   }
 });
 
@@ -2899,7 +2910,7 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   for (const expected of [
     "/transfers",
     "Transfer room",
-    "Atlas will preserve the conversation",
+    "Atlas will preserve it exactly",
     "Needs review",
     "Open in Inspect",
     "Accept",
@@ -3039,10 +3050,9 @@ test("V1.8 default surface is room-transfer-only while internal ontology remains
 });
 
 test("UI Simplification Slice 2 makes Steward outcome-first while preserving technical truth and copy semantics", async () => {
-  const [page, workspace, aid, packet, handoff, history, styles] = await Promise.all([
+  const [page, workspace, packet, handoff, history, styles] = await Promise.all([
     readFile(new URL("../app/projects/[projectId]/ask/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/projects/[projectId]/ask/context-aid-presentation.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/projects/[projectId]/ask/packet-preview.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/projects/[projectId]/ask/handoff-presentation.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/projects/[projectId]/ask/ask-history.tsx", import.meta.url), "utf8"),
@@ -3052,27 +3062,20 @@ test("UI Simplification Slice 2 makes Steward outcome-first while preserving tec
   assert.match(page, /<h1>Prepare the fresh-room packet<\/h1>/);
   assert.doesNotMatch(page, /Project context steward|Active project/);
   assert.match(workspace, /Fresh-room continuation/);
-  assert.match(workspace, /What must the new room continue\?/);
+  assert.match(workspace, /What should the fresh room continue\?/);
   assert.match(workspace, /pendingTask\?\.projectId === projectId \? pendingTask\.literalTask : ""/);
   assert.match(workspace, /Sign in from the application shell to prepare a transfer packet/);
   assert.doesNotMatch(workspace, /Enable canonical writes in the application shell/);
 
-  assert.match(workspace, /You’re ready to continue/);
-  assert.match(workspace, /Atlas found no governed project context that needs to be added for this task/);
-  assert.match(workspace, /Task copied\. No Atlas context was added/);
-  assert.match(aid, /One project decision matters here/);
-  assert.match(aid, /Atlas prepared the governed context that applies to this task/);
-  assert.match(aid, /Copy for this room/);
-  assert.doesNotMatch(aid, /Copy for a new room/);
+  assert.doesNotMatch(workspace, /You’re ready to continue|No Atlas context was added|light_continuity_only|atlas_not_needed/);
   assert.match(packet, /Ready to copy/);
   assert.match(packet, /Atlas prepared the smallest safe project context this continuation needs/);
 
   assert.ok(packet.indexOf("context.packet.compiledContent") < packet.indexOf("{actions}"));
   assert.ok(packet.indexOf("{actions}") < packet.indexOf("Advanced details"));
-  assert.match(handoff, /Copy for this room/);
-  assert.match(handoff, /Copy for a new room/);
+  assert.match(handoff, /Copy for fresh room/);
   assert.match(handoff, /navigator\.clipboard\.writeText\(context\.packet\.compiledContent\)/);
-  assert.match(handoff, /Both actions copy the identical context returned by Atlas/);
+  assert.match(handoff, /exact immutable packet returned by Atlas/);
 
   assert.match(workspace, /Atlas needs one decision/);
   assert.match(workspace, /Atlas needs current information before this can continue safely/);
@@ -3081,7 +3084,7 @@ test("UI Simplification Slice 2 makes Steward outcome-first while preserving tec
   assert.match(workspace, /<details className=\{styles\.advancedControls\}>/);
   assert.match(workspace, /<details className=\{styles\.technicalDetails\}>/);
   assert.doesNotMatch(workspace, /<details className=\{styles\.advancedControls\} open/);
-  for (const technicalLabel of ["Need level", "Reason codes", "Roadway", "Packet created", "Receipt created", "Authority changed"]) {
+  for (const technicalLabel of ["Delivery level", "Reason codes", "Roadway", "Packet created", "Receipt created", "Authority changed"]) {
     assert.match(`${workspace}\n${packet}`, new RegExp(technicalLabel));
   }
   assert.match(packet, /Inspect why/);
@@ -3134,10 +3137,7 @@ test("Final pre-authentic-test trim makes Inspect truth-first and exposes delive
   assert.match(taskContext, /setRecentDelivery\(delivery\)/);
   assert.match(steward, /rememberDelivery\(projectId, complete\)/);
   assert.doesNotMatch(taskContext, /localStorage|sessionStorage/);
-  assert.match(inspect, /Compact context · current session/);
-  assert.match(inspect, /No added context · current session/);
-  assert.match(inspect, /The task can be copied without an Atlas context packet/);
-  assert.match(inspect, /delivery\.capsule\.compiledContent/);
+  assert.doesNotMatch(inspect, /Compact context · current session|No added context · current session|without an Atlas context packet/);
   assert.match(inspect, /Saved transfer packet/);
   assert.match(inspect, /This is a task-specific selection, not a replacement for the full project record/);
   assert.doesNotMatch(inspect, /generic Roadway \/ Blueprint/);
@@ -5085,8 +5085,8 @@ test("Slice 4 canonical reconstruction remains available beneath the focused Ste
   for (const text of [
     "Prepare transfer packet",
     "Advanced controls",
-    "You’re ready to continue",
-    "One project decision matters here",
+    "What should the fresh room continue?",
+    "Copy for fresh room",
     "Ready to copy",
     "Atlas couldn’t prepare this safely",
     "400",
@@ -5099,7 +5099,7 @@ test("Slice 4 canonical reconstruction remains available beneath the focused Ste
   assert.doesNotMatch(interfaceSource, /reconstruction\/candidates/);
   assert.match(packetSource, /context\.packet\.compiledContent/);
   assert.match(packetSource, /Advanced details/);
-  assert.match(aidSource, /navigator\.clipboard\.writeText\(capsule\.compiledContent\)/);
+  assert.doesNotMatch(interfaceSource, /light_continuity_only|atlas_not_needed/);
   assert.match(handoffSource, /navigator\.clipboard\.writeText\(context\.packet\.compiledContent\)/);
   const slice4Source = await Promise.all([
     "roadway-service.ts",
@@ -5731,9 +5731,9 @@ test("Slice 5 immutable handoff remains auditable through the final separated As
     readFile(new URL("../app/projects/[projectId]/ask/page.tsx", import.meta.url), "utf8"),
   ]);
   for (const text of [
-    "This room",
-    "A new room",
-    "Context aid copied",
+    "Transfer packet",
+    "Copy for fresh room",
+    "Transfer packet copied",
     "Select prepared context",
     "Send another way",
     "Provider handoff and receipt",
@@ -6174,14 +6174,13 @@ test("Atlas Steward is focused, project-resetting, mobile-capable, and free of p
     readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8"),
   ]);
   const combined = [workspace, aid, packet, handoff, history, page].join("\n");
-  for (const state of ["Preparing context", "Atlas needs one decision", "You’re ready to continue", "One project decision matters here", "Ready to copy", "Atlas couldn’t prepare this safely"]) {
+  for (const state of ["Preparing context", "Atlas needs one decision", "What should the fresh room continue?", "Ready to copy", "Atlas couldn’t prepare this safely"]) {
     assert.match(combined, new RegExp(state));
   }
-  for (const surface of ["This room", "A new room", "Copy for this room", "Copy for a new room", "Context aid copied", "New-room context copied"]) {
+  for (const surface of ["Transfer packet", "Copy for fresh room", "Transfer packet copied"]) {
     assert.match(handoff, new RegExp(surface));
   }
-  assert.match(workspace, /Prepare full room transfer/);
-  assert.doesNotMatch(aid, /Copy for a new room/);
+  assert.doesNotMatch(workspace, /Prepare full room transfer|light_continuity_only|atlas_not_needed/);
   assert.match(workspace, /model\.production === true/);
   assert.match(workspace, /reconstruction\/run/);
   assert.doesNotMatch(workspace, /reconstruction\/candidates/);
@@ -7166,7 +7165,7 @@ test("V1.7.1 continuity/check exposes the additive OpenAPI contract without rela
   );
   assert.deepEqual(
     spec.components.schemas.ContinuityCheckResponse.properties.need.properties.level.enum,
-    ["none", "light", "full"],
+    ["light", "medium", "full", null],
   );
   assert.equal(
     spec.components.schemas.ContinuityCheckResponse.properties.effects.properties.packetCreated.const,
@@ -7389,7 +7388,7 @@ test("V1.7.1 continuity/check records deterministic outcomes for all five archit
   }
 });
 
-test("V1.7.1 continuity/check keeps none/light/full read-only, isolated, and server-owned", async () => {
+test("V1.8 continuity/check keeps clarification and Light/Medium/Full read-only, isolated, and server-owned", async () => {
   const worker = await builtWorker("v171-continuity-contracts");
   const DB = await sqliteD1();
   await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
@@ -7411,23 +7410,24 @@ test("V1.7.1 continuity/check keeps none/light/full read-only, isolated, and ser
   });
   const before = canonicalMutationCounts(DB);
 
-  const none = await continuityRequest(worker, DB, "sports", {
+  const insufficient = await continuityRequest(worker, DB, "sports", {
     task: "Convert four inches to centimeters.",
   });
-  assert.equal(none.response.status, 200);
-  assert.equal(none.value.need.level, "none");
-  assert.equal(none.value.diagnostics.candidatePreviewInvoked, false);
-  assert.equal(none.value.diagnostics.exactSourcesOpened, 0);
-  assert.equal(none.value.next.action, "proceed_without_atlas");
+  assert.equal(insufficient.response.status, 200);
+  assert.equal(insufficient.value.need.level, null);
+  assert.equal(insufficient.value.status, "clarification_required");
+  assert.equal(insufficient.value.diagnostics.candidatePreviewInvoked, false);
+  assert.equal(insufficient.value.diagnostics.exactSourcesOpened, 0);
+  assert.equal(insufficient.value.next.action, "clarify_continuation_task_or_review_room");
 
   const unmatchedCase = await continuityRequest(worker, DB, "sports", {
     task: "Convert four inches to centimeters.",
     caseId: boundedCase.caseId,
   });
   assert.equal(unmatchedCase.response.status, 200);
-  assert.equal(unmatchedCase.value.need.level, "none");
-  assert.equal(unmatchedCase.value.compactCapsule, null);
-  assert.ok(unmatchedCase.value.need.reasonCodes.includes("bounded_case_did_not_match_task"));
+  assert.equal(unmatchedCase.value.need.level, "light");
+  assert.equal(unmatchedCase.value.compactCapsule.includedItems, 1);
+  assert.ok(unmatchedCase.value.need.reasonCodes.includes("single_governed_orientation"));
 
   const injected = await continuityRequest(worker, DB, "sports", {
     task: "Compare soccer live-entry options.",
@@ -7612,7 +7612,7 @@ test("V1.7.1 reconstruction/run exposes a write-authorized additive OpenAPI cont
   assert.deepEqual(spec.components.schemas.ReconstructionRunRequest.properties.tokenBudget.enum, [400, 800, 1600]);
   assert.deepEqual(
     spec.components.schemas.ReconstructionRunStoppedResponse.properties.status.enum,
-    ["clarification_required", "atlas_not_needed", "light_continuity_only", "missing_required_state", "unsafe_under_selected_budget"],
+    ["clarification_required", "missing_required_state", "unsafe_under_selected_budget"],
   );
   assert.equal(spec.components.schemas.ReconstructionRunEffects.properties.handoffCreated.const, false);
   assert.equal(spec.components.schemas.ReconstructionRunEffects.properties.providerCallPerformed.const, false);
@@ -7739,7 +7739,7 @@ test("V1.7.1 reconstruction/run reproduces the reviewed soccer mechanism and lin
   assert.match(governed.statement, /time-based, game-state-based, or a combination of both/i);
 });
 
-test("V1.7.1 reconstruction/run stops without writes for none, light, ambiguity, missing state, and unsafe budget", async () => {
+test("V1.8 reconstruction/run fails safely for insufficient state and persists successful Light packets", async () => {
   const worker = await builtWorker("v171-slice-b-stopped-results");
 
   {
@@ -7747,10 +7747,10 @@ test("V1.7.1 reconstruction/run stops without writes for none, light, ambiguity,
     await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
     await initializeRoadways(worker, DB, "sports");
     const before = canonicalMutationCounts(DB);
-    const result = await reconstructionRunRequest(worker, DB, "sports", { task: "Convert four inches to centimeters." }, "slice-b-none");
-    assert.equal(result.response.status, 422);
-    assert.equal(result.value.status, "atlas_not_needed");
-    assert.equal(result.value.need.level, "none");
+    const result = await reconstructionRunRequest(worker, DB, "sports", { task: "Convert four inches to centimeters." }, "slice-b-insufficient");
+    assert.equal(result.response.status, 409);
+    assert.equal(result.value.status, "clarification_required");
+    assert.equal(result.value.need.level, null);
     assert.deepEqual(canonicalMutationCounts(DB), before);
   }
 
@@ -7765,18 +7765,18 @@ test("V1.7.1 reconstruction/run stops without writes for none, light, ambiguity,
     });
     const before = canonicalMutationCounts(DB);
     const result = await reconstructionRunRequest(worker, DB, "workflow", { task: "Prepare a Codex-ready transfer from mobile." }, "slice-b-light");
-    assert.equal(result.response.status, 422);
-    assert.equal(result.value.status, "light_continuity_only");
+    assert.equal(result.response.status, 201);
+    assert.equal(result.value.status, "compiled");
     assert.equal(result.value.need.level, "light");
-    assert.equal(result.value.packet, null);
-    assert.equal(result.value.receipt, null);
-    assert.equal(result.value.capsule.treatment, "Use");
-    assert.equal(result.value.capsule.includedItems, 1);
-    assert.equal(result.value.capsule.statement, "When Cody requests a Codex-ready transfer from mobile, use concise plain text; this does not suppress visual teaching elsewhere.");
-    assert.match(result.value.capsule.compiledContent, /^# Atlas context aid/m);
-    assert.match(result.value.capsule.compiledContent, /\[USE\]/);
-    assert.doesNotMatch(result.value.capsule.compiledContent, /\[CONSIDER\]|\[EXCLUDE\]/);
-    assert.deepEqual(canonicalMutationCounts(DB), before);
+    assert.ok(result.value.packet.id);
+    assert.ok(result.value.receipt.id);
+    assert.match(result.value.packet.compiledContent, /^# Atlas transfer packet/m);
+    assert.match(result.value.packet.compiledContent, /Delivery: LIGHT/);
+    assert.match(result.value.packet.compiledContent, /When Cody requests a Codex-ready transfer from mobile/);
+    const after = canonicalMutationCounts(DB);
+    for (const [table, count] of Object.entries(before)) {
+      if (!["packets", "packet_items", "receipts"].includes(table)) assert.equal(after[table], count, table);
+    }
   }
 
   {
@@ -7842,7 +7842,7 @@ test("V1.7.1 reconstruction/run stops without writes for none, light, ambiguity,
   }
 });
 
-test("Atlas Steward escalates a Light aid into Full through the same reconstruction engine", async () => {
+test("Atlas Steward persists Light and Full through the same reconstruction engine", async () => {
   const worker = await builtWorker("steward-light-to-full");
   const DB = await sqliteD1();
   await seedCanonicalProject(worker, DB, "workflow", "Workflow Engine");
@@ -7857,10 +7857,11 @@ test("Atlas Steward escalates a Light aid into Full through the same reconstruct
   const light = await reconstructionRunRequest(worker, DB, "workflow", {
     task: "Prepare a Codex-ready transfer from mobile.",
   }, "steward-light-result");
-  assert.equal(light.value.status, "light_continuity_only");
-  assert.equal(light.value.capsule.statement, statement);
-  assert.equal(light.value.packet, null);
-  assert.equal(light.value.receipt, null);
+  assert.equal(light.value.status, "compiled");
+  assert.equal(light.value.need.level, "light");
+  assert.match(light.value.packet.compiledContent, /Delivery: LIGHT/);
+  assert.match(light.value.packet.compiledContent, new RegExp(statement.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.ok(light.value.receipt.id);
 
   const registry = await slice2Request(worker, DB, "/api/v1/projects/workflow/roadways");
   const broadRoadway = registry.value.roadways.find((roadway) => roadway.name === "Broad Lock-Finding");
@@ -7880,6 +7881,113 @@ test("Atlas Steward escalates a Light aid into Full through the same reconstruct
   assert.ok(full.value.receipt.id);
   assert.match(full.value.packet.compiledContent, /^# Atlas reconstruction packet v1/m);
   assert.doesNotMatch(full.value.packet.compiledContent, /\[CONSIDER\]|\[EXCLUDE\]/);
+});
+
+test("V1.8 Medium and long-room Full are selected by semantic dependency depth rather than token count", async () => {
+  const worker = await builtWorker("v18-medium-semantic-depth");
+  const DB = await sqliteD1();
+  await seedCanonicalProject(worker, DB, "workflow", "Workflow Engine");
+  await initializeRoadways(worker, DB, "workflow");
+  const bounded = await createContinuityCase(
+    worker,
+    DB,
+    "workflow",
+    "medium-room",
+    "Continue the accepted room state in a fresh room.",
+  );
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:medium-direction",
+    projectId: "workflow",
+    statement: "The current direction is to finish the import contract before beginning connector work.",
+    authority: "approved_local",
+    supportingCaseIds: [bounded.caseId],
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:medium-constraint",
+    projectId: "workflow",
+    statement: "Do not invent continuity; request clarification when the source cannot establish a truthful handoff.",
+    authority: "approved_local",
+    supportingCaseIds: [bounded.caseId],
+  });
+  const body = {
+    task: "Continue this transferred room in a fresh room.",
+    caseId: bounded.caseId,
+  };
+  const smallBudget = await continuityRequest(worker, DB, "workflow", { ...body, tokenBudget: 400 });
+  const largeBudget = await continuityRequest(worker, DB, "workflow", { ...body, tokenBudget: 1600 });
+  assert.equal(smallBudget.value.need.level, "medium");
+  assert.equal(largeBudget.value.need.level, "medium");
+  assert.deepEqual(smallBudget.value.need.reasonCodes, largeBudget.value.need.reasonCodes);
+  assert.equal(smallBudget.value.deliveryItems.length, 2);
+  assert.equal(smallBudget.value.diagnostics.candidatePreviewInvoked, false);
+
+  const compiled = await reconstructionRunRequest(worker, DB, "workflow", {
+    ...body,
+    tokenBudget: 800,
+  }, "v18-medium-packet");
+  assert.equal(compiled.response.status, 201, JSON.stringify(compiled.value));
+  assert.equal(compiled.value.status, "compiled");
+  assert.equal(compiled.value.need.level, "medium");
+  assert.match(compiled.value.packet.compiledContent, /Delivery: MEDIUM/);
+  assert.match(compiled.value.packet.compiledContent, /finish the import contract/);
+  assert.match(compiled.value.packet.compiledContent, /Do not invent continuity/);
+  assert.equal(compiled.value.receipt.treatmentCounts.Use, 2);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 2);
+
+  const replay = await reconstructionRunRequest(worker, DB, "workflow", {
+    ...body,
+    tokenBudget: 800,
+  }, "v18-medium-packet");
+  assert.equal(replay.response.status, 200);
+  assert.equal(replay.value.idempotentReplay, true);
+  assert.equal(replay.value.packet.id, compiled.value.packet.id);
+
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:long-correction",
+    projectId: "workflow",
+    statement: "The earlier plan to build a connector in this slice was replaced by manual-copy dogfooding.",
+    authority: "approved_local",
+    supportingCaseIds: [bounded.caseId],
+  });
+  seedSlice4Mechanism(DB, {
+    id: "mechanism:long-rationale",
+    projectId: "workflow",
+    statement: "Manual-copy dogfooding must exercise the same canonical intake and downstream continuity machinery.",
+    authority: "approved_local",
+    supportingCaseIds: [bounded.caseId],
+  });
+  const longRoomTask = {
+    task: "Resume the approved work.",
+    caseId: bounded.caseId,
+  };
+  const longSmallBudget = await continuityRequest(worker, DB, "workflow", {
+    ...longRoomTask,
+    tokenBudget: 400,
+  });
+  const longLargeBudget = await continuityRequest(worker, DB, "workflow", {
+    ...longRoomTask,
+    tokenBudget: 1600,
+  });
+  assert.equal(longSmallBudget.value.need.level, "full");
+  assert.equal(longLargeBudget.value.need.level, "full");
+  assert.ok(longSmallBudget.value.need.reasonCodes.includes("multiple_governing_clusters"));
+  assert.deepEqual(longSmallBudget.value.need.reasonCodes, longLargeBudget.value.need.reasonCodes);
+});
+
+test("V1.8 product copy presents room transfer and immutable Light/Medium/Full packets without a fake connector", async () => {
+  const transfer = await readFile(new URL("../app/projects/[projectId]/work/transfer-room.tsx", import.meta.url), "utf8");
+  const steward = await readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8");
+  const handoff = await readFile(new URL("../app/projects/[projectId]/ask/handoff-presentation.tsx", import.meta.url), "utf8");
+  const intake = await readFile(new URL("../worker/canonical-conversation-intake.ts", import.meta.url), "utf8");
+  assert.match(transfer, /What room do you want to continue\?/);
+  assert.match(transfer, />Paste conversation</);
+  assert.match(steward, /What should the fresh room continue\?/);
+  assert.match(handoff, /Copy for fresh room/);
+  assert.match(handoff, /exact immutable packet returned by Atlas/);
+  assert.match(intake, /manual_paste/);
+  assert.match(intake, /future_export/);
+  assert.match(intake, /future_api/);
+  assert.doesNotMatch(transfer, /Connect (?:to )?ChatGPT|Authorize ChatGPT|Coming soon/i);
 });
 
 test("Full packet rendering uses governed State Truth without Roadway scaffolding when none applies", async () => {

@@ -312,15 +312,13 @@ export type ReconstructionRunResult = {
   status:
     | "compiled"
     | "clarification_required"
-    | "atlas_not_needed"
-    | "light_continuity_only"
     | "missing_required_state"
     | "unsafe_under_selected_budget";
   projectId: string;
   caseId: string | null;
   literalTask: string;
   need: {
-    level: "none" | "light" | "full";
+    level: "light" | "medium" | "full" | null;
     reasonCodes: string[];
     explanation: string;
   };
