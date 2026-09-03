@@ -46,7 +46,7 @@ const MAX_SELECTED_NODES = 7;
 const MAX_MATURE_SELECTED_NODES = 21;
 const MAX_MATURE_FINDINGS = 12;
 export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
-export const CHECKPOINT_CANDIDATE_VERSION = "slice3-continuation-closure-v1";
+export const CHECKPOINT_CANDIDATE_VERSION = "slice3-continuation-closure-v2";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -419,18 +419,19 @@ function continuitySignals(value: string): ContinuitySignal[] {
   if (/\b(?:must(?: not)?|has to|have to|needs? to|do not|does not|don't|never|avoid|preserve|required|requires|under\s+\$?\d|no more than|at most|ceiling|limit|prohibits?|not (?:supplied|provided|allowed)|bring (?:their|your|our|his|her|its) own|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/i.test(value)) {
     signals.push("constraint");
   }
-  if (/\b(?:current (?:direction|plan|work|state|objective|phase|surface|choice|decision|site|timing|gear|transportation|food)|working choice|preferred (?:choice|option|site|direction)|remains? (?:preferred|current|the plan)|is now|are now|begins now|prioriti[sz]e|proceed with|the next task is|make .{1,80} (?:current|preferred)|responsib(?:le|ility)|will bring)\b/i.test(value)) {
+  if (/\b(?:current (?:direction|plan|work|state|objective|phase|surface|choice|decision|site|timing|gear|transportation|food|(?:important )?packing requirements)|working choice|preferred (?:choice|option|site|direction)|remains? (?:preferred|current|the plan)|is now|are now|begins now|prioriti[sz]e|proceed with|the next task is|make .{1,80} (?:current|preferred)|responsib(?:le|ility)|will bring)\b/i.test(value)) {
     signals.push("current_direction");
   }
   if (/\b(?:next (?:actual )?action|next (?:actual )?step|next task|do next|build next|before anything else|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after|choose and (?:freeze|continue|begin|start)|reserve .{0,100} next|check .{0,100} then (?:reserve|book|continue))\b/i.test(value)) {
     signals.push("next_action");
   }
-  if (/\b(?:uncertain|uncertainty|unresolved|undecided|open question|open loop|proof question|unknown|missing state|not yet|not confirmed|not established|provisional|pending evidence|remains to be|stay on hold|deferred until)\b/i.test(value)
+  if (/\b(?:uncertain|uncertainty|unresolved|undecided|open question|open loop|open work|proof question|unknown|missing state|not yet|not confirmed|not established|provisional|pending evidence|remains to be|stay on hold|deferred until)\b/i.test(value)
     || /^(?:could|whether|will)\b[^?]{12,}\?$/i.test(value.trim())) {
     signals.push("uncertainty");
   }
   if (/^[A-Z][A-Za-z0-9 /+_-]{2,48}\s+(?:means|refers to|answers|is defined as)\b/m.test(value)
-    || /\b(?:we call this|the term .{1,48} means|local meaning|shared term)\b/i.test(value)) {
+    || /\b(?:Plan|Route|Option|Version|Mode|Tier)\s+[A-Z0-9][A-Za-z0-9_-]*\s+means\b/i.test(value)
+    || /\b(?:we call this|call .{1,60}(?:plan|option|route|version)|the term .{1,48} means|local meaning|shared term)\b/i.test(value)) {
     signals.push("shared_term");
   }
   if (/\b(?:because|therefore|so that|\bso\b|means|depends on|affects|changes how|materially alters|in order to|the reason|required rationale|rationale|caused|before widening|proof[^.]{0,100}first)\b/i.test(value)) {
@@ -760,6 +761,24 @@ function explicitCurrentOrientation(unit: MatureUnit) {
   return /\b(?:begins now|current (?:direction|plan|work|state|objective|phase|surface)|the next (?:task|action|step) is|prioriti[sz]e|proceed with|continue now|start now)\b/i.test(unit.statement);
 }
 
+function specificCurrentOrientation(unit: MatureUnit) {
+  return /\bcurrent\s+(?!direction\b)[a-z][a-z-]{1,30}(?:\s+[a-z][a-z-]{1,30})?\s+(?:decision|plan|choice|state|rule|requirements|is|are)\b/iu.test(unit.statement)
+    || /\b(?:is now|are now|remains?|stays?)\s+(?:the )?(?:governing|preferred|current)\b/iu.test(unit.statement);
+}
+
+function orientationSubject(unit: MatureUnit) {
+  return unit.statement.match(/\bcurrent\s+([a-z][a-z-]{1,30})\b/iu)?.[1]?.toLowerCase() || null;
+}
+
+function sameOrientationCluster(left: MatureUnit, right: MatureUnit) {
+  const leftSubject = orientationSubject(left);
+  const rightSubject = orientationSubject(right);
+  if (leftSubject && rightSubject) return leftSubject === rightSubject;
+  if (leftSubject) return new RegExp(`\\b${leftSubject}\\b`, "iu").test(right.statement);
+  if (rightSubject) return new RegExp(`\\b${rightSubject}\\b`, "iu").test(left.statement);
+  return candidateClusterOverlap(left.statement, right.statement) >= 3;
+}
+
 function currentBoundarySequence(units: MatureUnit[]) {
   const explicitUserDirections = units.filter((unit) =>
     sourceActorType(unit.event) === "user"
@@ -787,9 +806,21 @@ function termOverlap(left: string, right: string) {
   return { count: overlap, ratio: overlap / smaller };
 }
 
+function candidateClusterOverlap(left: string, right: string) {
+  const terms = (value: string) => new Set([
+    ...normalizedTerms(value),
+    ...(value.match(/\b[A-Z]\b/g) || []).map((term) => `identity:${term}`),
+  ]);
+  const leftTerms = terms(left);
+  const rightTerms = terms(right);
+  let count = 0;
+  for (const term of leftTerms) if (rightTerms.has(term)) count += 1;
+  return count;
+}
+
 function functionallyRedundant(left: CandidateSeed, right: CandidateSeed) {
   for (const protectedRole of ["correction_guard", "uncertainty", "shared_term"] satisfies CandidateRole[]) {
-    if (left.roles.includes(protectedRole) !== right.roles.includes(protectedRole)) return false;
+    if (left.roles.includes(protectedRole) && !right.roles.includes(protectedRole)) return false;
   }
   const sharedRoles = left.roles.filter((role) => right.roles.includes(role));
   const roleRatio = sharedRoles.length / Math.max(1, new Set([...left.roles, ...right.roles]).size);
@@ -798,9 +829,29 @@ function functionallyRedundant(left: CandidateSeed, right: CandidateSeed) {
     && overlap.count >= 2
     && overlap.ratio >= 0.4
     && roleRatio >= 0.5;
-  return sharedRoles.length > 0
+  const sameContinuationSeed = (
+    left.roles.includes("current_direction")
+    && right.roles.includes("current_direction")
+    && sameOrientationCluster(left.unit, right.unit)
+  ) || (
+    left.roles.includes("next_action")
+    && right.roles.includes("next_action")
+    && ((overlap.count >= 2 && overlap.ratio >= 0.35)
+      || candidateClusterOverlap(left.unit.statement, right.unit.statement) >= 3)
+  );
+  const sameSharedTerm = left.roles.includes("shared_term")
+    && right.roles.includes("shared_term")
+    && candidateClusterOverlap(left.unit.statement, right.unit.statement) >= 2;
+  const timeMarkers = (value: string) => new Set(value.toUpperCase().match(/\b\d{1,2}:\d{2}\s*(?:AM|PM)\b/g) || []);
+  const leftTimes = timeMarkers(left.unit.statement);
+  const rightTimes = timeMarkers(right.unit.statement);
+  const sameTemporalDependency = left.roles.includes("constraint")
+    && right.roles.includes("constraint")
+    && (left.roles.includes("current_direction") || right.roles.includes("current_direction"))
+    && [...leftTimes].some((marker) => rightTimes.has(marker));
+  return sameSharedTerm || sameContinuationSeed || sameTemporalDependency || (sharedRoles.length > 0
     && roleRatio >= 0.5
-    && ((overlap.count >= 3 && overlap.ratio >= 0.55) || adjacentParaphrase);
+    && ((overlap.count >= 3 && overlap.ratio >= 0.55) || adjacentParaphrase));
 }
 
 function compareForRole(left: MatureUnit, right: MatureUnit, role: CandidateRole, boundary: number) {
@@ -864,6 +915,10 @@ function assistantWorkflowStatus(unit: MatureUnit) {
   return sourceActorType(unit.event) === "assistant"
     && /\b(?:i(?:’|')m|i am|i(?:’|')ll|i will|we(?:’|')re|we are|we(?:’|')ll|we will)\b/iu.test(unit.statement)
     && /\b(?:using|starting|running|checking|mapping|capturing|rendering|testing|verifying|workflow|slice|build|deploy)\b/iu.test(unit.statement);
+}
+
+function explicitlyNonGoverningUnit(unit: MatureUnit) {
+  return /\b(?:not yet a change to (?:the )?(?:plan|decision|state)|does not affect (?:the )?(?:trip|project|work).{0,40}(?:current|working) state|can wait and does not govern)\b/iu.test(unit.statement);
 }
 
 function phaseBoundInstruction(event: Row) {
@@ -960,7 +1015,7 @@ function explicitSupersessionOf(unit: MatureUnit, possibleReplacement: MatureUni
   if (/\b(?:do not|don't|must not)\s+(?:replace|supersede|drop|reject)\b/iu.test(possibleReplacement.statement)
     || /\b(?:remains?|stays?)\s+(?:preferred|current|the plan)\b/iu.test(possibleReplacement.statement)) return false;
   const closesPriorState = /\b(?:no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale|superseded by|replaced by)\b/iu.test(possibleReplacement.statement);
-  return closesPriorState && termOverlap(unit.statement, possibleReplacement.statement).count >= 1;
+  return closesPriorState && candidateClusterOverlap(unit.statement, possibleReplacement.statement) >= 2;
 }
 
 function shortRoomClosureUnits(events: Row[]) {
@@ -976,7 +1031,8 @@ function shortRoomClosureUnits(events: Row[]) {
       && unit.signals.includes("current_direction")
       && !unit.signals.includes("correction")
       && !unit.signals.includes("supersession")
-      && !unit.signals.includes("constraint")))
+      && !unit.signals.includes("constraint")
+      && !specificCurrentOrientation(unit)))
     .sort(compareMatureUnits);
   const seeds = units.filter((unit) => (
     unit.signals.includes("next_action")
@@ -1187,6 +1243,7 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     .filter((unit) => unit.clusterKind !== "atomic" && completeCausalSupersession(unit.statement))
     .flatMap((unit) => unit.evidenceEvents.map((event) => String(event.id))));
   const stateValidity = (unit: MatureUnit): StateValidity => {
+    if (explicitlyNonGoverningUnit(unit)) return "historical_source_only";
     if (unit.clusterKind === "causal_state_cluster") return "current";
     if (unit.clusterKind === "supersession_cluster" && completeCausalSupersession(unit.statement)) {
       return "still_governing_historical";
@@ -1206,7 +1263,8 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
       && !unit.signals.includes("correction")
       && !unit.signals.includes("supersession")
       && !unit.signals.includes("constraint")
-      && !unit.signals.includes("shared_term")) return "superseded";
+      && !unit.signals.includes("shared_term")
+      && !specificCurrentOrientation(unit)) return "superseded";
     if (unit.signals.includes("uncertainty")) return "unresolved";
     if (explicitCurrentOrientation(unit)
       || (sourceActorType(unit.event) === "user"
@@ -1237,7 +1295,17 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     if (!seed.roles.length) return false;
     const duplicate = selected.find((candidate) => functionallyRedundant(seed, candidate));
     if (duplicate) {
+      if (seed.roles.includes("current_direction") && !duplicate.roles.includes("current_direction")) {
+        const duplicateIndex = selected.indexOf(duplicate);
+        redundantUnits.add(duplicate.unit);
+        selected.splice(duplicateIndex, 1, seed);
+        return true;
+      }
       if (criticalConstraint(unit) && !criticalConstraint(duplicate.unit)) {
+        if (duplicate.roles.includes("current_direction") && !seed.roles.includes("current_direction")) {
+          redundantUnits.add(unit);
+          return false;
+        }
         const duplicateIndex = selected.indexOf(duplicate);
         redundantUnits.add(duplicate.unit);
         selected.splice(duplicateIndex, 1, seed);
@@ -1267,6 +1335,30 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
         || compareForRole(left, right, role, boundary);
     });
 
+  // Reserve compact global orientation across distinct current subjects before
+  // local dependency roles can consume the bounded candidate set.
+  let orientationClusters = 0;
+  for (const unit of rankedForRole("current_direction")) {
+    if (orientationClusters >= 6 || selected.length >= MAX_MATURE_FINDINGS) break;
+    if (!specificCurrentOrientation(unit)) continue;
+    if (selected.some((candidate) => (
+      candidate.roles.includes("current_direction")
+      && sameOrientationCluster(candidate.unit, unit)
+    ))) continue;
+    const before = selected.length;
+    if (add(unit) && selected.length > before) orientationClusters += 1;
+  }
+  let unresolvedClusters = 0;
+  for (const unit of rankedForRole("uncertainty")) {
+    if (unresolvedClusters >= 2 || selected.length >= MAX_MATURE_FINDINGS) break;
+    if (selected.some((candidate) => (
+      candidate.roles.includes("uncertainty")
+      && candidateClusterOverlap(candidate.unit.statement, unit.statement) >= 2
+    ))) continue;
+    const before = selected.length;
+    if (add(unit) && selected.length > before) unresolvedClusters += 1;
+  }
+
   for (const role of [
     "next_action",
     "current_direction",
@@ -1281,6 +1373,10 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     let roleCount = 0;
     for (const unit of rankedForRole(role)) {
       if (roleCount >= (role === "next_action" ? 2 : 5) || selected.length >= MAX_MATURE_FINDINGS) break;
+      if (role === "current_direction" && selected.some((candidate) => (
+        candidate.roles.includes("current_direction")
+        && sameOrientationCluster(candidate.unit, unit)
+      ))) continue;
       if (add(unit)) roleCount += 1;
     }
   }
@@ -1313,6 +1409,44 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
       || unit.signals.includes("supersession")
       || (relationshipCount(unit) < 3 && !criticalConstraint(unit))) continue;
     if (add(unit)) persistentEarlierConstraints += 1;
+  }
+
+  // A single current subject may need both its governing statement and one
+  // open/conditional guard, but further paraphrases must not crowd unrelated
+  // current subjects out of the bounded reconstruction set.
+  for (const seed of [...selected]) {
+    if (!seed.roles.includes("current_direction")) continue;
+    const cluster = selected.filter((candidate) => (
+      candidate.roles.includes("current_direction")
+      && sameOrientationCluster(candidate.unit, seed.unit)
+    ));
+    if (cluster.length <= 2) continue;
+    const rankedCluster = [...cluster].sort((left, right) => {
+      const protectedCount = (candidate: CandidateSeed) => ["uncertainty", "shared_term", "correction_guard"]
+        .filter((role) => candidate.roles.includes(role as CandidateRole)).length;
+      return protectedCount(right) - protectedCount(left)
+        || right.roles.length - left.roles.length
+        || compareMatureUnits(left.unit, right.unit);
+    });
+    for (const redundant of rankedCluster.slice(2)) {
+      const index = selected.indexOf(redundant);
+      if (index >= 0) selected.splice(index, 1);
+      redundantUnits.add(redundant.unit);
+    }
+  }
+  for (const unit of rankedForRole("current_direction")) {
+    if (selected.length >= MAX_MATURE_FINDINGS) break;
+    if (!specificCurrentOrientation(unit) || selected.some((candidate) => candidate.unit === unit)) continue;
+    if (selected.some((candidate) => functionallyRedundant(
+      { unit, roles: candidateRoles(unit) },
+      candidate,
+    ))) continue;
+    add(unit);
+  }
+  for (const unit of rankedForRole("constraint")) {
+    if (selected.length >= MAX_MATURE_FINDINGS) break;
+    if (!criticalConstraint(unit) || selected.some((candidate) => candidate.unit === unit)) continue;
+    add(unit);
   }
 
   for (const unit of units) {
@@ -1407,7 +1541,7 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     candidates,
     metadata: {
       version: CHECKPOINT_CANDIDATE_VERSION,
-      strategy: "mature_room_complete_current_propositions_v1",
+      strategy: "mature_room_complete_current_propositions_v2",
       budget: MAX_MATURE_FINDINGS,
       candidateCount: candidates.length,
       currentBoundarySequence: boundary || null,
@@ -1431,6 +1565,11 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
           statementHashInputLength: unit.statement.length,
         })),
       staleOrCompletedUnitsRejected: staleUnits.size,
+      staleOrCompletedUnitDiagnostics: [...staleUnits].map((unit) => ({
+        sourceSequence: unit.sequence,
+        statement: unit.statement,
+        state: validityByUnit.get(unit),
+      })),
       completedSourceEventIds: [...completedEvents.keys()].sort(),
       completionRelationships: [...completedEvents.entries()].map(([eventId, closureEvents]) => ({
         eventId,
@@ -1445,6 +1584,13 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
         state: validityByUnit.get(seed.unit),
         clusterKind: seed.unit.clusterKind,
         sourceSequences: [...new Set(seed.unit.evidenceEvents.map((event) => sourceSequence(event)).filter((value): value is number => value !== null))].sort((left, right) => left - right),
+      })),
+      orientationCandidateDiagnostics: rankedForRole("current_direction").map((unit) => ({
+        sourceSequence: unit.sequence,
+        statement: unit.statement,
+        state: validityByUnit.get(unit),
+        specificCurrentOrientation: specificCurrentOrientation(unit),
+        selected: selected.some((seed) => seed.unit === unit),
       })),
       selectedFinalThirdStartSequence: finalThirdStart,
       selectedTailEvidenceDisposition,

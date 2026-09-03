@@ -74,8 +74,9 @@ function potentiallySensitive(value: string) {
 }
 
 function likelyTransient(value: string) {
-  return /\b(logo|branding|color palette|small talk|off topic)\b/i.test(value)
-    && !/\b(decision|constraint|required|approved|selected|will)\b/i.test(value);
+  return /\b(?:not yet a change to (?:the )?(?:plan|decision|state)|does not affect (?:the )?(?:trip|project|work).{0,40}(?:current|working) state)\b/i.test(value)
+    || (/\b(logo|branding|color palette|small talk|off topic)\b/i.test(value)
+      && !/\b(decision|constraint|required|approved|selected|will)\b/i.test(value));
 }
 
 function stageTimestamps(row: Row) {
@@ -322,7 +323,7 @@ async function reconcile(db: D1Database, row: Row) {
           : "new_candidate";
     const proposedTreatment: ReconciliationItem["proposedTreatment"] = transient
       ? "Exclude"
-      : uncertain || sensitive
+      : sensitive
         ? "Consider"
         : "Use";
     const eventIds = parseJson<string[]>(finding.source_event_ids, []);

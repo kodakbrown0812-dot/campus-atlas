@@ -27,6 +27,34 @@ export type GovernedDeliveryItem = {
   statement: string;
   authority: string;
   scope: string;
+  roles?: string[];
+  required?: boolean;
+  materialityReason?: string;
+  dependencyDepth?: number;
+  clusterId?: string;
+  semanticSignatures?: string[];
+  renderedStatement?: string;
+};
+
+export type ContinuationClosureDiagnostics = {
+  scope: "narrow" | "continuation" | "broad";
+  scopeReason: string;
+  seeds: { orientation: string[]; localAction: string[] };
+  requiredDependencyAdditions: Array<{ id: string; roles: string[]; reason: string; depth: number }>;
+  optionalDependencies: string[];
+  exclusions: Array<{ id: string; reason: string }>;
+  unresolved: string[];
+  semanticIdentities: string[];
+  sourceLineage: Array<{ id: string; versionId: string }>;
+  completeness: { complete: boolean; missing: string[] };
+  closureSizeBeforeCompaction: number;
+  packetSize: number | null;
+  relationshipTypes: string[];
+  traversalDepth: number;
+  clusterCount: number;
+  pruned: Array<{ id: string; reason: string }>;
+  semanticRecoveryActions: Array<{ id: string; signatures: string[] }>;
+  stopReason: string;
 };
 
 type PacketItemSnapshot = {
@@ -492,6 +520,73 @@ function packetRequiresRoadwayClarification(interpretation: TaskInterpretation) 
     || (!interpretation.primaryRoadway && !zeroApplicableRoadways);
 }
 
+const DELIVERY_ROLE_ORDER = [
+  "direction",
+  "next_action",
+  "constraint",
+  "conditional",
+  "correction",
+  "rationale",
+  "unresolved",
+  "semantic_identity",
+  "shared_term",
+];
+
+function deliveryRole(item: GovernedDeliveryItem) {
+  return [...(item.roles || [])].sort((left, right) => (
+    DELIVERY_ROLE_ORDER.indexOf(left) - DELIVERY_ROLE_ORDER.indexOf(right)
+  ))[0] || "direction";
+}
+
+function deliverySection(role: string) {
+  if (role === "next_action") return "Next";
+  if (["constraint", "conditional", "correction", "semantic_identity"].includes(role)) return "Must preserve";
+  if (role === "rationale") return "Why / dependencies";
+  if (role === "unresolved") return "Open";
+  return "Current state";
+}
+
+function governedSemanticSignatures(value: string) {
+  const signatures: string[] = [];
+  if (/\b(?:no|not|never|cannot|can't|don't|do not|without)\b/i.test(value)) signatures.push("negation");
+  if (/\b(?:if|unless|only if|only after|until|otherwise|subject to)\b/i.test(value)) signatures.push("condition");
+  if (/\b(?:before|after|requires?|required|prerequisite|depends on)\b/i.test(value)) signatures.push("prerequisite");
+  if (/\b(?:at least as|no worse than|no less than|better than|worse than|versus|compared? (?:with|to)|baseline)\b/i.test(value)) signatures.push("comparison");
+  if (/\b(?:replac(?:e|ed|es)|supersed(?:e|ed|es)|instead|is out|are out|reject(?:ed)?|obsolete|scratch|no longer)\b/i.test(value)) signatures.push("supersession");
+  if (/\b(?:because|therefore|\bso\b|caused|the reason|rationale|in order to)\b/i.test(value)) signatures.push("rationale");
+  if (/\b(?:unresolved|undecided|open|pending|not (?:yet )?(?:confirmed|established|settled)|deferred)\b/i.test(value)) signatures.push("unresolved");
+  if (/\b(?:next action|next step|before anything else|begin with)\b/i.test(value)) signatures.push("next_action");
+  if (/\b(?:commit|version|release|deployment|packet|receipt|run|artifact)\b[^\n]{0,80}\b(?:[a-f0-9]{7,64}|v\d+(?:\.\d+){0,3})\b/i.test(value)) signatures.push("semantic_identity");
+  return [...new Set(signatures)];
+}
+
+function renderGovernedDelivery(items: GovernedDeliveryItem[]) {
+  const recoveryActions: Array<{ id: string; signatures: string[] }> = [];
+  const normalized = items.map((item) => {
+    const original = item.statement.replace(/\s+/g, " ").trim();
+    let rendered = (item.renderedStatement || original).replace(/\s+/g, " ").trim();
+    const requiredSignatures = item.semanticSignatures || governedSemanticSignatures(original);
+    const renderedSignatures = governedSemanticSignatures(rendered);
+    const missing = requiredSignatures.filter((signature) => !renderedSignatures.includes(signature));
+    if (item.required !== false && missing.length) {
+      rendered = original;
+      recoveryActions.push({ id: item.id, signatures: missing });
+    }
+    return { ...item, rendered, role: deliveryRole(item) };
+  }).sort((left, right) => (
+    DELIVERY_ROLE_ORDER.indexOf(left.role) - DELIVERY_ROLE_ORDER.indexOf(right.role)
+    || (left.dependencyDepth || 0) - (right.dependencyDepth || 0)
+    || left.id.localeCompare(right.id)
+  ));
+  const sections = ["Current state", "Next", "Must preserve", "Why / dependencies", "Open"]
+    .map((title) => {
+      const sectionItems = normalized.filter((item) => deliverySection(item.role) === title);
+      return sectionItems.length ? `## ${title}\n${sectionItems.map((item) => `- ${item.rendered}`).join("\n")}` : "";
+    })
+    .filter(Boolean);
+  return { body: sections.join("\n\n"), recoveryActions };
+}
+
 export async function compileGovernedDeliveryPacket(
   db: D1Database,
   projectId: string,
@@ -504,6 +599,7 @@ export async function compileGovernedDeliveryPacket(
     reasonCodes: string[];
     explanation: string;
     items: GovernedDeliveryItem[];
+    closure?: ContinuationClosureDiagnostics;
   },
   idempotencyKey: string,
 ) {
@@ -529,15 +625,20 @@ export async function compileGovernedDeliveryPacket(
     };
   }
 
+  const renderedDelivery = renderGovernedDelivery(request.items);
+  const closure = request.closure ? {
+    ...request.closure,
+    semanticRecoveryActions: renderedDelivery.recoveryActions,
+  } : null;
   const content = [
     `# Atlas transfer packet v${PACKET_VERSION}`,
     `Delivery: ${request.level.toUpperCase()}`,
     `Continue: ${request.literalTask}`,
     "",
-    "## Current working state",
-    ...request.items.map((item) => `- ${item.statement.replace(/\s+/g, " ").trim()}`),
+    renderedDelivery.body,
   ].join("\n");
   const finalTokenCount = tokenCount(content);
+  if (closure) closure.packetSize = finalTokenCount;
   if (finalTokenCount > request.tokenBudget) {
     return {
       status: "unsafe_under_selected_budget",
@@ -562,7 +663,7 @@ export async function compileGovernedDeliveryPacket(
     scope: item.scope,
     authority: item.authority,
     freshness: "governing",
-    reason: `${request.level[0].toUpperCase()}${request.level.slice(1)} delivery selected this source-grounded governed state for the continuation task.`,
+    reason: item.materialityReason || `${request.level[0].toUpperCase()}${request.level.slice(1)} delivery selected this source-grounded governed state for the continuation task.`,
     sequenceOrder: index + 1,
     protectedRole: null,
     governanceEventId: null,
@@ -570,6 +671,12 @@ export async function compileGovernedDeliveryPacket(
     metadata: {
       contextDeliveryLevel: request.level,
       semanticDepthReasonCodes: request.reasonCodes,
+      continuationRoles: item.roles || [],
+      closureRequired: item.required !== false,
+      materialityReason: item.materialityReason || null,
+      dependencyDepth: item.dependencyDepth || 0,
+      clusterId: item.clusterId || null,
+      semanticSignatures: item.semanticSignatures || governedSemanticSignatures(item.statement),
     },
   }));
   const comparison = await sha256(json({
@@ -610,6 +717,7 @@ export async function compileGovernedDeliveryPacket(
     contextDeliveryLevel: request.level,
     semanticDepthReasonCodes: request.reasonCodes,
     stateTruthPrecedesTaskSelection: true,
+    continuationClosure: closure,
     reconstructionRunRequest: {
       requestedOutput: request.requestedOutput,
       roadwayOverride: null,
@@ -683,6 +791,7 @@ export async function compileGovernedDeliveryPacket(
       treatmentOrder: ["Use", "Consider", "Exclude"],
       semanticDepthReasonCodes: request.reasonCodes,
       stateTruthPrecedesTaskSelection: true,
+      continuationClosure: closure,
     }),
     json({ required: [], missing: [], safeToCompile: true }),
     "Atlas selected a minimal source-grounded subset from already governed State Truth. Delivery depth reflects dependency structure, not source or packet length.",

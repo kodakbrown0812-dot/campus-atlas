@@ -5,7 +5,12 @@ import {
   ValidatedContinuityRequest,
   validateContinuityRequest,
 } from "./continuity-request-contract";
-import { compileGovernedDeliveryPacket, compilePacket, getPacket } from "./packet-service";
+import {
+  compileGovernedDeliveryPacket,
+  compilePacket,
+  getPacket,
+  type ContinuationClosureDiagnostics,
+} from "./packet-service";
 import {
   first,
   Row,
@@ -227,6 +232,9 @@ export async function runReconstruction(
       reasonCodes: preflight.need.reasonCodes,
       explanation: preflight.need.explanation,
       items: "deliveryItems" in preflight ? preflight.deliveryItems : [],
+      closure: "diagnostics" in preflight && "continuationClosure" in preflight.diagnostics
+        ? preflight.diagnostics.continuationClosure as ContinuationClosureDiagnostics
+        : undefined,
     }, idempotencyKey);
     if (!compiled.packet || !compiled.receipt) {
       return stoppedResult(preflight, String(compiled.status));

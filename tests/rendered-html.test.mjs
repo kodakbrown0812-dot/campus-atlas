@@ -1743,8 +1743,8 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   for (const category of ["correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty", "shared_term"]) {
     assert.ok(selection.signalCategoriesRepresented.includes(category), category);
   }
-  assert.equal(candidateConstruction.version, "slice3-continuation-closure-v1");
-  assert.equal(candidateConstruction.strategy, "mature_room_complete_current_propositions_v1");
+  assert.equal(candidateConstruction.version, "slice3-continuation-closure-v2");
+  assert.equal(candidateConstruction.strategy, "mature_room_complete_current_propositions_v2");
   assert.equal(candidateConstruction.budget, 12);
   assert.ok(candidateConstruction.candidateCount <= 12);
   assert.equal(candidateConstruction.currentBoundarySequence, 20);
@@ -8274,6 +8274,128 @@ test("V1.8 continuation closure preserves minimum complete governed context", as
     assert.deepEqual(first.value.deliveryItems, second.value.deliveryItems);
     assert.deepEqual(first.value.need, second.value.need);
     assert.deepEqual(first.value.diagnostics.continuationClosure, second.value.diagnostics.continuationClosure);
+  });
+
+  await t.test("19 generic short software fixture is a complete Light closure", async () => {
+    const { result } = await reconstruct([
+      "Parser V2 is current after Parser V1 was rejected because it lost quoted commas; strict CSV compatibility must remain; next action: replace parseRow with Parser V2.",
+    ]);
+    assert.equal(result.value.need.level, "light");
+    for (const phrase of ["Parser V2 is current", "Parser V1 was rejected", "strict CSV compatibility", "next action"]) {
+      assert.match(result.value.packet.compiledContent, new RegExp(phrase, "i"));
+    }
+  });
+
+  await t.test("20 generic medium project fixture preserves architecture, safety, rationale, open state, and next action", async () => {
+    const { result } = await reconstruct([
+      "The current architecture uses signed append-only records.",
+      "Every write must preserve the existing audit trail.",
+      "Append-only storage is required because in-place edits would erase review history.",
+      "The retention interval remains unresolved pending the legal review.",
+      "The next action is to benchmark compaction without mutating stored records.",
+    ]);
+    assert.equal(result.value.need.level, "medium");
+    for (const phrase of ["signed append-only records", "must preserve", "because", "remains unresolved", "next action"]) {
+      assert.match(result.value.packet.compiledContent, new RegExp(phrase, "i"));
+    }
+  });
+
+  await t.test("21 generic full project fixture spans governed clusters without reviving superseded state", async () => {
+    const statements = [
+      "The current client architecture uses streamed server events.",
+      "Polling is rejected because it duplicated completion messages.",
+      "All client retries must preserve the request identity.",
+      "The current storage architecture uses immutable snapshots.",
+      "Mutable snapshots were replaced because they broke audit reconstruction.",
+      "The legacy export remains deferred until the schema is stable.",
+      "The exact retry interval remains unresolved pending load testing.",
+      "The next action is to verify streamed retries against immutable snapshots.",
+    ];
+    const { result } = await reconstruct(statements, "Where are we at? Continue the project from its current state.");
+    assert.equal(result.value.need.level, "full");
+    for (const statement of statements) assert.ok(result.value.packet.compiledContent.includes(statement));
+  });
+
+  await t.test("22 generic conditional fixture preserves the exact fallback condition", async () => {
+    const fallback = "Use the cached manifest only if the signed registry is unavailable.";
+    const { result } = await reconstruct([
+      "The signed registry remains the current manifest source.",
+      fallback,
+      "The next action is to verify registry availability.",
+    ]);
+    assert.ok(result.value.packet.compiledContent.includes(fallback));
+    assert.match(result.value.packet.compiledContent, /only if the signed registry is unavailable/i);
+  });
+
+  await t.test("23 generic open-work fixture keeps uncertainty open and carries its verification action", async () => {
+    const { result } = await reconstruct([
+      "The cache duration remains unresolved until production latency is measured.",
+      "The cache decision depends on the production p95 latency result.",
+      "The next action is to measure production p95 latency before selecting a cache duration.",
+    ]);
+    assert.match(result.value.packet.compiledContent, /remains unresolved/i);
+    assert.match(result.value.packet.compiledContent, /next action is to measure/i);
+    assert.doesNotMatch(result.value.packet.compiledContent, /cache duration is (?:now )?\d/i);
+  });
+
+  await t.test("24 source-supported unresolved state is proposed as governing open truth", async () => {
+    const DB = await sqliteD1();
+    const projectId = "closure-open-transfer";
+    await seedCanonicalProject(worker, DB, projectId, "Open Transfer");
+    const messages = [
+      { role: "user", content: "The signed registry is our current source." },
+      { role: "assistant", content: "We should verify its production availability." },
+      { role: "user", content: "The fallback remains unresolved until that availability check is complete." },
+      { role: "assistant", content: "The next action is to verify the signed registry before choosing a fallback." },
+    ];
+    const response = await worker.fetch(new Request(`http://localhost/api/v1/projects/${projectId}/transfers`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": "closure-open-transfer-import",
+        "oai-authenticated-user-id": "closure-owner",
+      },
+      body: JSON.stringify({ title: "Open state room", format: "json", transcript: JSON.stringify({ messages }) }),
+    }), {
+      DB,
+      ASSETS: assets,
+      CAMPUS_ATLAS_ACTION_KEY: "closure-key",
+      CAMPUS_ATLAS_OWNER_USER_ID: "closure-owner",
+    }, ctx);
+    const value = await response.json();
+    assert.equal(response.status, 201, JSON.stringify(value));
+    assert.equal(value.reconciliation[0].proposedTreatment, "Use");
+    assert.match(value.reconciliation[0].statement, /remains unresolved/i);
+  });
+
+  await t.test("25 closure diagnostics persist scope, seeds, dependencies, pruning, completeness, recovery, and stop reason", async () => {
+    const fixture = await closureFixture([
+      "The current release decision is Route Blue.",
+      "Route Red is rejected because accessibility verification failed.",
+      "Use Route Green only if Route Blue fails verification.",
+      "The launch date remains unresolved until verification finishes.",
+      "The next action is to verify Route Blue.",
+    ]);
+    const body = { task: "Pick this back up and continue.", caseId: fixture.caseId };
+    const preflight = await continuityRequest(worker, fixture.DB, fixture.projectId, body);
+    const diagnostics = preflight.value.diagnostics.continuationClosure;
+    assert.equal(diagnostics.scope, "continuation");
+    assert.match(diagnostics.scopeReason, /resume|next action/i);
+    assert.ok(diagnostics.seeds.orientation.length > 0);
+    assert.ok(diagnostics.seeds.localAction.length > 0);
+    assert.ok(diagnostics.requiredDependencyAdditions.length > 0);
+    assert.equal(diagnostics.completeness.complete, true);
+    assert.ok(Array.isArray(diagnostics.pruned));
+    assert.ok(diagnostics.closureSizeBeforeCompaction > 0);
+    assert.ok(diagnostics.traversalDepth >= 1);
+    assert.ok(diagnostics.clusterCount >= 1);
+    assert.match(diagnostics.stopReason, /no_omitted_fact|bounded_candidate/);
+    const run = await reconstructionRunRequest(worker, fixture.DB, fixture.projectId, body, "closure-diagnostics-run");
+    const detail = await slice2Request(worker, fixture.DB, `/api/v1/projects/${fixture.projectId}/packets/${run.value.packet.id}`);
+    const persisted = detail.value.packet.interpretation.continuationClosure;
+    assert.equal(persisted.packetSize, run.value.packet.finalTokenCount);
+    assert.ok(Array.isArray(persisted.semanticRecoveryActions));
+    assert.deepEqual(persisted.sourceLineage, diagnostics.sourceLineage);
   });
 });
 
