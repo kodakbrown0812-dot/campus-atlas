@@ -3167,7 +3167,8 @@ test("UI Simplification Slice 1 keeps Home action-led while advanced truth remai
   for (const label of ["Conversation preserved", "Project state identified", "Ready to continue"]) {
     assert.match(transfer, new RegExp(label));
   }
-  assert.match(transfer, /reviewItems\.length \? \[\{/);
+  assert.match(transfer, /current\.stage === "awaiting_review" && !legacyReview/);
+  assert.match(transfer, /reviewItems\.map\(\(item\) =>/);
   assert.match(transfer, /No prompt or packet setup is required/);
   assert.match(transfer, /packetRun\?\.need\.level === "full"/);
   assert.match(transfer, /Adjust direction/);
@@ -8576,7 +8577,9 @@ test("V1.8 product copy presents room transfer and immutable Light/Medium/Full p
   assert.match(transfer, /inferredRoomFormat/);
   assert.doesNotMatch(transfer, /Room title|Current method|name="format"/);
   assert.match(transfer, /Remove transfer/);
-  assert.match(transfer, /Organize review/);
+  assert.match(transfer, /legacyReviewAttempt/);
+  assert.match(transfer, /Atlas is resolving repeated and already-answered state/);
+  assert.doesNotMatch(transfer, /Organize review/);
   assert.match(transfer, /Atlas genuinely needs one decision/);
   assert.match(transfer, /status: "archived"/);
   assert.match(transfer, /packetRun\?\.need\.level === "full"/);

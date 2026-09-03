@@ -120,6 +120,7 @@ export default function TransferRoom({
   const [removeConfirmation, setRemoveConfirmation] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
   const packetAttempt = useRef<{ signature: string; key: string } | null>(null);
+  const legacyReviewAttempt = useRef(new Set<string>());
   const canWrite = Boolean(session?.writeAuthorization.authorized);
 
   function resetPreparedPacket() {
@@ -384,7 +385,7 @@ export default function TransferRoom({
       label: "Project state identified",
       complete: Boolean(current.stageTimestamps.analyzed || current.stageTimestamps.reconciled),
     },
-    ...(reviewItems.length ? [{
+    ...(reviewItems.length && !legacyReview ? [{
       label: `Needs review · ${reviewItems.length}`,
       complete: current.stage === "awaiting_review" || current.stage === "ready_for_steward",
     }] : []),
@@ -393,6 +394,19 @@ export default function TransferRoom({
       complete: current.stage === "ready_for_steward",
     },
   ] : [];
+
+  useEffect(() => {
+    if (!canWrite
+      || status !== "ready"
+      || current?.stage !== "awaiting_review"
+      || !legacyReview
+      || legacyReviewAttempt.current.has(current.id)) return;
+    legacyReviewAttempt.current.add(current.id);
+    void resume(current.id);
+    // The retry is intentionally keyed to the canonical transfer ID. A failed
+    // automatic migration remains visible as an error instead of looping.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canWrite, current?.id, current?.stage, legacyReview, status]);
 
   return (
     <section className={styles.transferRoom}>
@@ -445,6 +459,8 @@ export default function TransferRoom({
               <p>
                 {current.stage === "ready_for_steward"
                   ? `${preserved} message${preserved === 1 ? "" : "s"} preserved. This room is ready to continue.`
+                  : legacyReview
+                    ? `${preserved} message${preserved === 1 ? "" : "s"} preserved. Atlas is organizing the current state.`
                   : reviewItems.length
                     ? `${preserved} message${preserved === 1 ? "" : "s"} preserved. Atlas needs your judgment on ${reviewItems.length} item${reviewItems.length === 1 ? "" : "s"}.`
                     : `${preserved} message${preserved === 1 ? "" : "s"} preserved. Atlas is identifying what should carry forward.`}
@@ -471,20 +487,18 @@ export default function TransferRoom({
             ))}
           </ol>
 
-          {current.stage === "awaiting_review" && (
+          {current.stage === "awaiting_review" && legacyReview ? (
+            <div className={styles.automaticTransfer} role="status">
+              <span className={styles.eyebrow}>Reconstructing the room</span>
+              <strong>Atlas is resolving repeated and already-answered state.</strong>
+              <p>No review is needed unless a real ambiguity remains.</p>
+            </div>
+          ) : null}
+
+          {current.stage === "awaiting_review" && !legacyReview && (
             <details className={styles.transferReview} open>
-              <summary>{legacyReview ? "Atlas can organize this review" : `Needs your judgment · ${reviewItems.length}`}</summary>
-              {legacyReview ? (
-                <article>
-                  <span>Cleaner review available</span>
-                  <strong className={styles.reviewStatement}>Let Atlas consolidate repeated summaries and incomplete fragments first.</strong>
-                  <p>Your Exact conversation stays unchanged. Atlas will rebuild only the review set.</p>
-                  <div className={styles.reviewActions}>
-                    <button disabled={!canWrite || status === "saving"} onClick={() => resume(current.id)} type="button">Organize review</button>
-                  </div>
-                </article>
-              ) : null}
-              {!legacyReview && reviewItems.map((item) => (
+              <summary>Needs your judgment · {reviewItems.length}</summary>
+              {reviewItems.map((item) => (
                 <article key={item.findingId}>
                   <span>Atlas genuinely needs one decision</span>
                   <strong className={styles.reviewStatement}>{item.statement}</strong>
