@@ -1827,7 +1827,7 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   for (const category of ["correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty", "shared_term"]) {
     assert.ok(selection.signalCategoriesRepresented.includes(category), category);
   }
-  assert.equal(candidateConstruction.version, "slice3-continuation-closure-v2");
+  assert.equal(candidateConstruction.version, "slice3-continuation-closure-v3");
   assert.equal(candidateConstruction.strategy, "mature_room_complete_current_propositions_v2");
   assert.equal(candidateConstruction.budget, 12);
   assert.ok(candidateConstruction.candidateCount <= 12);
@@ -1872,12 +1872,15 @@ test("mature Exact room analysis preserves chronology, bounded signal coverage, 
   assert.ok(proposals.some((statement) => /Open question:.*remains unresolved/i.test(statement)), JSON.stringify(proposals));
   assert.ok(proposals.filter((statement) => /earlier broad dashboard direction/i.test(statement)).length <= 1);
   assert.ok(firstRun.value.reconciliation.some((item) => item.candidateType === "supersession"));
-  assert.ok(firstRun.value.reconciliation.every((item) => item.status === "proposed"));
+  const matureReviewItems = firstRun.value.reconciliation.filter((item) => item.reviewRequired);
+  assert.equal(matureReviewItems.length, 1, JSON.stringify(firstRun.value.reconciliation));
+  assert.equal(matureReviewItems[0].sourceAuthorship, "assistant");
+  assert.ok(firstRun.value.reconciliation.filter((item) => !item.reviewRequired).every((item) => item.status === "approved"));
   assert.ok(firstRun.value.reconciliation.every((item) => item.exactSources.length > 0));
   assert.ok(firstRun.value.reconciliation.every((item) => item.exactSources.every((source) => source.messageIds.length > 0)));
   assert.ok(proposals.every((statement) => !/Airport coffee|Naming brainstorm|ordinary chatter/i.test(statement)));
-  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);
-  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, firstRun.value.reconciliation.length - 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, firstRun.value.reconciliation.length - 1);
 
   const beforeReplay = canonicalMutationCounts(DB);
   const replay = await ownerRequest(`/api/v1/projects/${projectId}/transfers`, {
@@ -1949,10 +1952,79 @@ test("mature proposition construction rejects completed state and leaves unused 
   assert.ok(proposals.every((statement) => !/build the legacy dashboard next/i.test(statement)));
   assert.ok(proposals.every((statement) => !/browser workflow|capture screenshots/i.test(statement)));
   assert.ok(proposals.every((statement) => !/proof checklist|rendered output and scoring/i.test(statement)));
-  assert.ok(value.reconciliation.every((item) => item.status === "proposed"));
+  const validityReviewItems = value.reconciliation.filter((item) => item.reviewRequired);
+  assert.equal(validityReviewItems.length, 1, JSON.stringify(value.reconciliation));
+  assert.match(validityReviewItems[0].statement, /Open question|unresolved/i);
+  assert.ok(value.reconciliation.filter((item) => !item.reviewRequired).every((item) => item.status === "approved"));
   assert.ok(value.reconciliation.every((item) => item.exactSources.every((source) => source.messageIds.length > 0)));
-  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 0);
-  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, value.reconciliation.length - 1);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, value.reconciliation.length - 1);
+});
+
+test("Room Transfer governs complete Camping state and reserves review for genuine ambiguity", async () => {
+  const worker = await builtWorker("camping-review-consolidation");
+  const DB = await sqliteD1();
+  const projectId = "camping";
+  await seedCanonicalProject(worker, DB, projectId, "Camping Trip");
+  const messages = [
+    { role: "user", text: "We are planning a long weekend camping trip on the North Shore." },
+    { role: "assistant", text: "I can help compare lodging, food, activities, and the budget." },
+    { role: "user", text: "Cedar Bluff was the early lodging idea, but stairs make it unsuitable for Eli." },
+    { role: "user", text: "No. Eli sleeping on a sofa is not an acceptable workaround. Cedar Bluff is rejected because the usable bedrooms require stairs. Lakeview is the fallback only if we cannot verify Harbor Pines. Harbor Pines is the current choice because the ground-floor bedroom and kitchen appear to satisfy the actual constraints." },
+    { role: "assistant", text: "Understood. Harbor Pines is current, and Lakeview is the known fallback rather than an automatic booking." },
+    { role: "user", text: "Not yet. Before paying, we must confirm directly that Harbor Pines has a stair-free ground-floor bedroom and a kitchen cleaned of tree-nut residue." },
+    { role: "user", text: "Use this condition: proceed with kayaking only if winds stay below 12 mph and the outfitter confirms a beginner session with a protected launch. Otherwise use the Split Rock visitor center and scenic drive." },
+    { role: "assistant", text: "Kayaking proceeds only below 12 mph with outfitter confirmation; otherwise use the Split Rock visitor center and scenic drive." },
+    { role: "user", text: "No bulk-bin ingredients, no pesto, and no shared bakery desserts unless sealed and labeled. Friday dinner is sheet-pan chicken and vegetables at the cabin, not the taco bar; the taco idea was dropped because shared toppings create cross-contact risk." },
+    { role: "assistant", text: "So cabin dinner remains the safe default unless a restaurant is verified." },
+    { role: "assistant", text: "Friday dinner is sheet-pan chicken and vegetables using sealed ingredients. Taco bar is obsolete." },
+    { role: "user", text: "That incorrectly treats kayaking as committed. Keep the $420 conditional, reduce groceries to $430 for seven confirmed people, add at most $45 if Nina joins, and use $120 for parking and admissions." },
+    { role: "user", text: "Firewood is conditional on local restrictions and must be purchased locally." },
+    { role: "user", text: "Saturday restaurant dinner remains unresolved until Sam verifies a safe option." },
+    { role: "assistant", text: "Harbor Pines remains current, Lakeview remains fallback, and kayaking remains conditional." },
+    { role: "user", text: "Good. The next action is not more itinerary brainstorming.\n\nAfter the lodging decision, update the shared budget and then the room and grocery counts if Nina has answered. Do not book kayaking before Wednesday's wind forecast and outfitter confirmation. Saturday restaurant dinner is still unresolved. The fixed departure remains Friday at 2 PM.\n\nOnly pay the $600 nonrefundable deposit if both lodging answers are clear yeses. If either answer is no or vague, reopen the cabin search under the $1,250 lodging ceiling; Lakeview remains the known fallback, not an automatic booking." },
+  ];
+  const transcript = JSON.stringify({
+    messages: messages.map((message, index) => ({
+      id: `camping-review-${String(index + 1).padStart(2, "0")}`,
+      role: message.role,
+      timestamp: `2026-08-20T12:${String(index).padStart(2, "0")}:00.000Z`,
+      text: message.text,
+    })),
+  });
+  const env = {
+    DB,
+    ASSETS: assets,
+    CAMPUS_ATLAS_ACTION_KEY: "camping-review-key",
+    CAMPUS_ATLAS_OWNER_USER_ID: "camping-owner",
+  };
+  const response = await worker.fetch(new Request(`http://localhost/api/v1/projects/${projectId}/transfers`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": "camping-review-consolidation",
+      "oai-authenticated-user-id": "camping-owner",
+    },
+    body: JSON.stringify({ title: "Camping review consolidation", format: "json", transcript }),
+  }), env, ctx);
+  const value = await response.json();
+  assert.equal(response.status, 201, JSON.stringify(value));
+  assert.equal(value.stage, "ready_for_steward", JSON.stringify(value.reconciliation));
+  assert.equal(value.actualCounts.reviewItems, 0);
+  assert.ok(value.reconciliation.every((item) => item.sourceAuthorship === "user"));
+  assert.ok(value.reconciliation.every((item) => item.status === "approved"));
+  const proposals = value.reconciliation.map((item) => item.statement);
+  assert.ok(proposals.every((statement) => !/^Good\. The next action is not more itinerary brainstorming\.$/i.test(statement)));
+  assert.ok(proposals.every((statement) => !/^Understood\. Harbor Pines is current/i.test(statement)));
+  assert.ok(proposals.every((statement) => !/^So cabin dinner remains the safe default/i.test(statement)));
+  assert.ok(proposals.every((statement) => !/^Friday dinner is sheet-pan chicken and vegetables using sealed ingredients/i.test(statement)));
+  const checkpoint = DB.database.prepare(
+    "SELECT metadata FROM checkpoints WHERE project_id = ? ORDER BY rowid DESC LIMIT 1",
+  ).get(projectId);
+  const metadata = JSON.parse(checkpoint.metadata);
+  assert.ok(metadata.candidateConstruction.assistantRestatementsCollapsed >= 2, JSON.stringify(metadata.candidateConstruction));
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM mechanisms").get().count, 7);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM governance_events").get().count, 7);
 });
 
 test("Transfer Room resumes after a controlled stage failure and treats sensitive proposed state as non-authoritative", async () => {
@@ -8168,8 +8240,10 @@ test("V1.8 continuation closure preserves minimum complete governed context", as
     }, ctx);
     const value = await response.json();
     assert.equal(response.status, 201, JSON.stringify(value));
-    assert.equal(value.stage, "awaiting_review", JSON.stringify(value));
+    assert.equal(value.stage, "ready_for_steward", JSON.stringify(value));
     assert.equal(value.actualCounts.durableCandidates, 1);
+    assert.equal(value.actualCounts.reviewItems, 0);
+    assert.equal(value.reconciliation[0].status, "approved");
     assert.match(value.reconciliation[0].statement, /Route Red cannot meet the accessibility requirement/i);
     assert.match(value.reconciliation[0].statement, /Route Blue is the current choice/i);
     assert.match(value.reconciliation[0].statement, /under (?:the )?\$500 limit|\$500 ceiling/i);
@@ -8502,6 +8576,8 @@ test("V1.8 product copy presents room transfer and immutable Light/Medium/Full p
   assert.match(transfer, /inferredRoomFormat/);
   assert.doesNotMatch(transfer, /Room title|Current method|name="format"/);
   assert.match(transfer, /Remove transfer/);
+  assert.match(transfer, /Organize review/);
+  assert.match(transfer, /Atlas genuinely needs one decision/);
   assert.match(transfer, /status: "archived"/);
   assert.match(transfer, /packetRun\?\.need\.level === "full"/);
   assert.match(transfer, /reconstruction\/run/);

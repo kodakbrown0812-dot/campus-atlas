@@ -4,7 +4,7 @@ import {
   runCheckpoint,
 } from "./checkpoint-service";
 import { ingestRoomSource } from "./canonical-conversation-intake";
-import { materializeApprovedStateTruthMechanisms } from "./governance-service";
+import { governFinding, materializeApprovedStateTruthMechanisms } from "./governance-service";
 import { ensureExactImportSourceEvents } from "./source-event-materialization";
 import { sha256 } from "./transcript-import";
 import { all, first, json, now, parseJson, Row } from "./slice3-support";
@@ -48,9 +48,13 @@ type ReconciliationItem = {
     eventId: string;
     messageIds: string[];
     exactContent: string;
+    actorType: string;
+    sequence: number | null;
   }>;
   status: string;
   mechanismId: string | null;
+  sourceAuthorship: "user" | "assistant" | "mixed" | "unknown";
+  hasCounterevidence: boolean;
   checkpointDisposition: string;
   canonicalOriginCheckpointId: string;
 };
@@ -257,13 +261,49 @@ async function exactSources(db: D1Database, projectId: string, eventIds: string[
       "SELECT * FROM events WHERE id = ? AND project_id = ? LIMIT 1",
     ).bind(eventId, projectId));
     if (!event) continue;
+    const metadata = parseJson<Record<string, unknown>>(event.metadata, {});
+    const sourceMessage = metadata.sourceMessage && typeof metadata.sourceMessage === "object"
+      ? metadata.sourceMessage as Row
+      : null;
+    const sequence = Number(sourceMessage?.sequence);
     sources.push({
       eventId,
       messageIds: parseJson<string[]>(event.source_message_ids, []),
       exactContent: String(event.exact_source_span),
+      actorType: String(sourceMessage?.actorType || "unknown").toLowerCase(),
+      sequence: Number.isInteger(sequence) && sequence > 0 ? sequence : null,
     });
   }
   return sources;
+}
+
+function primarySource(statement: string, reason: string, sources: ReconciliationItem["exactSources"]) {
+  const selectedSequence = reason.match(/Exact source sequence (\d+)/iu)?.[1];
+  if (selectedSequence) {
+    const source = sources.find((candidate) => candidate.sequence === Number(selectedSequence));
+    if (source) return source;
+  }
+  const normalizedStatement = normalized(statement);
+  const exactMatch = sources.find((source) => {
+    const content = normalized(source.exactContent);
+    return content.includes(normalizedStatement) || normalizedStatement.includes(content);
+  });
+  return exactMatch || null;
+}
+
+function sourceAuthorship(
+  statement: string,
+  reason: string,
+  sources: ReconciliationItem["exactSources"],
+): ReconciliationItem["sourceAuthorship"] {
+  const primary = primarySource(statement, reason, sources);
+  if (primary?.actorType === "user" || primary?.actorType === "assistant") return primary.actorType;
+  const actors = new Set(sources.map((source) => source.actorType).filter((actor) => actor !== "unknown"));
+  if (actors.size === 1) {
+    const actor = [...actors][0];
+    if (actor === "user" || actor === "assistant") return actor;
+  }
+  return actors.size ? "mixed" : "unknown";
 }
 
 async function reconcile(db: D1Database, row: Row) {
@@ -281,7 +321,7 @@ async function reconcile(db: D1Database, row: Row) {
     ? `f.checkpoint_id = ? OR f.id IN (${attachedFindingIds.map(() => "?").join(", ")})`
     : "f.checkpoint_id = ?";
   const findings = await all<Row>(db.prepare(
-    `SELECT f.*, v.proposal_statement, v.proposed_scope, v.uncertainty,
+    `SELECT f.*, v.proposal_statement, v.proposed_scope, v.uncertainty, v.counterevidence,
             v.reason_for_surfacing, v.created_at AS version_created_at
      FROM findings f
      JOIN finding_versions v ON v.id = f.current_version_id AND v.project_id = f.project_id
@@ -321,12 +361,15 @@ async function reconcile(db: D1Database, row: Row) {
         : uncertain
           ? "uncertain"
           : "new_candidate";
-    const proposedTreatment: ReconciliationItem["proposedTreatment"] = transient
+    const rejected = String(finding.status) === "rejected";
+    const proposedTreatment: ReconciliationItem["proposedTreatment"] = transient || rejected
       ? "Exclude"
       : sensitive
         ? "Consider"
         : "Use";
     const eventIds = parseJson<string[]>(finding.source_event_ids, []);
+    const sources = await exactSources(db, String(row.project_id), eventIds);
+    const reasonForSurfacing = String(finding.reason_for_surfacing);
     result.push({
       findingId: String(finding.id),
       findingVersionId: String(finding.current_version_id),
@@ -337,24 +380,61 @@ async function reconcile(db: D1Database, row: Row) {
       freshness: String(finding.version_created_at),
       uncertainty: finding.uncertainty ? String(finding.uncertainty) : null,
       sensitivity: sensitive ? "potentially_sensitive" : "standard",
-      relationship,
+      relationship: rejected ? "transient_source_only" : relationship,
       relatedMechanismId: direct ? String(direct.id) : null,
       proposedTreatment,
       reviewRequired: !direct && !transient && !["approved", "rejected", "deferred"].includes(String(finding.status)),
-      reason: direct
+      reason: rejected
+        ? "The Exact source remains inspectable, but this candidate does not create separate working authority."
+        : direct
         ? "The candidate confirms an unchanged governed statement; no new semantic authority is required."
         : transient
           ? "The source remains exact and inspectable, but this material does not govern future project action."
-          : String(finding.reason_for_surfacing),
+          : reasonForSurfacing,
       sourceEventIds: eventIds,
-      exactSources: await exactSources(db, String(row.project_id), eventIds),
+      exactSources: sources,
       status: String(finding.status),
       mechanismId: governed ? String(governed.id) : direct ? String(direct.id) : null,
+      sourceAuthorship: sourceAuthorship(statement, reasonForSurfacing, sources),
+      hasCounterevidence: parseJson<string[]>(finding.counterevidence, []).length > 0,
       checkpointDisposition: String(attachment?.disposition || "created"),
       canonicalOriginCheckpointId: String(attachment?.canonicalOriginCheckpointId || finding.checkpoint_id),
     });
   }
   return result;
+}
+
+async function governUnambiguousUserState(db: D1Database, row: Row, items: ReconciliationItem[]) {
+  const checkpoint = await first<Row>(db.prepare(
+    "SELECT ambiguity FROM checkpoints WHERE id = ? AND project_id = ? LIMIT 1",
+  ).bind(row.checkpoint_id, row.project_id));
+  if (checkpoint?.ambiguity) return [];
+  const hasExplicitResolutionPath = (item: ReconciliationItem) => /\b(?:until|before|after|unless|only if|must confirm|needs? to (?:confirm|verify|check)|pending (?:confirmation|verification)|blocked on|waiting for|if .{1,100} then)\b/iu.test(item.statement);
+  const eligible = items.filter((item) => item.reviewRequired
+    && item.status === "proposed"
+    && item.sourceAuthorship === "user"
+    && item.sensitivity === "standard"
+    && item.scope === "local"
+    && item.proposedTreatment === "Use"
+    && (!item.uncertainty || hasExplicitResolutionPath(item))
+    && !item.hasCounterevidence);
+  for (const item of eligible) {
+    await governFinding(
+      db,
+      String(row.project_id),
+      item.findingId,
+      {
+        action: "keep_local",
+        actorId: "atlas-transfer-source-governor",
+        sourceVersionId: item.findingVersionId,
+        reviewedStatement: item.statement,
+        scope: "local",
+        reason: "Atlas preserved a complete, non-sensitive, unambiguous user-authored statement as room-local continuity.",
+      },
+      `transfer-room:${row.id}:source-governance:${item.findingId}:keep-local`,
+    );
+  }
+  return eligible.map((item) => item.findingId);
 }
 
 async function saveRunState(
@@ -606,6 +686,8 @@ async function orchestrate(db: D1Database, row: Row, imported: Row) {
     });
 
     let reconciliation = await reconcile(db, row);
+    const sourceGovernedFindingIds = await governUnambiguousUserState(db, row, reconciliation);
+    if (sourceGovernedFindingIds.length) reconciliation = await reconcile(db, row);
     const materializedStateTruth = await materializeApprovedStateTruthMechanisms(
       db,
       String(row.project_id),
@@ -636,6 +718,7 @@ async function orchestrate(db: D1Database, row: Row, imported: Row) {
     await recordStage(db, row, "reconciled", "completed", {
       candidates: reconciliation.length,
       materializedStateTruth,
+      sourceGovernedFindingIds,
       relationships: reconciliation.map((item) => ({
         findingId: item.findingId,
         relationship: item.relationship,

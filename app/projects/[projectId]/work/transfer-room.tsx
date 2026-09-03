@@ -29,9 +29,10 @@ type ReconciliationItem = {
   proposedTreatment: "Use" | "Consider" | "Exclude";
   reviewRequired: boolean;
   reason: string;
-  exactSources: Array<{ eventId: string; messageIds: string[]; exactContent: string }>;
+  exactSources: Array<{ eventId: string; messageIds: string[]; exactContent: string; actorType?: string; sequence?: number | null }>;
   status: string;
   mechanismId: string | null;
+  sourceAuthorship?: "user" | "assistant" | "mixed" | "unknown";
 };
 
 type Transfer = {
@@ -372,6 +373,7 @@ export default function TransferRoom({
     [conversations],
   );
   const reviewItems = current?.reconciliation.filter((item) => item.reviewRequired) || [];
+  const legacyReview = reviewItems.length > 0 && reviewItems.every((item) => !item.sourceAuthorship);
   const preserved = current ? count(current.actualCounts, "messages") : 0;
   const journey = current ? [
     {
@@ -471,10 +473,20 @@ export default function TransferRoom({
 
           {current.stage === "awaiting_review" && (
             <details className={styles.transferReview} open>
-              <summary>Needs review · {reviewItems.length}</summary>
-              {reviewItems.map((item) => (
+              <summary>{legacyReview ? "Atlas can organize this review" : `Needs your judgment · ${reviewItems.length}`}</summary>
+              {legacyReview ? (
+                <article>
+                  <span>Cleaner review available</span>
+                  <strong className={styles.reviewStatement}>Let Atlas consolidate repeated summaries and incomplete fragments first.</strong>
+                  <p>Your Exact conversation stays unchanged. Atlas will rebuild only the review set.</p>
+                  <div className={styles.reviewActions}>
+                    <button disabled={!canWrite || status === "saving"} onClick={() => resume(current.id)} type="button">Organize review</button>
+                  </div>
+                </article>
+              ) : null}
+              {!legacyReview && reviewItems.map((item) => (
                 <article key={item.findingId}>
-                  <span>Atlas needs one decision</span>
+                  <span>Atlas genuinely needs one decision</span>
                   <strong className={styles.reviewStatement}>{item.statement}</strong>
                   <p>{item.reason}</p>
                   <details>

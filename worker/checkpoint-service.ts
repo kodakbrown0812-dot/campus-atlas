@@ -46,7 +46,7 @@ const MAX_SELECTED_NODES = 7;
 const MAX_MATURE_SELECTED_NODES = 21;
 const MAX_MATURE_FINDINGS = 12;
 export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
-export const CHECKPOINT_CANDIDATE_VERSION = "slice3-continuation-closure-v2";
+export const CHECKPOINT_CANDIDATE_VERSION = "slice3-continuation-closure-v3";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -425,7 +425,7 @@ function continuitySignals(value: string): ContinuitySignal[] {
   if (/\b(?:next (?:actual )?action|next (?:actual )?step|next task|do next|build next|before anything else|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after|choose and (?:freeze|continue|begin|start)|reserve .{0,100} next|check .{0,100} then (?:reserve|book|continue))\b/i.test(value)) {
     signals.push("next_action");
   }
-  if (/\b(?:uncertain|uncertainty|unresolved|undecided|open question|open loop|open work|proof question|unknown|missing state|not yet|not confirmed|not established|provisional|pending evidence|remains to be|stay on hold|deferred until)\b/i.test(value)
+  if (/\b(?:uncertain|unresolved|undecided|open question|open loop|open work|proof question|unknown|missing state|not yet|not confirmed|not established|provisional|pending evidence|remains to be|stay on hold|deferred until)\b/i.test(value)
     || /^(?:could|whether|will)\b[^?]{12,}\?$/i.test(value.trim())) {
     signals.push("uncertainty");
   }
@@ -854,6 +854,20 @@ function functionallyRedundant(left: CandidateSeed, right: CandidateSeed) {
     && ((overlap.count >= 3 && overlap.ratio >= 0.55) || adjacentParaphrase));
 }
 
+function assistantRestatementOfUser(unit: MatureUnit, candidates: MatureUnit[]) {
+  if (sourceActorType(unit.event) !== "assistant") return false;
+  return candidates.some((candidate) => {
+    if (sourceActorType(candidate.event) !== "user") return false;
+    const overlap = termOverlap(unit.statement, candidate.statement);
+    const adjacent = Math.abs(unit.sequence - candidate.sequence) <= 2;
+    return overlap.count >= 3 && overlap.ratio >= 0.3
+      || adjacent && overlap.count >= 1
+      || candidateRoles(unit).includes("current_direction")
+        && candidateRoles(candidate).includes("current_direction")
+        && sameOrientationCluster(unit, candidate);
+  });
+}
+
 function compareForRole(left: MatureUnit, right: MatureUnit, role: CandidateRole, boundary: number) {
   const currentRole = ["current_direction", "next_action", "constraint", "rationale"].includes(role);
   const currentTier = (unit: MatureUnit) => currentRole
@@ -899,6 +913,11 @@ function completeConstraint(value: string) {
 function completeProposition(unit: MatureUnit) {
   if (nakedStructuralFragment(unit.statement)) return false;
   if (unit.statement.trim().length < 32) return false;
+  if (/\bnext action is not\b/iu.test(unit.statement)
+    && !/\b(?:instead|rather|next action is to|next action remains|then (?:update|check|confirm|reserve|book|prepare|send|build|run))\b/iu.test(unit.statement)) return false;
+  if (unit.signals.length === 1
+    && unit.signals[0] === "constraint"
+    && !/\b(?:must|has to|have to|do not|don't|never|only if|only after|unless|required|fixed|limit|ceiling|stop|defer|frozen)\b/iu.test(unit.statement)) return false;
   const roles = candidateRoles(unit);
   if (roles.includes("correction_guard") && !completeSupersession(unit)) return false;
   if (roles.includes("constraint") && !completeConstraint(unit.statement)) return false;
@@ -1286,7 +1305,8 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
   ));
   const completeUnits = structurallyCompleteUnits.filter((unit) => !staleUnits.has(unit));
   const directlyRelevant = (unit: MatureUnit) => ["current", "still_governing_historical", "unresolved"].includes(validityByUnit.get(unit) || "");
-  const units = completeUnits.filter(directlyRelevant);
+  const relevantUnits = completeUnits.filter(directlyRelevant);
+  const units = relevantUnits.filter((unit) => !assistantRestatementOfUser(unit, relevantUnits));
   const selected: CandidateSeed[] = [];
   const redundantUnits = new Set<MatureUnit>();
   const add = (unit: MatureUnit | undefined) => {
@@ -1565,6 +1585,7 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
           statementHashInputLength: unit.statement.length,
         })),
       staleOrCompletedUnitsRejected: staleUnits.size,
+      assistantRestatementsCollapsed: relevantUnits.length - units.length,
       staleOrCompletedUnitDiagnostics: [...staleUnits].map((unit) => ({
         sourceSequence: unit.sequence,
         statement: unit.statement,

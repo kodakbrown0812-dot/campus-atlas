@@ -396,7 +396,7 @@ export async function governFinding(
     db.prepare(
       `UPDATE findings
        SET current_version_id = ?, status = ?, authority_state = ?, return_condition = ?,
-           expires_at = ?, resolved_at = ?
+           expires_at = ?, resolved_at = ?, review_required = ?
        WHERE id = ? AND project_id = ? AND current_version_id = ?`,
     ).bind(
       resultingVersionId,
@@ -405,6 +405,7 @@ export async function governFinding(
       action === "defer" ? returnCondition : null,
       action === "defer" ? expiresAt : null,
       ["approved", "rejected"].includes(newStatus) ? createdAt : null,
+      ["approved", "rejected"].includes(newStatus) ? 0 : 1,
       findingId,
       projectId,
       sourceVersionId,
