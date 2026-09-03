@@ -1556,6 +1556,34 @@ test("Transfer Room performs one exact import through review into one immutable 
   for (const [table, count] of Object.entries(beforeDelivery)) {
     if (!["packets", "packet_items", "receipts"].includes(table)) assert.equal(afterDelivery[table], count, table);
   }
+
+  const removedFromActive = await ownerRequest(
+    `/api/v1/projects/sports/work/${encodeURIComponent(started.value.conversationId)}`,
+    { method: "PATCH", body: { status: "archived" } },
+  );
+  assert.equal(removedFromActive.response.status, 200, JSON.stringify(removedFromActive.value));
+  assert.equal(removedFromActive.value.workItem.status, "archived");
+  const activeTransfers = await ownerRequest("/api/v1/projects/sports/transfers");
+  assert.equal(activeTransfers.response.status, 200);
+  assert.equal(activeTransfers.value.transfers.length, 0);
+  const archivedTransfers = await ownerRequest("/api/v1/projects/sports/transfers?includeArchived=true");
+  assert.equal(archivedTransfers.response.status, 200);
+  assert.equal(archivedTransfers.value.transfers.length, 1);
+  assert.equal(archivedTransfers.value.transfers[0].id, started.value.id);
+  assert.equal(archivedTransfers.value.transfers[0].conversationStatus, "archived");
+  const preservedAfterRemoval = await ownerRequest(
+    `/api/v1/projects/sports/inspect/transfers/${encodeURIComponent(started.value.id)}`,
+  );
+  assert.equal(preservedAfterRemoval.response.status, 200);
+  assert.equal(preservedAfterRemoval.value.immutableMessages.length, 1);
+  assert.ok(preservedAfterRemoval.value.stewardArtifacts.some((artifact) => artifact.id === light.value.packet.id));
+
+  const restoredToActive = await ownerRequest(
+    `/api/v1/projects/sports/work/${encodeURIComponent(started.value.conversationId)}`,
+    { method: "PATCH", body: { status: "active" } },
+  );
+  assert.equal(restoredToActive.response.status, 200);
+  assert.equal((await ownerRequest("/api/v1/projects/sports/transfers")).value.transfers[0].id, started.value.id);
 });
 
 test("Transfer Room idempotently materializes an approved durable finding missing its governed mechanism", async () => {
@@ -2916,11 +2944,12 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   for (const expected of [
     "/transfers",
     "/reconstruction/run",
-    "Transfer room",
-    "Atlas will preserve it exactly",
+    "Continue this room",
+    "That’s it. Atlas will name it",
     "Needs review",
-    "What should the fresh room continue?",
-    "Light, Medium, or Full",
+    "No prompt or packet setup is required",
+    "Adjust direction",
+    "Remove transfer",
     "PacketPreview",
     "HandoffPresentation",
     "Open in Inspect",
@@ -2976,11 +3005,13 @@ test("Transfer sends the exact literal task and reconstructed case scope directl
   assert.doesNotMatch(home, /carryTask\(|\/ask`/);
   assert.doesNotMatch(home, /URLSearchParams|[?&]task=/);
   assert.match(transfer, /reconstruction\/run/);
-  assert.match(transfer, /const task = continuationTask\.trim\(\)/);
+  assert.match(transfer, /DEFAULT_CONTINUATION_TASK/);
+  assert.match(transfer, /room-transfer-auto:/);
+  assert.match(transfer, /directionNote\.trim\(\)/);
   assert.match(transfer, /\.\.\.\(current\.caseId \? \{ caseId: current\.caseId \} : \{\}\)/);
   assert.match(transfer, /body: JSON\.stringify\(\{/);
   assert.match(transfer, /task,/);
-  assert.match(transfer, /room-transfer-packet:/);
+  assert.match(transfer, /room-transfer-direction:/);
   assert.doesNotMatch(transfer, /localStorage|sessionStorage|[?&]task=/);
 });
 
@@ -3009,8 +3040,9 @@ test("UI Simplification Slice 1 keeps Home action-led while advanced truth remai
     assert.match(transfer, new RegExp(label));
   }
   assert.match(transfer, /reviewItems\.length \? \[\{/);
-  assert.match(transfer, /What should the fresh room continue\?/);
-  assert.match(transfer, /Prepare transfer/);
+  assert.match(transfer, /No prompt or packet setup is required/);
+  assert.match(transfer, /packetRun\?\.need\.level === "full"/);
+  assert.match(transfer, /Adjust direction/);
   assert.doesNotMatch(transfer, /Exact evidence prepared|Project state analyzed|Compared with existing state/);
   assert.match(stewardHistory, /Packets, handoffs, answers, and receipts/);
   assert.match(inspect, /What Atlas preserved/);
@@ -8407,11 +8439,17 @@ test("V1.8 product copy presents room transfer and immutable Light/Medium/Full p
   const packet = await readFile(new URL("../app/projects/[projectId]/ask/packet-preview.tsx", import.meta.url), "utf8");
   const inspect = await readFile(new URL("../app/projects/[projectId]/inspect/inspect-workspace.tsx", import.meta.url), "utf8");
   const intake = await readFile(new URL("../worker/canonical-conversation-intake.ts", import.meta.url), "utf8");
-  assert.match(transfer, /What room do you want to continue\?/);
-  assert.match(transfer, />Paste conversation</);
-  assert.match(transfer, /What should the fresh room continue\?/);
+  assert.match(transfer, /Paste the room you want to continue/);
+  assert.match(transfer, /Paste the whole ChatGPT conversation here/);
+  assert.match(transfer, /No prompt or packet setup is required/);
+  assert.match(transfer, /inferredRoomTitle/);
+  assert.match(transfer, /inferredRoomFormat/);
+  assert.doesNotMatch(transfer, /Room title|Current method|name="format"/);
+  assert.match(transfer, /Remove transfer/);
+  assert.match(transfer, /status: "archived"/);
+  assert.match(transfer, /packetRun\?\.need\.level === "full"/);
   assert.match(transfer, /reconstruction\/run/);
-  assert.match(transfer, /Light, Medium, or Full/);
+  assert.match(transfer, /packetRun\?\.need\.level === "full"/);
   assert.match(transfer, /<PacketPreview/);
   assert.match(transfer, /<HandoffPresentation/);
   assert.match(transfer, /current\.caseId/);

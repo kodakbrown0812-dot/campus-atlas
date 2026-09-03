@@ -13,6 +13,7 @@ type ConversationChoice = {
   id: string;
   title: string;
   sourceType: string;
+  status: "active" | "completed" | "archived";
 };
 
 type ReconciliationItem = {
@@ -39,6 +40,7 @@ type Transfer = {
   conversationId: string;
   caseId: string | null;
   conversationTitle: string;
+  conversationStatus: "active" | "completed" | "archived";
   status: string;
   stage: string;
   stageTimestamps: Record<string, string>;
@@ -64,6 +66,34 @@ function count(value: Record<string, number>, key: string) {
   return Number(value[key] || 0);
 }
 
+const DEFAULT_CONTINUATION_TASK = "Continue this room from its current governed state. Start with the next materially correct action.";
+
+function inferredRoomTitle(transcript: string) {
+  const trimmed = transcript.trim();
+  try {
+    const parsed = JSON.parse(trimmed) as { messages?: Array<{ role?: string; content?: string; text?: string }> };
+    const message = parsed.messages?.find((item) => item.role === "user") || parsed.messages?.[0];
+    const content = String(message?.content || message?.text || "").trim();
+    if (content) return content.replace(/\s+/g, " ").slice(0, 72);
+  } catch {
+    // Plain pasted rooms are expected; title inference continues below.
+  }
+  const firstMeaningfulLine = trimmed
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*(?:user|assistant|human|chatgpt)\s*:\s*/i, "").trim())
+    .find(Boolean);
+  return (firstMeaningfulLine || "Transferred room").replace(/\s+/g, " ").slice(0, 72);
+}
+
+function inferredRoomFormat(transcript: string) {
+  try {
+    const parsed = JSON.parse(transcript) as { messages?: unknown };
+    return Array.isArray(parsed.messages) ? "json" : "text";
+  } catch {
+    return "text";
+  }
+}
+
 export default function TransferRoom({
   projectId,
   conversations,
@@ -81,17 +111,18 @@ export default function TransferRoom({
   const [current, setCurrent] = useState<Transfer | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const [error, setError] = useState("");
-  const [reviewed, setReviewed] = useState<Record<string, string>>({});
-  const [continuationTask, setContinuationTask] = useState("");
+  const [directionNote, setDirectionNote] = useState("");
   const [packetStatus, setPacketStatus] = useState<"idle" | "preparing" | "needs_input" | "ready" | "failure">("idle");
   const [packetRun, setPacketRun] = useState<ReconstructionRunResult | null>(null);
   const [prepared, setPrepared] = useState<PreparedContext | null>(null);
   const [packetError, setPacketError] = useState("");
+  const [removeConfirmation, setRemoveConfirmation] = useState<string | null>(null);
+  const [actionMessage, setActionMessage] = useState("");
   const packetAttempt = useRef<{ signature: string; key: string } | null>(null);
   const canWrite = Boolean(session?.writeAuthorization.authorized);
 
   function resetPreparedPacket() {
-    setContinuationTask("");
+    setDirectionNote("");
     setPacketStatus("idle");
     setPacketRun(null);
     setPrepared(null);
@@ -170,10 +201,11 @@ export default function TransferRoom({
     event.preventDefault();
     const form = event.currentTarget;
     const data = new FormData(form);
+    const transcript = String(data.get("transcript") || "");
     const succeeded = await transfer({
-      title: String(data.get("title") || ""),
-      format: String(data.get("format") || "text"),
-      transcript: String(data.get("transcript") || ""),
+      title: inferredRoomTitle(transcript),
+      format: inferredRoomFormat(transcript),
+      transcript,
     });
     if (succeeded) form.reset();
   }
@@ -223,7 +255,7 @@ export default function TransferRoom({
           action,
           actorId: session?.actor.id || "owner",
           sourceVersionId: item.findingVersionId,
-          reviewedStatement: reviewed[item.findingId] || item.statement,
+          reviewedStatement: item.statement,
           scope: "project_wide",
           reason: treatment === "Use"
             ? "Owner accepted this reviewed statement for future project continuity."
@@ -243,15 +275,16 @@ export default function TransferRoom({
     await resume(current.id);
   }
 
-  async function preparePacket(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!current || !continuationTask.trim() || !canWrite) return;
-    const task = continuationTask.trim();
+  async function preparePacket(taskOverride?: string) {
+    if (!current || !canWrite) return;
+    const task = taskOverride?.trim() || directionNote.trim() || DEFAULT_CONTINUATION_TASK;
     const signature = JSON.stringify([current.id, current.caseId, task]);
     if (packetAttempt.current?.signature !== signature) {
       packetAttempt.current = {
         signature,
-        key: `room-transfer-packet:${crypto.randomUUID()}`,
+        key: task === DEFAULT_CONTINUATION_TASK
+          ? `room-transfer-auto:${current.id}`
+          : `room-transfer-direction:${current.id}:${crypto.randomUUID()}`,
       };
     }
     setPacketStatus("preparing");
@@ -301,18 +334,41 @@ export default function TransferRoom({
     }
   }
 
-  function changeContinuationTask(value: string) {
-    setContinuationTask(value);
-    if (packetStatus !== "idle") {
-      setPacketStatus("idle");
-      setPacketRun(null);
-      setPrepared(null);
-      setPacketError("");
+  async function removeTransfer(transferToRemove: Transfer) {
+    setStatus("saving");
+    setError("");
+    setActionMessage("");
+    const response = await fetch(
+      `/api/v1/projects/${encodeURIComponent(projectId)}/work/${encodeURIComponent(transferToRemove.conversationId)}`,
+      {
+        method: "PATCH",
+        headers: { "content-type": "application/json", ...authorizationHeaders() },
+        body: JSON.stringify({ status: "archived" }),
+      },
+    );
+    const value = await response.json().catch(() => ({ error: "Transfer removal failed." })) as { error?: string };
+    if (!response.ok) {
+      setError(value.error || "Transfer removal failed. Nothing was deleted.");
+      setStatus("ready");
+      return;
     }
+    resetPreparedPacket();
+    setRemoveConfirmation(null);
+    await load();
+    onCanonicalChange();
+    setActionMessage("Transfer removed from active work. Its source and history remain available in Inspect.");
+    setStatus("ready");
   }
 
+  useEffect(() => {
+    if (!canWrite || current?.stage !== "ready_for_steward" || prepared || packetStatus !== "idle") return;
+    const pending = window.setTimeout(() => void preparePacket(DEFAULT_CONTINUATION_TASK), 0);
+    return () => window.clearTimeout(pending);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canWrite, current?.id, current?.stage, packetStatus, prepared]);
+
   const imported = useMemo(
-    () => conversations.filter((conversation) => conversation.sourceType === "imported"),
+    () => conversations.filter((conversation) => conversation.sourceType === "imported" && conversation.status !== "archived"),
     [conversations],
   );
   const reviewItems = current?.reconciliation.filter((item) => item.reviewRequired) || [];
@@ -340,28 +396,17 @@ export default function TransferRoom({
     <section className={styles.transferRoom}>
       <header>
         <span className={styles.eyebrow}>Room transfer</span>
-        <h2>What room do you want to continue?</h2>
-        <p>Paste the conversation. Atlas will preserve it exactly, reconstruct what is current, and prepare it for a fresh room.</p>
+        <h2>Paste the room you want to continue.</h2>
+        <p>That’s it. Atlas will name it, preserve it, reconstruct what is current, and create the fresh-room transfer.</p>
       </header>
 
       <form className={styles.transferForm} onSubmit={submit}>
-        <label>
-          Room title
-          <input name="title" placeholder="What work is this room preserving?" required />
-        </label>
-        <label>
-          Current method
-          <select defaultValue="text" name="format">
-            <option value="text">Paste conversation</option>
-            <option value="json">Paste structured export</option>
-          </select>
-        </label>
         <label className={styles.transferTranscript}>
           Conversation
-          <textarea name="transcript" placeholder="Paste the conversation or export here." required />
+          <textarea name="transcript" placeholder="Paste the whole ChatGPT conversation here." required />
         </label>
         <button disabled={!canWrite || status === "saving"} type="submit">
-          {status === "saving" ? "Transferring room…" : "Transfer room"}
+          {status === "saving" ? "Atlas is reconstructing…" : "Continue this room"}
         </button>
       </form>
 
@@ -386,6 +431,7 @@ export default function TransferRoom({
       ) : null}
 
       {!canWrite && <p className={styles.readOnlyNotice}>Sign in as the owner to transfer a room or make review decisions.</p>}
+      {actionMessage && <p className={styles.lifecycleMessage} role="status">{actionMessage}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
 
       {current ? (
@@ -402,7 +448,18 @@ export default function TransferRoom({
                     : `${preserved} message${preserved === 1 ? "" : "s"} preserved. Atlas is identifying what should carry forward.`}
               </p>
             </div>
-            <Link href={`/projects/${encodeURIComponent(projectId)}/inspect/transfers/${encodeURIComponent(current.id)}`}>Open in Inspect</Link>
+            <div className={styles.transferResultActions}>
+              <Link href={`/projects/${encodeURIComponent(projectId)}/inspect/transfers/${encodeURIComponent(current.id)}`}>Open in Inspect</Link>
+              {removeConfirmation === current.id ? (
+                <div className={styles.removeTransferConfirmation}>
+                  <span>Remove from active work? Atlas will keep its history.</span>
+                  <button disabled={!canWrite || status === "saving"} onClick={() => void removeTransfer(current)} type="button">Confirm remove</button>
+                  <button onClick={() => setRemoveConfirmation(null)} type="button">Cancel</button>
+                </div>
+              ) : (
+                <button disabled={!canWrite || status === "saving"} onClick={() => setRemoveConfirmation(current.id)} type="button">Remove transfer</button>
+              )}
+            </div>
           </div>
           <ol className={styles.transferProgress}>
             {journey.map((step) => (
@@ -417,12 +474,8 @@ export default function TransferRoom({
               <summary>Needs review · {reviewItems.length}</summary>
               {reviewItems.map((item) => (
                 <article key={item.findingId}>
-                  <span>Review what Atlas should carry forward</span>
-                  <textarea
-                    aria-label="Reviewed wording"
-                    onChange={(event) => setReviewed((value) => ({ ...value, [item.findingId]: event.target.value }))}
-                    value={reviewed[item.findingId] || item.statement}
-                  />
+                  <span>Atlas needs one decision</span>
+                  <strong className={styles.reviewStatement}>{item.statement}</strong>
                   <p>{item.reason}</p>
                   <details>
                     <summary>View the supporting conversation</summary>
@@ -464,38 +517,37 @@ export default function TransferRoom({
                   <div><dt>Changed or replaced</dt><dd>{current.reconstructedState.changedOrReplaced.join(" ")}</dd></div>
                 ) : null}
               </dl>
-              {!prepared ? (
-                <form className={styles.transferTask} onSubmit={(event) => void preparePacket(event)}>
+              {!prepared && ["idle", "preparing"].includes(packetStatus) ? (
+                <div className={styles.automaticTransfer} role="status">
+                  <span className={styles.eyebrow}>Preparing the transfer</span>
+                  <strong>Atlas is deciding what the fresh room needs.</strong>
+                  <p>No prompt or packet setup is required.</p>
+                </div>
+              ) : null}
+              {!prepared && packetStatus === "needs_input" ? (
+                <form className={styles.transferTask} onSubmit={(event) => { event.preventDefault(); void preparePacket(); }}>
                   <div>
-                    <span className={styles.eyebrow}>Steer the transfer</span>
-                    <h3>What should the fresh room continue?</h3>
-                    <p>Atlas will select the minimum safe part of the reconstructed state and determine whether this transfer is Light, Medium, or Full.</p>
+                    <span className={styles.eyebrow}>One direction needed</span>
+                    <h3>Atlas found more than one safe way to continue.</h3>
+                    <p>{packetRun?.need.explanation || packetError}</p>
                   </div>
-                  <label htmlFor={`transfer-task-${current.id}`}>Continuation task</label>
+                  <label htmlFor={`transfer-direction-${current.id}`}>What should the fresh room focus on?</label>
                   <textarea
-                    id={`transfer-task-${current.id}`}
-                    onChange={(event) => changeContinuationTask(event.target.value)}
-                    placeholder="Describe the work, decision, or next step the fresh room should continue."
-                    value={continuationTask}
+                    id={`transfer-direction-${current.id}`}
+                    onChange={(event) => setDirectionNote(event.target.value)}
+                    placeholder="One short direction is enough."
+                    value={directionNote}
                   />
-                  <button disabled={!canWrite || !continuationTask.trim() || packetStatus === "preparing"} type="submit">
-                    {packetStatus === "preparing" ? "Preparing transfer…" : "Prepare transfer"}
-                  </button>
-                  {packetStatus === "needs_input" ? (
-                    <div className={styles.transferGuidance} role="alert">
-                      <strong>Atlas needs a clearer continuation direction.</strong>
-                      <p>{packetRun?.need.explanation || packetError}</p>
-                      <span>Revise the task above. Atlas did not create a packet or invent missing continuity.</span>
-                    </div>
-                  ) : null}
-                  {packetStatus === "failure" ? (
-                    <div className={styles.transferGuidance} role="alert">
-                      <strong>Atlas stopped before creating the packet.</strong>
-                      <p>{packetError}</p>
-                      <span>The reconstructed room and completed transfer stages remain preserved.</span>
-                    </div>
-                  ) : null}
+                  <button disabled={!canWrite || !directionNote.trim()} type="submit">Continue</button>
                 </form>
+              ) : null}
+              {!prepared && packetStatus === "failure" ? (
+                <div className={styles.transferGuidance} role="alert">
+                  <strong>Atlas stopped before creating the packet.</strong>
+                  <p>{packetError}</p>
+                  <span>The room and completed reconstruction remain preserved.</span>
+                  <button disabled={!canWrite} onClick={() => { setPacketStatus("idle"); packetAttempt.current = null; }} type="button">Try again</button>
+                </div>
               ) : null}
               {prepared ? (
                 <div className={styles.embeddedPacket}>
@@ -504,8 +556,29 @@ export default function TransferRoom({
                     advancedActions={null}
                     context={prepared}
                   />
+                  {packetRun?.need.level === "full" ? (
+                    <details className={styles.directionControl}>
+                      <summary>Adjust direction <span>Optional</span></summary>
+                      <p>Atlas already created the complete transfer. Only change this if the fresh room should start somewhere specific.</p>
+                      <div className={styles.directionChoices}>
+                        <button onClick={() => setDirectionNote("Continue from the current next action.")} type="button">Current next action</button>
+                        <button onClick={() => setDirectionNote("Resolve the most material open decision before taking the next action.")} type="button">Open decision first</button>
+                      </div>
+                      <form onSubmit={(event) => { event.preventDefault(); void preparePacket(); }}>
+                        <label htmlFor={`optional-direction-${current.id}`}>Direction</label>
+                        <textarea
+                          id={`optional-direction-${current.id}`}
+                          onChange={(event) => setDirectionNote(event.target.value)}
+                          placeholder="Optional: give Atlas one short directional note."
+                          value={directionNote}
+                        />
+                        <button disabled={!directionNote.trim() || packetStatus === "preparing"} type="submit">
+                          {packetStatus === "preparing" ? "Updating…" : "Update transfer"}
+                        </button>
+                      </form>
+                    </details>
+                  ) : null}
                   <div className={styles.transferReady}>
-                    <button onClick={() => changeContinuationTask(continuationTask)} type="button">Prepare a different transfer</button>
                     <Link href={prepared.links.inspect}>Inspect transfer</Link>
                   </div>
                 </div>

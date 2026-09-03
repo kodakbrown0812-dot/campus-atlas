@@ -25,7 +25,10 @@ export async function handleTransferRoom(
     const parts = match[2] ? match[2].split("/").map(decodeURIComponent) : [];
 
     if (!parts.length && request.method === "GET") {
-      return Response.json({ projectId, transfers: await listTransfers(db, projectId) }, {
+      return Response.json({
+        projectId,
+        transfers: await listTransfers(db, projectId, url.searchParams.get("includeArchived") === "true"),
+      }, {
         headers: { "cache-control": "no-store" },
       });
     }

@@ -473,6 +473,7 @@ async function view(db: D1Database, projectId: string, row: Row) {
     conversationId: row.conversation_id,
     caseId: row.case_id,
     conversationTitle: conversation?.title || "Transferred room",
+    conversationStatus: conversation?.status || "active",
     sourceImportId: row.source_import_id,
     sourceFingerprint: row.source_fingerprint,
     representationType: imported?.representation_type || "Exact",
@@ -710,9 +711,12 @@ export async function getTransfer(db: D1Database, projectId: string, id: string)
   return view(db, projectId, await transferRow(db, projectId, id));
 }
 
-export async function listTransfers(db: D1Database, projectId: string) {
+export async function listTransfers(db: D1Database, projectId: string, includeArchived = false) {
   const rows = await all<Row>(db.prepare(
-    "SELECT * FROM transfer_runs WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC",
+    `SELECT tr.* FROM transfer_runs tr
+     INNER JOIN conversations c ON c.id = tr.conversation_id AND c.project_id = tr.project_id
+     WHERE tr.project_id = ? ${includeArchived ? "" : "AND c.status != 'archived'"}
+     ORDER BY tr.updated_at DESC, tr.created_at DESC`,
   ).bind(projectId));
   return Promise.all(rows.map((row) => view(db, projectId, row)));
 }
