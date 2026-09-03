@@ -1489,7 +1489,7 @@ test("Transfer Room performs one exact import through review into one immutable 
   assert.equal(crossProject.status, 404);
 
   const task = "Prepare the context needed to identify when the internal project update should be delivered and why.";
-  const beforeSteward = canonicalMutationCounts(DB);
+  const beforeDelivery = canonicalMutationCounts(DB);
   const light = await ownerRequest("/api/v1/projects/sports/reconstruction/run", {
     method: "POST",
     key: "transfer-room-light-proof",
@@ -1511,6 +1511,12 @@ test("Transfer Room performs one exact import through review into one immutable 
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packets").get().count, 1);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM packet_items").get().count, 1);
   assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM receipts").get().count, 1);
+  const deliveredInspection = await ownerRequest(
+    `/api/v1/projects/sports/inspect/transfers/${encodeURIComponent(started.value.id)}`,
+  );
+  assert.equal(deliveredInspection.response.status, 200);
+  assert.equal(deliveredInspection.value.stewardArtifacts.length, 1);
+  assert.equal(deliveredInspection.value.stewardArtifacts[0].id, light.value.packet.id);
 
   const wrongProjectCase = await ownerRequest("/api/v1/projects/hockey/reconstruction/run", {
     method: "POST",
@@ -1520,16 +1526,16 @@ test("Transfer Room performs one exact import through review into one immutable 
   assert.equal(wrongProjectCase.response.status, 404);
   assert.match(wrongProjectCase.value.error, /case not found/i);
 
-  const directSteward = await ownerRequest("/api/v1/projects/sports/reconstruction/run", {
+  const unscopedDelivery = await ownerRequest("/api/v1/projects/sports/reconstruction/run", {
     method: "POST",
     key: "transfer-room-direct-project-scope",
     body: { task, tokenBudget: 800 },
   });
-  assert.equal(directSteward.response.status, 409, JSON.stringify(directSteward.value));
-  assert.equal(directSteward.value.status, "clarification_required");
-  assert.equal(directSteward.value.need.level, null);
-  assert.equal(directSteward.value.caseId, null);
-  assert.equal(directSteward.value.capsule, null);
+  assert.equal(unscopedDelivery.response.status, 409, JSON.stringify(unscopedDelivery.value));
+  assert.equal(unscopedDelivery.value.status, "clarification_required");
+  assert.equal(unscopedDelivery.value.need.level, null);
+  assert.equal(unscopedDelivery.value.caseId, null);
+  assert.equal(unscopedDelivery.value.capsule, null);
 
   for (const path of [
     "/api/v1/projects/sports/transfers",
@@ -1546,9 +1552,9 @@ test("Transfer Room performs one exact import through review into one immutable 
   });
   assert.equal(retriedLight.value.status, "compiled");
   assert.equal(retriedLight.value.packet.compiledContent, light.value.packet.compiledContent);
-  const afterSteward = canonicalMutationCounts(DB);
-  for (const [table, count] of Object.entries(beforeSteward)) {
-    if (!["packets", "packet_items", "receipts"].includes(table)) assert.equal(afterSteward[table], count, table);
+  const afterDelivery = canonicalMutationCounts(DB);
+  for (const [table, count] of Object.entries(beforeDelivery)) {
+    if (!["packets", "packet_items", "receipts"].includes(table)) assert.equal(afterDelivery[table], count, table);
   }
 });
 
@@ -2909,15 +2915,20 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   ]) assert.match(work, new RegExp(expected.replaceAll("/", "\\/")));
   for (const expected of [
     "/transfers",
+    "/reconstruction/run",
     "Transfer room",
     "Atlas will preserve it exactly",
     "Needs review",
+    "What should the fresh room continue?",
+    "Light, Medium, or Full",
+    "PacketPreview",
+    "HandoffPresentation",
     "Open in Inspect",
     "Accept",
     "Decide later",
     "Do not keep",
   ]) assert.match(transfer, new RegExp(expected.replaceAll("/", "\\/")));
-  assert.match(transfer, /carryTask\(projectId, "", current\.caseId\)/);
+  assert.doesNotMatch(transfer, /carryTask\(/);
   assert.doesNotMatch(transfer, /\/ask\?(?:[^\s"'`]*&)?caseId=/);
   assert.match(stewardTask, /caseId: string \| null/);
   assert.match(stewardTask, /setPendingTask\(\{ projectId, literalTask, caseId \}\)/);
@@ -2928,13 +2939,11 @@ test("Slice 6A Work and conversation actions use canonical services only", async
     "Start here",
     "Transfer an existing room",
     "Current work",
-    "Continue with Atlas",
-    "Prepare the context for a fresh room",
-    "Prepare transfer packet",
+    "Continue transfer",
     "Advanced / Internal records",
   ]) assert.match(work, new RegExp(expected));
   assert.ok(work.indexOf("Start here") < work.indexOf("Current work"));
-  assert.ok(work.indexOf("Current work") < work.indexOf("Continue with Atlas"));
+  assert.ok(work.indexOf("Current work") < work.indexOf("Advanced / Internal records"));
   assert.doesNotMatch(work, /Recent context packets|Pending findings|Reasoning Health|packet token|canonical_d1|Canonical Work/);
   assert.match(transfer, /Conversation preserved/);
   assert.match(transfer, /Project state identified/);
@@ -2959,21 +2968,20 @@ test("Slice 6A Work and conversation actions use canonical services only", async
   assert.doesNotMatch(session, /authorization:\s*`Bearer/);
 });
 
-test("Home carries the exact literal task and optional case scope through project-scoped memory, not the URL", async () => {
-  const [home, steward, taskContext] = await Promise.all([
+test("Transfer sends the exact literal task and reconstructed case scope directly to the canonical engine", async () => {
+  const [home, transfer] = await Promise.all([
     readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/components/steward-task.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/projects/[projectId]/work/transfer-room.tsx", import.meta.url), "utf8"),
   ]);
-  assert.match(home, /carryTask\(projectId, stewardTask\)/);
-  assert.match(home, /router\.push\(`\/projects\/\$\{encodeURIComponent\(projectId\)\}\/ask`\)/);
+  assert.doesNotMatch(home, /carryTask\(|\/ask`/);
   assert.doesNotMatch(home, /URLSearchParams|[?&]task=/);
-  assert.match(taskContext, /setPendingTask\(\{ projectId, literalTask, caseId \}\)/);
-  assert.doesNotMatch(taskContext, /localStorage|sessionStorage/);
-  assert.match(steward, /pendingTask\?\.projectId === projectId \? pendingTask\.literalTask : ""/);
-  assert.match(steward, /clearTask\(projectId\)/);
-  assert.match(steward, /body: JSON\.stringify\(\{/);
-  assert.match(steward, /task,/);
+  assert.match(transfer, /reconstruction\/run/);
+  assert.match(transfer, /const task = continuationTask\.trim\(\)/);
+  assert.match(transfer, /\.\.\.\(current\.caseId \? \{ caseId: current\.caseId \} : \{\}\)/);
+  assert.match(transfer, /body: JSON\.stringify\(\{/);
+  assert.match(transfer, /task,/);
+  assert.match(transfer, /room-transfer-packet:/);
+  assert.doesNotMatch(transfer, /localStorage|sessionStorage|[?&]task=/);
 });
 
 test("UI Simplification Slice 1 keeps Home action-led while advanced truth remains discoverable", async () => {
@@ -2985,11 +2993,11 @@ test("UI Simplification Slice 1 keeps Home action-led while advanced truth remai
     readFile(new URL("../app/projects/[projectId]/inspect/inspect-workspace.tsx", import.meta.url), "utf8"),
   ]);
 
-  const hierarchy = ["Start here", "Transfer an existing room", "Current work", "Continue with Atlas", "Advanced / Internal records"];
+  const hierarchy = ["Start here", "Transfer an existing room", "Current work", "Advanced / Internal records"];
   for (let index = 1; index < hierarchy.length; index += 1) {
     assert.ok(home.indexOf(hierarchy[index - 1]) < home.indexOf(hierarchy[index]), hierarchy.join(" → "));
   }
-  for (const action of ["Prepare packet", "Prepare transfer packet", "Transfer a room"]) {
+  for (const action of ["Continue transfer", "Transfer a room"]) {
     assert.match(home, new RegExp(action));
   }
   assert.match(home, /Needs review · \{overview\.project\.pendingFindingCount\}/);
@@ -3001,6 +3009,8 @@ test("UI Simplification Slice 1 keeps Home action-led while advanced truth remai
     assert.match(transfer, new RegExp(label));
   }
   assert.match(transfer, /reviewItems\.length \? \[\{/);
+  assert.match(transfer, /What should the fresh room continue\?/);
+  assert.match(transfer, /Prepare transfer/);
   assert.doesNotMatch(transfer, /Exact evidence prepared|Project state analyzed|Compared with existing state/);
   assert.match(stewardHistory, /Packets, handoffs, answers, and receipts/);
   assert.match(inspect, /What Atlas preserved/);
@@ -3029,7 +3039,8 @@ test("V1.8 default surface is room-transfer-only while internal ontology remains
   assert.match(shell, /label: "Inspect"/);
 
   assert.ok(home.indexOf("Transfer an existing room") < home.indexOf("Current work"));
-  assert.match(home, /href=\{`\/projects\/\$\{encodeURIComponent\(projectId\)\}\/ask`\}/);
+  assert.doesNotMatch(home, /href=\{`\/projects\/\$\{encodeURIComponent\(projectId\)\}\/ask`\}/);
+  assert.match(home, /onClick=\{\(\) => setMode\("transfer"\)\}/);
   assert.match(home, /<summary>Advanced \/ Internal records<\/summary>/);
   assert.match(conversation, /<summary>Advanced \/ Internal controls<\/summary>/);
   assert.match(conversation, /<summary>Advanced \/ Native conversation controls<\/summary>/);
@@ -3059,7 +3070,8 @@ test("UI Simplification Slice 2 makes Steward outcome-first while preserving tec
     readFile(new URL("../app/projects/[projectId]/ask/ask.module.css", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /<h1>Prepare the fresh-room packet<\/h1>/);
+  assert.match(page, /<h1>Prepare a transfer directly<\/h1>/);
+  assert.match(page, /Steward is the transfer intelligence Atlas uses after reconstructing a room/);
   assert.doesNotMatch(page, /Project context steward|Active project/);
   assert.match(workspace, /Fresh-room continuation/);
   assert.match(workspace, /What should the fresh room continue\?/);
@@ -3068,7 +3080,7 @@ test("UI Simplification Slice 2 makes Steward outcome-first while preserving tec
   assert.doesNotMatch(workspace, /Enable canonical writes in the application shell/);
 
   assert.doesNotMatch(workspace, /You’re ready to continue|No Atlas context was added|light_continuity_only|atlas_not_needed/);
-  assert.match(packet, /Ready to copy/);
+  assert.match(packet, /Ready for a fresh room/);
   assert.match(packet, /Atlas prepared the smallest safe project context this continuation needs/);
 
   assert.ok(packet.indexOf("context.packet.compiledContent") < packet.indexOf("{actions}"));
@@ -5073,7 +5085,7 @@ test("Slice 4 canonical reconstruction remains available beneath the focused Ste
   );
   assert.equal(response.status, 200);
   const html = await response.text();
-  for (const text of ["Prepare the fresh-room packet", "Steward"]) {
+  for (const text of ["Prepare a transfer directly", "Steward"]) {
     assert.match(html, new RegExp(text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   const [interfaceSource, aidSource, packetSource, handoffSource] = await Promise.all([
@@ -5087,7 +5099,7 @@ test("Slice 4 canonical reconstruction remains available beneath the focused Ste
     "Advanced controls",
     "What should the fresh room continue?",
     "Copy for fresh room",
-    "Ready to copy",
+    "Ready for a fresh room",
     "Atlas couldn’t prepare this safely",
     "400",
     "800",
@@ -5740,7 +5752,7 @@ test("Slice 5 immutable handoff remains auditable through the final separated As
   ]) {
     assert.match(handoffSource, new RegExp(text));
   }
-  assert.match(pageSource, /Prepare the fresh-room packet/);
+  assert.match(pageSource, /Prepare a transfer directly/);
   assert.match(interfaceSource, /model\.production === true/);
   assert.match(historySource, /never recompiles a packet or retries a handoff/i);
   assert.match(adapter, /not a new user instruction/i);
@@ -6174,7 +6186,7 @@ test("Atlas Steward is focused, project-resetting, mobile-capable, and free of p
     readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8"),
   ]);
   const combined = [workspace, aid, packet, handoff, history, page].join("\n");
-  for (const state of ["Preparing context", "Atlas needs one decision", "What should the fresh room continue?", "Ready to copy", "Atlas couldn’t prepare this safely"]) {
+  for (const state of ["Preparing context", "Atlas needs one decision", "What should the fresh room continue?", "Ready for a fresh room", "Atlas couldn’t prepare this safely"]) {
     assert.match(combined, new RegExp(state));
   }
   for (const surface of ["Transfer packet", "Copy for fresh room", "Transfer packet copied"]) {
@@ -7975,15 +7987,28 @@ test("V1.8 Medium and long-room Full are selected by semantic dependency depth r
 });
 
 test("V1.8 product copy presents room transfer and immutable Light/Medium/Full packets without a fake connector", async () => {
+  const home = await readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8");
   const transfer = await readFile(new URL("../app/projects/[projectId]/work/transfer-room.tsx", import.meta.url), "utf8");
   const steward = await readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8");
   const handoff = await readFile(new URL("../app/projects/[projectId]/ask/handoff-presentation.tsx", import.meta.url), "utf8");
+  const packet = await readFile(new URL("../app/projects/[projectId]/ask/packet-preview.tsx", import.meta.url), "utf8");
+  const inspect = await readFile(new URL("../app/projects/[projectId]/inspect/inspect-workspace.tsx", import.meta.url), "utf8");
   const intake = await readFile(new URL("../worker/canonical-conversation-intake.ts", import.meta.url), "utf8");
   assert.match(transfer, /What room do you want to continue\?/);
   assert.match(transfer, />Paste conversation</);
+  assert.match(transfer, /What should the fresh room continue\?/);
+  assert.match(transfer, /reconstruction\/run/);
+  assert.match(transfer, /Light, Medium, or Full/);
+  assert.match(transfer, /<PacketPreview/);
+  assert.match(transfer, /<HandoffPresentation/);
+  assert.match(transfer, /current\.caseId/);
+  assert.doesNotMatch(home, /stewardEntry|Prepare transfer packet|carryTask\(/);
   assert.match(steward, /What should the fresh room continue\?/);
   assert.match(handoff, /Copy for fresh room/);
   assert.match(handoff, /exact immutable packet returned by Atlas/);
+  assert.match(packet, /\{deliveryLevel\} transfer/);
+  assert.match(packet, /Ready for a fresh room/);
+  assert.match(inspect, /Prepare one in Transfer/);
   assert.match(intake, /manual_paste/);
   assert.match(intake, /future_export/);
   assert.match(intake, /future_api/);

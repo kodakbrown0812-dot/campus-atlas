@@ -41,13 +41,16 @@ export default function PacketPreview({
   const includedItems = context.receipt.treatmentSummary.Use.filter((item) => item.sourceType !== "RoadwayCheck").length;
   const comparisonUrl = `${context.links.packet}/comparison`;
   const run = context.raw as Partial<ReconstructionRunResult>;
+  const deliveryLevel = run.need?.level
+    ? `${run.need.level[0].toUpperCase()}${run.need.level.slice(1)}`
+    : "Prepared";
 
   return (
     <section className={styles.readyPanel} aria-labelledby="prepared-context-title">
       <header className={styles.readyHeader}>
         <div>
-          <span>Fresh-room packet</span>
-          <h2 id="prepared-context-title">Ready to copy</h2>
+          <span>{deliveryLevel} transfer</span>
+          <h2 id="prepared-context-title">Ready for a fresh room</h2>
           <p>Atlas prepared the smallest safe project context this continuation needs.</p>
         </div>
       </header>
@@ -70,7 +73,7 @@ export default function PacketPreview({
       <details className={styles.technicalDetails}>
         <summary>Advanced details</summary>
         <dl className={styles.resultMetadata}>
-          <div><dt>Delivery level</dt><dd>{run.need?.level ? `${run.need.level[0].toUpperCase()}${run.need.level.slice(1)}` : "Available in Inspect"}</dd></div>
+          <div><dt>Delivery level</dt><dd>{deliveryLevel}</dd></div>
           <div><dt>Reason codes</dt><dd>{run.need?.reasonCodes?.join(", ") || "Available in Inspect"}</dd></div>
           <div><dt>Roadway</dt><dd>{run.roadway?.primary?.name || run.roadway?.name || "Available in Inspect"}</dd></div>
           <div><dt>Included items</dt><dd>{includedItems}</dd></div>

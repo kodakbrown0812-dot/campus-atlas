@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useStewardTask } from "../../../components/steward-task";
 import styles from "./inspect.module.css";
 
 type CaseRecord = Record<string, unknown> & {
@@ -170,7 +169,6 @@ function detailHref(projectId: string, type: string, id: string) {
 }
 
 export default function InspectWorkspace({ projectId }: { projectId: string }) {
-  const { recentDelivery } = useStewardTask();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [mechanismDetails, setMechanismDetails] = useState<Record<string, MechanismDetail>>({});
   const [latestPacket, setLatestPacket] = useState<PacketDetail | null>(null);
@@ -258,7 +256,6 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
     const state = `${record.status || ""} ${record.authority || ""}`.toLowerCase();
     return Boolean(record.uncertainty) || /proposed|challenged|pending|conflict/.test(state);
   });
-  const projectDelivery = recentDelivery?.projectId === projectId ? recentDelivery : null;
   const lineageDetail = governing.map((record) => mechanismDetails[record.id]).find(Boolean) || null;
   const lineageRecord = lineageDetail
     ? governing.find((record) => record.id === lineageDetail.mechanism.id) || null
@@ -316,7 +313,7 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
 
           <section className={styles.section}>
             <SectionHeading eyebrow="Fresh-room context" title="Recent transfer packet" />
-            <DeliverySummary delivery={projectDelivery} latestPacket={latestPacket} projectId={projectId} />
+            <DeliverySummary latestPacket={latestPacket} projectId={projectId} />
           </section>
 
           <section className={styles.section}>
@@ -362,7 +359,6 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
       {view === "Packets" ? (
         <section className={styles.section}>
           <SectionHeading eyebrow="Fresh-room context" title="Prepared transfer packets" />
-          {projectDelivery ? <DeliverySummary delivery={projectDelivery} latestPacket={latestPacket} projectId={projectId} /> : null}
           <div className={styles.deliveryList}>
             {overview.packets.map((packet) => (
               <Link className={styles.deliveryRow} href={detailHref(projectId, "packets", packet.id)} key={packet.id}>
@@ -372,7 +368,7 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
               </Link>
             ))}
           </div>
-          {!overview.packets.length && !projectDelivery ? <Empty text="No transfer packets have been prepared yet." detail="Prepare one in Steward when a fresh room needs project context." /> : null}
+          {!overview.packets.length ? <Empty text="No transfer packets have been prepared yet." detail="Prepare one in Transfer when a fresh room needs project context." /> : null}
         </section>
       ) : null}
 
@@ -468,13 +464,12 @@ function CollaborationSignals({
   );
 }
 
-function DeliverySummary({ delivery, latestPacket, projectId }: { delivery: ReturnType<typeof useStewardTask>["recentDelivery"]; latestPacket: PacketDetail | null; projectId: string }) {
-  void delivery;
+function DeliverySummary({ latestPacket, projectId }: { latestPacket: PacketDetail | null; projectId: string }) {
   if (latestPacket) {
     const governingUsed = latestPacket.items.filter((item) => item.treatment === "Use" && item.sourceType === "Mechanism");
     return <article className={styles.deliveryCard}><span>Saved transfer packet</span><h3>{latestPacket.packet.task}</h3><p>Atlas supplied {governingUsed.length} preserved project {governingUsed.length === 1 ? "item" : "items"} for this task.</p><Link href={detailHref(projectId, "packets", latestPacket.packet.id)}>Inspect this packet</Link><small>This is a task-specific selection, not a replacement for the full project record.{latestPacket.packet.finalTokenCount ? ` Estimated size: ${latestPacket.packet.finalTokenCount} tokens.` : ""}</small></article>;
   }
-  return <Empty text="No transfer packet is available to inspect." detail="Prepare one in Steward when a fresh room needs project context." />;
+  return <Empty text="No transfer packet is available to inspect." detail="Prepare one in Transfer when a fresh room needs project context." />;
 }
 
 function LineageSummary({ detail, projectId, record }: { detail: MechanismDetail | null; projectId: string; record: MechanismRecord | null }) {

@@ -61,13 +61,12 @@ function HistoryCard({
 export default function WorkWorkspace({ projectId }: { projectId: string }) {
   const router = useRouter();
   const { session, authorizationHeaders } = useWriteSession();
-  const { carryTask, clearTask } = useStewardTask();
+  const { clearTask } = useStewardTask();
   const [overview, setOverview] = useState<WorkOverview | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "unavailable">("loading");
   const [mode, setMode] = useState<"none" | "native" | "transfer">("none");
   const [error, setError] = useState("");
   const [lifecycleMessage, setLifecycleMessage] = useState("");
-  const [stewardTask, setStewardTask] = useState("");
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/work`, {
@@ -148,13 +147,6 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
     }
   }
 
-  function openSteward(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!stewardTask.trim()) return;
-    carryTask(projectId, stewardTask);
-    router.push(`/projects/${encodeURIComponent(projectId)}/ask`);
-  }
-
   async function createNative(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -224,7 +216,7 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         <div>
           <span className={styles.eyebrow}>Current project</span>
           <h1>{overview.project.name}</h1>
-          <p>Transfer an existing AI room, prepare its smallest safe packet, and continue in a fresh room.</p>
+          <p>Connect an existing room. Atlas will reconstruct where the work actually is and prepare it to continue.</p>
         </div>
       </header>
 
@@ -247,6 +239,7 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
         <TransferRoom
           conversations={overview.conversations}
           onCanonicalChange={() => load().then(setOverview).catch(() => undefined)}
+          preferredConversationId={overview.activeConversationId}
           projectId={projectId}
         />
       )}
@@ -281,37 +274,21 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
             <span>Next</span>
             <p>{activeConversation.nextAction}</p>
           </div>
-          <Link
+          <button
             className={styles.continueButton}
-            href={`/projects/${encodeURIComponent(projectId)}/ask`}
-            onClick={() => carryTask(projectId, `Continue ${activeConversation.title} from its accepted state in a fresh room.`)}
+            onClick={() => setMode("transfer")}
+            type="button"
           >
-            Prepare packet
-          </Link>
+            Continue transfer
+          </button>
         </section>
       ) : (
         <section className={styles.emptyState}>
           <span>Current work</span>
           <h2>No active work yet.</h2>
-          <p>Transfer an existing room or tell Steward what the fresh room needs.</p>
+          <p>Transfer an existing room to reconstruct its current state and continue it safely.</p>
         </section>
       )}
-
-      <form className={styles.stewardEntry} onSubmit={openSteward}>
-        <div>
-          <span className={styles.eyebrow}>Continue with Atlas</span>
-          <h2>Prepare the context for a fresh room.</h2>
-          <p>Tell Atlas what the fresh room needs to continue. Atlas will prepare only the project context that matters.</p>
-        </div>
-        <label htmlFor="home-steward-task">What are you trying to continue?</label>
-        <textarea
-          id="home-steward-task"
-          onChange={(event) => setStewardTask(event.target.value)}
-          placeholder="Describe the decision, task, or missing project context."
-          value={stewardTask}
-        />
-        <button disabled={!stewardTask.trim()} type="submit">Prepare transfer packet</button>
-      </form>
 
       {lifecycleMessage && <p className={styles.lifecycleMessage} role="status">{lifecycleMessage}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}

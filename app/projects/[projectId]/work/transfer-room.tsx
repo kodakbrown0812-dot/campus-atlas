@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStewardTask } from "../../../components/steward-task";
 import { useWriteSession } from "../../../components/write-session";
+import HandoffPresentation from "../ask/handoff-presentation";
+import PacketPreview from "../ask/packet-preview";
+import type { PreparedContext, ReconstructionRunResult } from "../ask/ask-types";
 import styles from "./work.module.css";
 
 type ConversationChoice = {
@@ -65,19 +68,36 @@ export default function TransferRoom({
   projectId,
   conversations,
   onCanonicalChange,
+  preferredConversationId,
 }: {
   projectId: string;
   conversations: ConversationChoice[];
   onCanonicalChange: () => void;
+  preferredConversationId?: string | null;
 }) {
   const { session, authorizationHeaders } = useWriteSession();
-  const { carryTask } = useStewardTask();
+  const { rememberDelivery } = useStewardTask();
   const [transfers, setTransfers] = useState<Transfer[]>([]);
   const [current, setCurrent] = useState<Transfer | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const [error, setError] = useState("");
   const [reviewed, setReviewed] = useState<Record<string, string>>({});
+  const [continuationTask, setContinuationTask] = useState("");
+  const [packetStatus, setPacketStatus] = useState<"idle" | "preparing" | "needs_input" | "ready" | "failure">("idle");
+  const [packetRun, setPacketRun] = useState<ReconstructionRunResult | null>(null);
+  const [prepared, setPrepared] = useState<PreparedContext | null>(null);
+  const [packetError, setPacketError] = useState("");
+  const packetAttempt = useRef<{ signature: string; key: string } | null>(null);
   const canWrite = Boolean(session?.writeAuthorization.authorized);
+
+  function resetPreparedPacket() {
+    setContinuationTask("");
+    setPacketStatus("idle");
+    setPacketRun(null);
+    setPrepared(null);
+    setPacketError("");
+    packetAttempt.current = null;
+  }
 
   const load = useCallback(async () => {
     const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/transfers`, { cache: "no-store" });
@@ -87,8 +107,11 @@ export default function TransferRoom({
     };
     if (!response.ok || !value.transfers) throw new Error(value.error || "Transfers unavailable.");
     setTransfers(value.transfers);
-    setCurrent((prior) => value.transfers?.find((item) => item.id === prior?.id) || value.transfers?.[0] || null);
-  }, [projectId]);
+    setCurrent((prior) => value.transfers?.find((item) => item.id === prior?.id)
+      || value.transfers?.find((item) => item.conversationId === preferredConversationId)
+      || value.transfers?.[0]
+      || null);
+  }, [preferredConversationId, projectId]);
 
   useEffect(() => {
     let active = true;
@@ -104,7 +127,7 @@ export default function TransferRoom({
       .then((value) => {
         if (!active) return;
         setTransfers(value);
-        setCurrent(value[0] || null);
+        setCurrent(value.find((item) => item.conversationId === preferredConversationId) || value[0] || null);
         setStatus("ready");
       })
       .catch((caught) => {
@@ -113,7 +136,7 @@ export default function TransferRoom({
         setStatus("error");
       });
     return () => { active = false; };
-  }, [projectId]);
+  }, [preferredConversationId, projectId]);
 
   async function transfer(body: Record<string, unknown>) {
     setStatus("saving");
@@ -135,6 +158,7 @@ export default function TransferRoom({
       setStatus("ready");
       return false;
     }
+    resetPreparedPacket();
     setCurrent(value);
     await load();
     onCanonicalChange();
@@ -174,6 +198,7 @@ export default function TransferRoom({
       setStatus("ready");
       return;
     }
+    resetPreparedPacket();
     setCurrent(value);
     await load();
     onCanonicalChange();
@@ -216,6 +241,74 @@ export default function TransferRoom({
       return;
     }
     await resume(current.id);
+  }
+
+  async function preparePacket(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!current || !continuationTask.trim() || !canWrite) return;
+    const task = continuationTask.trim();
+    const signature = JSON.stringify([current.id, current.caseId, task]);
+    if (packetAttempt.current?.signature !== signature) {
+      packetAttempt.current = {
+        signature,
+        key: `room-transfer-packet:${crypto.randomUUID()}`,
+      };
+    }
+    setPacketStatus("preparing");
+    setPacketRun(null);
+    setPrepared(null);
+    setPacketError("");
+    try {
+      const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/reconstruction/run`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": packetAttempt.current.key,
+          ...authorizationHeaders(),
+        },
+        body: JSON.stringify({
+          task,
+          ...(current.caseId ? { caseId: current.caseId } : {}),
+          tokenBudget: 800,
+        }),
+      });
+      const value = await response.json().catch(() => ({ error: "Transfer packet preparation failed." })) as (
+        Partial<ReconstructionRunResult> & { error?: string }
+      );
+      if (value.status === "compiled" && value.packet && value.receipt && value.links && value.literalTask) {
+        const complete = value as ReconstructionRunResult;
+        const context: PreparedContext = {
+          projectId,
+          literalTask: complete.literalTask,
+          packet: complete.packet!,
+          receipt: complete.receipt!,
+          links: complete.links!,
+          raw: complete,
+        };
+        setPacketRun(complete);
+        setPrepared(context);
+        setPacketStatus("ready");
+        rememberDelivery(projectId, complete);
+        return;
+      }
+      const stopped = value.status ? value as ReconstructionRunResult : null;
+      setPacketRun(stopped);
+      setPacketStatus(value.status === "clarification_required" ? "needs_input" : "failure");
+      setPacketError(value.error || value.need?.explanation || "Atlas could not prepare a truthful transfer packet.");
+    } catch (caught) {
+      setPacketStatus("failure");
+      setPacketError(caught instanceof Error ? caught.message : "Atlas could not prepare a truthful transfer packet.");
+    }
+  }
+
+  function changeContinuationTask(value: string) {
+    setContinuationTask(value);
+    if (packetStatus !== "idle") {
+      setPacketStatus("idle");
+      setPacketRun(null);
+      setPrepared(null);
+      setPacketError("");
+    }
   }
 
   const imported = useMemo(
@@ -353,6 +446,10 @@ export default function TransferRoom({
               </header>
               <dl className={styles.roomStateSummary}>
                 <div>
+                  <dt>Preserved current state</dt>
+                  <dd>{current.reconstructedState.governedStatementCount} governing statement{current.reconstructedState.governedStatementCount === 1 ? "" : "s"}</dd>
+                </div>
+                <div>
                   <dt>Current direction</dt>
                   <dd>{current.reconstructedState.currentDirection || "No accepted direction was established."}</dd>
                 </div>
@@ -367,15 +464,56 @@ export default function TransferRoom({
                   <div><dt>Changed or replaced</dt><dd>{current.reconstructedState.changedOrReplaced.join(" ")}</dd></div>
                 ) : null}
               </dl>
-              <div className={styles.transferReady}>
-                <Link
-                  href={`/projects/${encodeURIComponent(projectId)}/ask`}
-                  onClick={() => carryTask(projectId, "", current.caseId)}
-                >
-                  Prepare transfer
-                </Link>
-                <Link href={`/projects/${encodeURIComponent(projectId)}/inspect/transfers/${encodeURIComponent(current.id)}`}>Inspect what Atlas preserved</Link>
-              </div>
+              {!prepared ? (
+                <form className={styles.transferTask} onSubmit={(event) => void preparePacket(event)}>
+                  <div>
+                    <span className={styles.eyebrow}>Steer the transfer</span>
+                    <h3>What should the fresh room continue?</h3>
+                    <p>Atlas will select the minimum safe part of the reconstructed state and determine whether this transfer is Light, Medium, or Full.</p>
+                  </div>
+                  <label htmlFor={`transfer-task-${current.id}`}>Continuation task</label>
+                  <textarea
+                    id={`transfer-task-${current.id}`}
+                    onChange={(event) => changeContinuationTask(event.target.value)}
+                    placeholder="Describe the work, decision, or next step the fresh room should continue."
+                    value={continuationTask}
+                  />
+                  <button disabled={!canWrite || !continuationTask.trim() || packetStatus === "preparing"} type="submit">
+                    {packetStatus === "preparing" ? "Preparing transfer…" : "Prepare transfer"}
+                  </button>
+                  {packetStatus === "needs_input" ? (
+                    <div className={styles.transferGuidance} role="alert">
+                      <strong>Atlas needs a clearer continuation direction.</strong>
+                      <p>{packetRun?.need.explanation || packetError}</p>
+                      <span>Revise the task above. Atlas did not create a packet or invent missing continuity.</span>
+                    </div>
+                  ) : null}
+                  {packetStatus === "failure" ? (
+                    <div className={styles.transferGuidance} role="alert">
+                      <strong>Atlas stopped before creating the packet.</strong>
+                      <p>{packetError}</p>
+                      <span>The reconstructed room and completed transfer stages remain preserved.</span>
+                    </div>
+                  ) : null}
+                </form>
+              ) : null}
+              {prepared ? (
+                <div className={styles.embeddedPacket}>
+                  <PacketPreview
+                    actions={<HandoffPresentation context={prepared} />}
+                    advancedActions={null}
+                    context={prepared}
+                  />
+                  <div className={styles.transferReady}>
+                    <button onClick={() => changeContinuationTask(continuationTask)} type="button">Prepare a different transfer</button>
+                    <Link href={prepared.links.inspect}>Inspect transfer</Link>
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.transferReady}>
+                  <Link href={`/projects/${encodeURIComponent(projectId)}/inspect/transfers/${encodeURIComponent(current.id)}`}>Inspect what Atlas preserved</Link>
+                </div>
+              )}
             </div>
           )}
           {["blocked", "failed"].includes(current.stage) && (

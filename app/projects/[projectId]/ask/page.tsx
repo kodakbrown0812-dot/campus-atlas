@@ -17,8 +17,8 @@ export default async function AskPage({
         <header className={styles.header}>
           <div>
             <span>Steward</span>
-            <h1>Prepare the fresh-room packet</h1>
-            <p>Describe what the fresh room must continue. Atlas will carry forward only the project context needed to do it correctly.</p>
+            <h1>Prepare a transfer directly</h1>
+            <p>Steward is the transfer intelligence Atlas uses after reconstructing a room. For the complete experience, start with Transfer on Home.</p>
           </div>
         </header>
         <ReconstructionWorkspace key={projectId} projectId={projectId} />
