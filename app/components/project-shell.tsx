@@ -92,7 +92,7 @@ function ProjectShellInner({
   const [projectActionMessage, setProjectActionMessage] = useState("");
   const [projectActionError, setProjectActionError] = useState("");
   const [renameValue, setRenameValue] = useState("");
-  const [archiveConfirmation, setArchiveConfirmation] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState(false);
   const activeDestination = destinationForPath(pathname);
 
   const loadProjects = useCallback(async () => {
@@ -154,7 +154,7 @@ function ProjectShellInner({
     setRenameValue(currentProject?.name || "");
     setProjectActionError("");
     setProjectActionMessage("");
-    setArchiveConfirmation(false);
+    setDeleteConfirmation(false);
     setProjectActionsOpen(true);
     setMobileAuthorizationOpen(false);
   }
@@ -194,7 +194,7 @@ function ProjectShellInner({
       } else {
         setProjectActionMessage("Project name updated. Its history and identity are unchanged.");
       }
-      setArchiveConfirmation(false);
+      setDeleteConfirmation(false);
     } catch (caught) {
       setProjectActionError(caught instanceof Error ? caught.message : "Project update failed.");
     } finally {
@@ -206,6 +206,47 @@ function ProjectShellInner({
     event.preventDefault();
     if (!renameValue.trim() || !currentProject) return;
     void patchProject(currentProject.id, { name: renameValue.trim() });
+  }
+
+  async function deleteProject() {
+    if (!currentProject || !deleteConfirmation) return;
+    setProjectActionStatus("saving");
+    setProjectActionError("");
+    setProjectActionMessage("");
+    try {
+      const response = await fetch(`/api/v1/projects/${encodeURIComponent(currentProject.id)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json", ...authorizationHeaders() },
+        body: JSON.stringify({
+          confirmation: {
+            projectId: currentProject.id,
+            projectName: currentProject.name,
+            permanentlyDelete: true,
+          },
+        }),
+      });
+      const value = await response.json().catch(() => ({ error: "Project deletion failed." })) as {
+        deleted?: boolean;
+        error?: string;
+      };
+      if (!response.ok || !value.deleted) {
+        throw new Error(response.status === 401
+          ? "Sign in as the owner to delete this project."
+          : value.error || "Project deletion failed.");
+      }
+      clearTask(currentProject.id);
+      const refreshed = await loadProjects();
+      setProjects(refreshed.active);
+      setAllProjects(refreshed.all);
+      setProjectActionsOpen(false);
+      window.dispatchEvent(new Event("atlas:project-lifecycle"));
+      const next = refreshed.active[0];
+      router.push(next ? destinationHref(next.id, activeDestination) : "/");
+    } catch (caught) {
+      setProjectActionError(caught instanceof Error ? caught.message : "Project deletion failed.");
+    } finally {
+      setProjectActionStatus("idle");
+    }
   }
 
   return (
@@ -378,26 +419,46 @@ function ProjectShellInner({
                     </button>
                   </div>
                 </form>
-                <div className={styles.projectActionBlock}>
-                  <strong>Remove from active projects</strong>
-                  <p>Archive this project without deleting its rooms, packets, or history.</p>
-                  {archiveConfirmation ? (
-                    <div className={styles.confirmActions}>
-                      <button
-                        disabled={!canWrite || projectActionStatus === "saving"}
-                        onClick={() => currentProject && void patchProject(currentProject.id, { status: "archived" })}
-                        type="button"
-                      >
-                        Confirm archive
-                      </button>
-                      <button onClick={() => setArchiveConfirmation(false)} type="button">Cancel</button>
-                    </div>
-                  ) : (
-                    <button disabled={!canWrite} onClick={() => setArchiveConfirmation(true)} type="button">Archive project</button>
-                  )}
-                </div>
               </>
             )}
+
+            {currentProject ? (
+              <div className={`${styles.projectActionBlock} ${styles.deleteProjectBlock}`}>
+                <strong>Delete project</strong>
+                <p>Permanently remove this project, its rooms, transfer packets, and Atlas history.</p>
+                {deleteConfirmation ? (
+                  <div className={styles.deleteConfirmation}>
+                    <p><strong>Delete {currentProject.name}?</strong> This cannot be undone.</p>
+                    <div className={styles.confirmActions}>
+                      <button
+                        className={styles.dangerButton}
+                        disabled={!canWrite || projectActionStatus === "saving"}
+                        onClick={() => void deleteProject()}
+                        type="button"
+                      >
+                        {projectActionStatus === "saving" ? "Deleting…" : "Yes, delete project"}
+                      </button>
+                      <button
+                        disabled={projectActionStatus === "saving"}
+                        onClick={() => setDeleteConfirmation(false)}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    className={styles.dangerTextButton}
+                    disabled={!canWrite}
+                    onClick={() => setDeleteConfirmation(true)}
+                    type="button"
+                  >
+                    Delete project
+                  </button>
+                )}
+              </div>
+            ) : null}
 
             <details className={styles.archivedProjects}>
               <summary>Archived projects · {archivedProjects.length}</summary>

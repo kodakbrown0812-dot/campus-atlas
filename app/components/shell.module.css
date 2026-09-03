@@ -220,6 +220,33 @@
   gap: 8px;
 }
 
+.deleteProjectBlock {
+  border-color: rgba(245, 138, 168, .22);
+}
+
+.deleteConfirmation {
+  padding: 11px;
+  border: 1px solid rgba(245, 138, 168, .24);
+  border-radius: 9px;
+  background: rgba(245, 138, 168, .06);
+}
+
+.deleteConfirmation > p {
+  color: #d8b4c0;
+}
+
+.projectActionBlock .dangerTextButton {
+  border-color: rgba(245, 138, 168, .32);
+  color: #f1a8bb;
+  background: transparent;
+}
+
+.projectActionBlock .dangerButton {
+  border-color: rgba(245, 138, 168, .52);
+  color: #fff0f4;
+  background: rgba(202, 64, 101, .32);
+}
+
 .archivedProjects > summary {
   color: #9badc5;
   font-size: 11px;

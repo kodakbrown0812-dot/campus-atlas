@@ -49,37 +49,37 @@ async function listProjects(db: D1Database, includeArchived = false) {
   return rows.map(projectView);
 }
 
-const projectHistoryTables = [
-  "conversations",
+const projectDeletionOrder = [
+  "handoff_receipts",
+  "handoff_answers",
+  "handoff_lifecycle_events",
+  "handoffs",
+  "receipts",
+  "packet_items",
+  "packets",
+  "roadway_versions",
+  "roadways",
+  "governance_events",
+  "mechanism_versions",
+  "mechanisms",
+  "finding_versions",
+  "findings",
+  "transfer_run_events",
+  "transfer_runs",
+  "checkpoint_reasoning_nodes",
+  "reasoning_node_versions",
+  "reasoning_nodes",
+  "checkpoints",
+  "case_boundary_operations",
+  "case_boundary_proposals",
+  "case_event_attachments",
+  "conversation_case_links",
+  "events",
   "conversation_imports",
   "messages",
-  "cases",
-  "events",
-  "conversation_case_links",
-  "case_event_attachments",
-  "case_boundary_proposals",
-  "case_boundary_operations",
-  "checkpoints",
-  "reasoning_nodes",
-  "reasoning_node_versions",
-  "checkpoint_reasoning_nodes",
-  "transfer_runs",
-  "transfer_run_events",
-  "findings",
-  "finding_versions",
-  "mechanisms",
-  "mechanism_versions",
-  "governance_events",
-  "roadways",
-  "roadway_versions",
-  "packets",
-  "packet_items",
-  "receipts",
   "live_state_snapshots",
-  "handoffs",
-  "handoff_lifecycle_events",
-  "handoff_answers",
-  "handoff_receipts",
+  "conversations",
+  "cases",
 ] as const;
 
 const conversationHistoryTables = [
@@ -111,6 +111,69 @@ async function requireProject(db: D1Database, projectId: string) {
   ).bind(projectId));
   if (!row) throw new Error("Project not found.");
   return row;
+}
+
+async function createProject(db: D1Database, request: Request, body: Row) {
+  const name = String(body.name || "").trim();
+  if (!name || name.length > 120) throw new Error("Project name must be between 1 and 120 characters.");
+  const projectId = `project-${crypto.randomUUID()}`;
+  const ownerActorId = request.headers.get("oai-authenticated-user-id")
+    || request.headers.get("oai-authenticated-user-email")
+    || "owner";
+  await db.prepare(
+    `INSERT INTO projects (
+      id, workspace_id, name, description, owner_actor_id, visibility, status, schema_version, metadata
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(
+    projectId,
+    "primary-campus",
+    name,
+    null,
+    ownerActorId,
+    "private",
+    "active",
+    17,
+    "{}",
+  ).run();
+  return { project: projectView(await requireProject(db, projectId)) };
+}
+
+async function permanentlyDeleteProject(db: D1Database, projectId: string, body: Row) {
+  const project = await requireProject(db, projectId);
+  const confirmation = body.confirmation as Row | undefined;
+  if (
+    confirmation?.projectId !== projectId
+    || confirmation?.projectName !== project.name
+    || confirmation?.permanentlyDelete !== true
+  ) {
+    throw new Error("Exact project deletion confirmation is required.");
+  }
+  const counts = await Promise.all(projectDeletionOrder.map(async (table) => {
+    const row = await first<{ count: number } & Row>(
+      db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE project_id = ?`).bind(projectId),
+    );
+    return [table, Number(row?.count || 0)] as const;
+  }));
+  await db.batch([
+    db.prepare(
+      "INSERT INTO project_deletion_authorizations (project_id, project_name) VALUES (?, ?)",
+    ).bind(projectId, String(project.name)),
+    db.prepare(
+      "UPDATE projects SET status = 'deleting', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND name = ?",
+    ).bind(projectId, String(project.name)),
+    ...projectDeletionOrder.map((table) => (
+      db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).bind(projectId)
+    )),
+    db.prepare("DELETE FROM project_deletion_authorizations WHERE project_id = ?").bind(projectId),
+    db.prepare("DELETE FROM projects WHERE id = ?").bind(projectId),
+  ]);
+  return {
+    deleted: true,
+    projectId,
+    projectName: String(project.name),
+    deletedRecordCount: counts.reduce((total, [, count]) => total + count, 0) + 1,
+    deletedRecords: Object.fromEntries(counts),
+  };
 }
 
 async function updateProject(db: D1Database, projectId: string, body: Row) {
@@ -323,8 +386,15 @@ export async function handleShellService(
       });
     }
     if (url.pathname === "/api/v1/projects") {
+      if (request.method === "POST") {
+        authorizeWrite(request, options.actionKey);
+        return Response.json(await createProject(db, request, await request.json() as Row), {
+          status: 201,
+          headers: { "cache-control": "no-store" },
+        });
+      }
       if (request.method !== "GET") {
-        return Response.json({ error: "Method not allowed." }, { status: 405, headers: { Allow: "GET" } });
+        return Response.json({ error: "Method not allowed." }, { status: 405, headers: { Allow: "GET, POST" } });
       }
       const projects = await listProjects(db, url.searchParams.get("includeArchived") === "true");
       return Response.json({
@@ -345,15 +415,11 @@ export async function handleShellService(
     if (projectMatch && request.method === "DELETE") {
       authorizeWrite(request, options.actionKey);
       const projectId = decodeURIComponent(projectMatch[1]);
-      await requireProject(db, projectId);
-      if (await referenceCount(db, projectHistoryTables, "project_id", projectId)) {
-        return Response.json({
-          error: "This project is part of Atlas history and can be archived but not permanently removed.",
-          canArchive: true,
-        }, { status: 409, headers: { "cache-control": "no-store" } });
-      }
-      await db.prepare("DELETE FROM projects WHERE id = ?").bind(projectId).run();
-      return Response.json({ deleted: true, projectId }, {
+      return Response.json(await permanentlyDeleteProject(
+        db,
+        projectId,
+        await request.json() as Row,
+      ), {
         headers: { "cache-control": "no-store" },
       });
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 
 type RootState =
   | { status: "loading" }
@@ -12,6 +12,58 @@ type RootState =
 export default function CampusAtlasRoot() {
   const router = useRouter();
   const [state, setState] = useState<RootState>({ status: "loading" });
+  const [newProjectName, setNewProjectName] = useState("");
+  const [createStatus, setCreateStatus] = useState<"idle" | "saving">("idle");
+  const [createError, setCreateError] = useState("");
+
+  async function createProject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const name = newProjectName.trim();
+    if (!name || createStatus === "saving") return;
+    setCreateStatus("saving");
+    setCreateError("");
+    try {
+      const response = await fetch("/api/v1/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const value = await response.json().catch(() => ({ error: "Project creation failed." })) as {
+        project?: { id: string };
+        error?: string;
+      };
+      if (!response.ok || !value.project) {
+        throw new Error(response.status === 401
+          ? "Sign in as the owner to create a project."
+          : value.error || "Project creation failed.");
+      }
+      router.replace(`/projects/${encodeURIComponent(value.project.id)}/work`);
+    } catch (caught) {
+      setCreateError(caught instanceof Error ? caught.message : "Project creation failed.");
+      setCreateStatus("idle");
+    }
+  }
+
+  const createProjectForm = (
+    <form className="root-create-project" onSubmit={createProject}>
+      <label htmlFor="new-project-name">Project name</label>
+      <div>
+        <input
+          autoComplete="off"
+          disabled={createStatus === "saving"}
+          id="new-project-name"
+          maxLength={120}
+          onChange={(event) => setNewProjectName(event.target.value)}
+          placeholder="My project"
+          value={newProjectName}
+        />
+        <button disabled={!newProjectName.trim() || createStatus === "saving"} type="submit">
+          {createStatus === "saving" ? "Creating…" : "Create project"}
+        </button>
+      </div>
+      {createError ? <p className="root-create-error" role="alert">{createError}</p> : null}
+    </form>
+  );
 
   useEffect(() => {
     let active = true;
@@ -75,11 +127,9 @@ export default function CampusAtlasRoot() {
         )}
         {state.status === "empty" && (
           <>
-            <h1>Choose a project to begin</h1>
-            <p>No project exists in this workspace yet.</p>
-            <div className="root-notice">
-              Create the first project through workspace setup, then return here to transfer an existing room.
-            </div>
+            <h1>Start a clean project</h1>
+            <p>No project exists in this workspace yet. Name one, then transfer the room you actually want to continue.</p>
+            {createProjectForm}
           </>
         )}
         {state.status === "archived" && (
@@ -93,6 +143,7 @@ export default function CampusAtlasRoot() {
                 </a>
               ))}
             </div>
+            {createProjectForm}
           </>
         )}
         {state.status === "unavailable" && (

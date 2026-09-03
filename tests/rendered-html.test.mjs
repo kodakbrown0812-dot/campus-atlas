@@ -66,6 +66,7 @@ async function sqliteD1() {
     "0007_harsh_makkari.sql",
     "0008_complete_timeslip.sql",
     "0010_misty_wasp.sql",
+    "0011_wealthy_mad_thinker.sql",
   ]) {
     const migration = await readFile(new URL(`../drizzle/${name}`, import.meta.url), "utf8");
     for (const statement of migration.split("--> statement-breakpoint").map((value) => value.trim()).filter(Boolean)) {
@@ -629,7 +630,7 @@ test("Slice 6A shell reads canonical health, projects, session, and isolated act
   });
 });
 
-test("V1.8 lifecycle rename, archive, restore, and safe deletion preserve canonical history", async () => {
+test("V1.8 lifecycle rename and guarded project deletion stay project-scoped", async () => {
   const worker = await builtWorker("v18-lifecycle");
   const DB = await sqliteD1();
   await seedCanonicalProject(worker, DB, "sports", "Sports Engine");
@@ -798,12 +799,29 @@ test("V1.8 lifecycle rename, archive, restore, and safe deletion preserve canoni
   assert.equal(archivedHistory.response.status, 200);
   assert.equal(archivedHistory.value.conversations[0].id, conversationId);
 
-  const unsafeProjectDelete = await slice2Request(worker, DB, "/api/v1/projects/sports", {
+  const unconfirmedProjectDelete = await slice2Request(worker, DB, "/api/v1/projects/sports", {
     method: "DELETE",
     body: {},
   });
-  assert.equal(unsafeProjectDelete.response.status, 409);
-  assert.match(unsafeProjectDelete.value.error, /part of Atlas history.*archived/i);
+  assert.equal(unconfirmedProjectDelete.response.status, 400);
+  assert.match(unconfirmedProjectDelete.value.error, /exact project deletion confirmation/i);
+  assert.deepEqual(continuitySnapshot(), before);
+  await assert.rejects(
+    DB.prepare("DELETE FROM messages WHERE id = ?").bind(message.value.message.id).run(),
+    /Canonical messages are immutable/,
+  );
+
+  const staleNameConfirmation = await slice2Request(worker, DB, "/api/v1/projects/sports", {
+    method: "DELETE",
+    body: {
+      confirmation: {
+        projectId: "sports",
+        projectName: "Sports Engine",
+        permanentlyDelete: true,
+      },
+    },
+  });
+  assert.equal(staleNameConfirmation.response.status, 400);
   assert.deepEqual(continuitySnapshot(), before);
 
   const restoredProject = await slice2Request(worker, DB, "/api/v1/projects/sports", {
@@ -818,18 +836,51 @@ test("V1.8 lifecycle rename, archive, restore, and safe deletion preserve canoni
     1,
   );
 
-  await seedCanonicalProject(worker, DB, "disposable", "Disposable local project");
-  const disposableDelete = await slice2Request(worker, DB, "/api/v1/projects/disposable", {
+  await seedCanonicalProject(worker, DB, "keep", "Keep this project");
+  const deleted = await slice2Request(worker, DB, "/api/v1/projects/sports", {
     method: "DELETE",
-    body: {},
+    body: {
+      confirmation: {
+        projectId: "sports",
+        projectName: "Room Transfer Dogfood",
+        permanentlyDelete: true,
+      },
+    },
   });
-  assert.equal(disposableDelete.response.status, 200);
-  assert.equal(disposableDelete.value.deleted, true);
-  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM projects WHERE id = 'disposable'").get().count, 0);
+  assert.equal(deleted.response.status, 200, JSON.stringify(deleted.value));
+  assert.equal(deleted.value.deleted, true);
+  assert.equal(deleted.value.projectId, "sports");
+  assert.ok(deleted.value.deletedRecordCount >= 6);
+  for (const table of [
+    "conversations", "conversation_imports", "messages", "cases", "events",
+    "conversation_case_links", "case_event_attachments", "case_boundary_proposals",
+    "case_boundary_operations", "checkpoints", "reasoning_nodes", "reasoning_node_versions",
+    "checkpoint_reasoning_nodes", "transfer_runs", "transfer_run_events", "findings",
+    "finding_versions", "mechanisms", "mechanism_versions", "governance_events", "roadways",
+    "roadway_versions", "packets", "packet_items", "receipts", "live_state_snapshots",
+    "handoffs", "handoff_lifecycle_events", "handoff_answers", "handoff_receipts",
+  ]) {
+    assert.equal(
+      DB.database.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE project_id = 'sports'`).get().count,
+      0,
+      `${table} should contain no deleted-project records`,
+    );
+  }
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM projects WHERE id = 'sports'").get().count, 0);
+  assert.equal(DB.database.prepare("SELECT COUNT(*) AS count FROM projects WHERE id = 'keep'").get().count, 1);
+
+  const created = await slice2Request(worker, DB, "/api/v1/projects", {
+    method: "POST",
+    body: { name: "Clean dogfood" },
+  });
+  assert.equal(created.response.status, 201, JSON.stringify(created.value));
+  assert.equal(created.value.project.name, "Clean dogfood");
+  assert.match(created.value.project.id, /^project-/);
 });
 
 test("V1.8 lifecycle UI stays transfer-first and frozen proof artifacts remain byte-identical", async () => {
   const shell = await readFile(new URL("../app/components/project-shell.tsx", import.meta.url), "utf8");
+  const root = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const home = await readFile(new URL("../app/projects/[projectId]/work/work-workspace.tsx", import.meta.url), "utf8");
   const steward = await readFile(new URL("../app/projects/[projectId]/ask/reconstruction-workspace.tsx", import.meta.url), "utf8");
   const inspect = await readFile(new URL("../app/projects/[projectId]/inspect/inspect-workspace.tsx", import.meta.url), "utf8");
@@ -840,10 +891,15 @@ test("V1.8 lifecycle UI stays transfer-first and frozen proof artifacts remain b
 
   assert.match(shell, /Project options/);
   assert.match(shell, /Rename/);
-  assert.match(shell, /Archive project/);
+  assert.match(shell, /Delete project/);
+  assert.match(shell, /Yes, delete project/);
+  assert.match(shell, /permanentlyDelete: true/);
   assert.match(shell, /Archived projects/);
   assert.match(shell, /Restore project/);
   assert.doesNotMatch(shell, /ContextualAdd|Open Contextual Add/);
+  assert.match(root, /Start a clean project/);
+  assert.match(root, /Create project/);
+  assert.match(root, /method: "POST"/);
   assert.match(home, /Transfer an existing room/);
   assert.match(home, /No active work yet/);
   assert.match(home, /Mark complete/);

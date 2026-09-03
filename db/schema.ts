@@ -26,6 +26,12 @@ export const projects = sqliteTable("projects", {
   ...timestamps,
 }, (table) => [uniqueIndex("projects_workspace_legacy_key").on(table.workspaceId, table.legacyProjectKey)]);
 
+export const projectDeletionAuthorizations = sqliteTable("project_deletion_authorizations", {
+  projectId: text("project_id").primaryKey(),
+  projectName: text("project_name").notNull(),
+  confirmedAt: text("confirmed_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
 export const conversations = sqliteTable("conversations", {
   id: text("id").primaryKey(),
   projectId: text("project_id").notNull().references(() => projects.id),

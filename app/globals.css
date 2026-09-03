@@ -166,6 +166,55 @@ p {
   cursor: pointer;
 }
 
+.root-create-project {
+  display: grid;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.root-create-project label {
+  color: #aebdd3;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.root-create-project > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 9px;
+}
+
+.root-create-project input {
+  min-width: 0;
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid rgba(137, 160, 197, .25);
+  border-radius: 9px;
+  color: var(--atlas-text);
+  background: rgba(5, 16, 33, .7);
+}
+
+.root-create-project button {
+  margin-top: 0;
+}
+
+.root-create-project button:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+
+.root-create-error {
+  margin: 3px 0 0;
+  color: #efadc0;
+  font-size: 11px;
+}
+
+@media (max-width: 520px) {
+  .root-create-project > div {
+    grid-template-columns: 1fr;
+  }
+}
+
 @keyframes root-loading {
   from { transform: translateX(0); }
   to { transform: translateX(175%); }
