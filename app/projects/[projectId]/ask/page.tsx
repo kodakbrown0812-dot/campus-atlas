@@ -1,5 +1,5 @@
 import Link from "next/link";
-import ReconstructionWorkspace from "./reconstruction-workspace";
+import TransferRoom from "../work/transfer-room";
 import styles from "./ask.module.css";
 
 export default async function AskPage({
@@ -16,12 +16,12 @@ export default async function AskPage({
         </Link>
         <header className={styles.header}>
           <div>
-            <span>Steward</span>
-            <h1>Prepare a transfer directly</h1>
-            <p>Steward is the transfer intelligence Atlas uses after reconstructing a room. For the complete experience, start with Transfer on Home.</p>
+            <span>Transfer</span>
+            <h1>Continue in a fresh room</h1>
+            <p>Atlas applies one final relevance filter, asks only for governing clarity it cannot safely infer, and prepares the finished transfer.</p>
           </div>
         </header>
-        <ReconstructionWorkspace key={projectId} projectId={projectId} />
+        <TransferRoom key={projectId} projectId={projectId} surface="transfer" />
       </div>
     </main>
   );

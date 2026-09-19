@@ -789,7 +789,7 @@ function openApi(origin: string) {
               content: { "application/json": { schema: { oneOf: [{ $ref: "#/components/schemas/ReconstructionRunStoppedResponse" }, { $ref: "#/components/schemas/CanonicalError" }] } } },
             },
             "422": {
-              description: "Atlas is not needed, light continuity is sufficient, required state is missing, or the selected budget is unsafe",
+              description: "Required state is missing, semantic closure is incomplete, or the selected budget is unsafe",
               content: { "application/json": { schema: { $ref: "#/components/schemas/ReconstructionRunStoppedResponse" } } },
             },
             "400": {
@@ -970,7 +970,7 @@ function openApi(origin: string) {
             apiVersion: { type: "string", const: "v1.7.1" },
             status: {
               type: "string",
-              enum: ["clarification_required", "missing_required_state", "unsafe_under_selected_budget"],
+              enum: ["clarification_required", "missing_required_state", "semantic_completeness_failed", "unsafe_under_selected_budget"],
             },
             projectId: { type: "string" },
             caseId: { type: ["string", "null"] },
@@ -982,6 +982,15 @@ function openApi(origin: string) {
               description: "Optional read-only preview of bounded governed state; successful reconstruction persists an immutable packet.",
             },
             preflight: { type: "object" },
+            failure: {
+              type: "object",
+              description: "Structured reason Atlas refused to compile an incomplete or unsafe transfer packet.",
+              properties: {
+                reason: { type: "string" },
+                message: { type: "string" },
+                missing: { type: "array", items: { type: "string" } },
+              },
+            },
             packet: { type: "null" },
             summary: { type: "null" },
             receipt: { type: "null" },

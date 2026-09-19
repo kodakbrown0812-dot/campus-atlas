@@ -5,6 +5,15 @@ import { isPacketEligibleProtectedItem } from "./packet-eligibility";
 import { interpretTask, InterpretTaskOptions, TaskInterpretation } from "./roadway-service";
 import { sha256 } from "./transcript-import";
 import {
+  type DeliveryPreservationClass,
+  deliveryPreservationClass,
+  hasExplicitCorrectionLanguage,
+  hasDistinctImmutableState,
+  immutableSemanticAtoms,
+  immutableSemanticSignatures,
+  normalizeDeliveryStatement,
+} from "./immutable-state";
+import {
   all,
   assertId,
   first,
@@ -15,6 +24,17 @@ import {
   requiredString,
   Row,
 } from "./slice3-support";
+import type {
+  DeliveryManifest,
+  DeliveryManifestItem,
+  DeliveryManifestSectionId,
+} from "../shared/delivery-manifest";
+
+export type {
+  DeliveryManifest,
+  DeliveryManifestItem,
+  DeliveryManifestSectionId,
+} from "../shared/delivery-manifest";
 
 export const PACKET_VERSION = 1;
 export const SUPPORTED_TOKEN_BUDGETS = CONTINUITY_TOKEN_BUDGETS;
@@ -24,6 +44,9 @@ export type ContextDeliveryLevel = "light" | "medium" | "full";
 export type GovernedDeliveryItem = {
   id: string;
   versionId: string;
+  sourceType?: string;
+  sourceId?: string;
+  sourceVersionId?: string | null;
   statement: string;
   authority: string;
   scope: string;
@@ -34,6 +57,18 @@ export type GovernedDeliveryItem = {
   clusterId?: string;
   semanticSignatures?: string[];
   renderedStatement?: string;
+  preservationClass?: DeliveryPreservationClass;
+  immutableAtoms?: ReturnType<typeof immutableSemanticAtoms>;
+  deliveryLayer?: "immutable_spine" | "governed_abstraction" | "continuation_frontier";
+  sourceEventIds?: string[];
+  participantIds?: string[];
+};
+
+type SemanticStateDeltaItem = {
+  type: "unchanged" | "added" | "corrected" | "superseded" | "reopened" | "completed" | "not_selected";
+  sourceId: string;
+  priorSourceId?: string;
+  reason: string;
 };
 
 export type ContinuationClosureDiagnostics = {
@@ -54,6 +89,41 @@ export type ContinuationClosureDiagnostics = {
   clusterCount: number;
   pruned: Array<{ id: string; reason: string }>;
   semanticRecoveryActions: Array<{ id: string; signatures: string[] }>;
+  reconstructionVerification?: {
+    complete: boolean;
+    missing: string[];
+    requiredItemCount: number;
+    renderedItemCount: number;
+    requiredRoleCoverage: string[];
+    immutableAtomCount: number;
+  } | null;
+  budgetPlan?: {
+    requiredItems: number;
+    optionalItems: number;
+    optionalOmitted: number;
+    requiredTokens: number;
+    finalTokens: number;
+    unusedTokens: number;
+    requiredByRole: Record<string, number>;
+  } | null;
+  stateDelta?: {
+    predecessorPacketId: string | null;
+    confidence: "verified_same_case" | "predecessor_unknown";
+    transitions: SemanticStateDeltaItem[];
+  } | null;
+  continuationFrontier?: {
+    mechanismId: string;
+    text: string;
+    sourceEventIds: string[];
+    representation: "governed_abstraction";
+    reason: string;
+  } | null;
+  immutableStates?: Array<{
+    id: string;
+    preservationClass: DeliveryPreservationClass;
+    atoms: ReturnType<typeof immutableSemanticAtoms>;
+  }>;
+  workingSummary?: { text: string; sourceIds: string[] } | null;
   stopReason: string;
 };
 
@@ -366,6 +436,70 @@ function storedTreatmentSummary(value: unknown) {
   };
 }
 
+function stringMetadataList(metadata: Record<string, unknown>, key: string) {
+  return Array.isArray(metadata[key])
+    ? metadata[key].filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+}
+
+function storedDeliveryManifest(
+  summary: ReturnType<typeof storedTreatmentSummary>,
+  interpretation: Record<string, unknown>,
+) {
+  const closure = interpretation.continuationClosure && typeof interpretation.continuationClosure === "object"
+    ? interpretation.continuationClosure as Record<string, unknown>
+    : null;
+  const workingSummary = closure?.workingSummary && typeof closure.workingSummary === "object"
+    ? closure.workingSummary as Record<string, unknown>
+    : null;
+  const orientation = typeof workingSummary?.text === "string" ? workingSummary.text : null;
+  const items = summary.Use
+    .filter((item) => item.sourceType !== "RoadwayCheck")
+    .map((item): GovernedDeliveryItem => {
+      const metadata = item.metadata && typeof item.metadata === "object"
+        ? item.metadata as Record<string, unknown>
+        : {};
+      const roles = stringMetadataList(metadata, "continuationRoles");
+      const participantIds = stringMetadataList(metadata, "participantIds");
+      const sourceEventIds = stringMetadataList(metadata, "sourceEventIds");
+      return {
+        id: item.sourceId,
+        versionId: item.sourceVersionId || "",
+        sourceType: item.sourceType,
+        sourceId: item.sourceId,
+        sourceVersionId: item.sourceVersionId,
+        statement: item.statement,
+        renderedStatement: typeof metadata.compiledStatement === "string"
+          ? metadata.compiledStatement
+          : item.statement,
+        authority: item.authority,
+        scope: item.scope,
+        roles: roles.length ? roles : item.protectedRole ? [item.protectedRole] : [],
+        required: metadata.closureRequired !== false,
+        materialityReason: item.reason,
+        dependencyDepth: Number(metadata.dependencyDepth || 0),
+        clusterId: typeof metadata.clusterId === "string" ? metadata.clusterId : undefined,
+        deliveryLayer: metadata.deliveryLayer === "continuation_frontier"
+          ? "continuation_frontier"
+          : metadata.deliveryLayer === "immutable_spine"
+            ? "immutable_spine"
+            : "governed_abstraction",
+        sourceEventIds,
+        participantIds,
+      };
+    });
+  const manifest = renderGovernedDelivery(items, orientation).manifest;
+  const exclusions = [closure?.pruned, closure?.exclusions]
+    .flatMap((value) => Array.isArray(value) ? value : [])
+    .filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object")
+    .map((value) => ({
+      id: String(value.id || "unknown"),
+      reason: String(value.reason || "Not needed for this continuation."),
+    }))
+    .filter((value, index, all) => all.findIndex((candidate) => candidate.id === value.id) === index);
+  return { ...manifest, exclusions };
+}
+
 async function comparisonKey(projectId: string, interpretation: TaskInterpretation) {
   return sha256(json({
     projectId,
@@ -383,6 +517,17 @@ async function priorPacket(db: D1Database, projectId: string, key: string) {
      WHERE project_id = ? AND comparison_key = ?
      ORDER BY created_at DESC, rowid DESC LIMIT 1`,
   ).bind(projectId, key));
+}
+
+async function priorContinuationPacket(db: D1Database, projectId: string, caseId: string | null) {
+  return first<Row>(db.prepare(
+    `SELECT id FROM packets
+     WHERE project_id = ?
+       AND ((? IS NULL AND case_id IS NULL) OR case_id = ?)
+       AND status = 'compiled'
+       AND inferred_intent = 'Continue with the minimum source-grounded current room state.'
+     ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+  ).bind(projectId, caseId, caseId));
 }
 
 async function priorItems(db: D1Database, projectId: string, packetId: string | null) {
@@ -424,6 +569,137 @@ function packetDifference(prior: Row[], current: PacketItemSnapshot[]) {
   return changes;
 }
 
+async function priorSemanticItems(db: D1Database, projectId: string, packetId: string | null) {
+  if (!packetId) return [];
+  const receipt = await first<Row>(db.prepare(
+    "SELECT candidate_treatment_summary FROM receipts WHERE project_id = ? AND packet_id = ? LIMIT 1",
+  ).bind(projectId, packetId));
+  if (!receipt) return [];
+  const summary = storedTreatmentSummary(parseJson(receipt.candidate_treatment_summary, {}));
+  return [...summary.Use, ...summary.Consider, ...summary.Exclude];
+}
+
+const DELTA_STOP_WORDS = new Set([
+  "and", "are", "for", "from", "has", "have", "into", "not", "only", "that", "the", "their", "then", "this", "with",
+]);
+
+function deltaTerms(value: string) {
+  return new Set((value.toLowerCase().match(/[a-z0-9]+(?:-[a-z0-9]+)*/gu) || [])
+    .filter((word) => word.length >= 3 && !DELTA_STOP_WORDS.has(word)));
+}
+
+function deltaSimilarity(left: string, right: string) {
+  const leftTerms = deltaTerms(left);
+  const rightTerms = deltaTerms(right);
+  const smaller = Math.min(leftTerms.size, rightTerms.size);
+  if (!smaller) return { count: 0, ratio: 0 };
+  let count = 0;
+  for (const term of leftTerms) if (rightTerms.has(term)) count += 1;
+  return { count, ratio: count / smaller };
+}
+
+function explicitCompletion(value: string) {
+  const source = value.replace(/\s+/gu, " ").trim();
+  const negated = /\b(?:not|not yet|is not|isn't|are not|aren't|remains? unresolved)\b[^.!?]{0,40}\b(?:complete|completed|finished|done|resolved|closed)\b/iu.test(source);
+  return !negated && /\b(?:is|are|was|were|has been|have been|now)\s+(?:complete|completed|finished|done|resolved|closed)\b/iu.test(source);
+}
+
+function semanticStateDelta(
+  priorPacketId: string | null,
+  prior: PacketItemSnapshot[],
+  current: PacketItemSnapshot[],
+) {
+  if (!priorPacketId) {
+    return {
+      predecessorPacketId: null,
+      confidence: "predecessor_unknown" as const,
+      transitions: current.map((item): SemanticStateDeltaItem => ({
+        type: "added",
+        sourceId: item.sourceId,
+        reason: "No verified same-case predecessor packet is available; this is baseline current state.",
+      })),
+    };
+  }
+  const transitions: SemanticStateDeltaItem[] = [];
+  const consumedPrior = new Set<string>();
+  for (const item of current) {
+    const exact = prior.find((candidate) => candidate.sourceType === item.sourceType && candidate.sourceId === item.sourceId);
+    if (exact) {
+      consumedPrior.add(`${exact.sourceType}:${exact.sourceId}`);
+      const unchanged = exact.sourceVersionId === item.sourceVersionId
+        && normalizeDeliveryStatement(exact.statement) === normalizeDeliveryStatement(item.statement);
+      transitions.push({
+        type: unchanged ? "unchanged" : "corrected",
+        sourceId: item.sourceId,
+        priorSourceId: exact.sourceId,
+        reason: unchanged
+          ? "The same stable source and governing version remain selected."
+          : "The same stable source now has a different governing version or statement.",
+      });
+      continue;
+    }
+    const currentCorrection = hasExplicitCorrectionLanguage(item.statement)
+      && !/\b(?:do not|don't|must not)\s+(?:replace|supersede|drop|reject)\b/iu.test(item.statement);
+    const currentRoles = Array.isArray(item.metadata?.continuationRoles)
+      ? item.metadata.continuationRoles.filter((role): role is string => typeof role === "string")
+      : [];
+    const related = prior
+      .filter((candidate) => !consumedPrior.has(`${candidate.sourceType}:${candidate.sourceId}`))
+      .filter((candidate) => !hasDistinctImmutableState(candidate.statement, item.statement) || currentCorrection)
+      .filter((candidate) => {
+        const priorRoles = Array.isArray(candidate.metadata?.continuationRoles)
+          ? candidate.metadata.continuationRoles.filter((role): role is string => typeof role === "string")
+          : [];
+        return currentCorrection || !currentRoles.length || !priorRoles.length
+          || currentRoles.some((role) => priorRoles.includes(role));
+      })
+      .map((candidate) => ({ candidate, similarity: deltaSimilarity(candidate.statement, item.statement) }))
+      .filter(({ similarity }) => similarity.count >= 3 && similarity.ratio >= 0.4)
+      .sort((left, right) => right.similarity.ratio - left.similarity.ratio || right.similarity.count - left.similarity.count)[0]?.candidate;
+    if (!related) {
+      transitions.push({ type: "added", sourceId: item.sourceId, reason: "This governed state was not present in the verified predecessor packet." });
+      continue;
+    }
+    consumedPrior.add(`${related.sourceType}:${related.sourceId}`);
+    const currentUnresolved = governedSemanticSignatures(item.statement).includes("unresolved");
+    const priorUnresolved = governedSemanticSignatures(related.statement).includes("unresolved");
+    const completed = explicitCompletion(item.statement);
+    const correction = currentCorrection;
+    transitions.push({
+      type: currentUnresolved && !priorUnresolved
+        ? "reopened"
+        : completed
+          ? "completed"
+          : correction
+            ? "superseded"
+            : "unchanged",
+      sourceId: item.sourceId,
+      priorSourceId: related.sourceId,
+      reason: currentUnresolved && !priorUnresolved
+        ? "A closely related governed state is explicitly unresolved again."
+        : completed
+          ? "A closely related governed state is now explicitly complete or resolved."
+          : correction
+            ? "A source-grounded correction now guards against reviving the related predecessor state."
+            : "The same semantic state remains selected under a different source identity.",
+    });
+  }
+  for (const item of prior) {
+    if (!consumedPrior.has(`${item.sourceType}:${item.sourceId}`)) {
+      transitions.push({
+        type: "not_selected",
+        sourceId: item.sourceId,
+        reason: "The predecessor state is not selected now; Atlas does not infer completion or invalidity from omission alone.",
+      });
+    }
+  }
+  return {
+    predecessorPacketId: priorPacketId,
+    confidence: "verified_same_case" as const,
+    transitions,
+  };
+}
+
 async function packetDetail(db: D1Database, projectId: string, packetId: string) {
   const packet = await first<Row>(db.prepare(
     "SELECT * FROM packets WHERE id = ? AND project_id = ? LIMIT 1",
@@ -441,6 +717,7 @@ async function packetDetail(db: D1Database, projectId: string, packetId: string)
   const receiptTreatmentSummary = storedTreatmentSummary(
     parseJson(receipt.candidate_treatment_summary, {}),
   );
+  const interpretation = parseJson<Record<string, unknown>>(packet.interpretation, {});
   const receiptItems = new Map(
     Object.values(receiptTreatmentSummary).flat().map((item) => (
       [`${item.sourceType}:${item.sourceId}`, item]
@@ -454,7 +731,7 @@ async function packetDetail(db: D1Database, projectId: string, packetId: string)
       caseId: packet.case_id,
       task: packet.task,
       inferredIntent: packet.inferred_intent,
-      interpretation: parseJson(packet.interpretation, {}),
+      interpretation,
       primaryRoadwayId: packet.primary_roadway_id,
       primaryRoadwayVersionId: packet.primary_roadway_version_id,
       supportingModules: parseJson(packet.supporting_modules, []),
@@ -478,6 +755,7 @@ async function packetDetail(db: D1Database, projectId: string, packetId: string)
         scope: item.scope,
         authority: item.authority_state,
         freshness: item.freshness,
+        statement: receiptItem?.statement ?? null,
         reason: item.inclusion_reason || item.exclusion_reason,
         sequenceOrder: item.sequence_order,
         protectedRole: receiptItem?.protectedRole ?? null,
@@ -485,6 +763,7 @@ async function packetDetail(db: D1Database, projectId: string, packetId: string)
         metadata: receiptItem?.metadata ?? {},
       };
     }),
+    deliveryManifest: storedDeliveryManifest(receiptTreatmentSummary, interpretation),
     receipt: {
       id: receipt.id,
       packetId: receipt.packet_id,
@@ -538,33 +817,106 @@ function deliveryRole(item: GovernedDeliveryItem) {
   ))[0] || "direction";
 }
 
-function deliverySection(role: string) {
-  if (role === "next_action") return "Next";
-  if (["constraint", "conditional", "correction", "semantic_identity"].includes(role)) return "Must preserve";
-  if (role === "rationale") return "Why / dependencies";
-  if (role === "unresolved") return "Open";
-  return "Current state";
+const DELIVERY_MANIFEST_SECTIONS: Array<{ id: DeliveryManifestSectionId; title: string }> = [
+  { id: "current_plan", title: "Current plan" },
+  { id: "next", title: "Next action" },
+  { id: "people", title: "People and responsibilities" },
+  { id: "constraints", title: "Governing constraints" },
+  { id: "replaced", title: "Do not revive" },
+  { id: "open", title: "Still open" },
+];
+
+const FIRST_PERSON_DELIVERY = /\b(?:I|I'm|I’m|I've|I’ve|I'll|I’ll|me|my|mine)\b/iu;
+
+function participantLabel(value: string) {
+  return value
+    .trim()
+    .split(/[-_\s]+/u)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function participantAnchoredStatement(statement: string, participantIds: string[]) {
+  const rendered = normalizeDeliveryStatement(statement);
+  if (!FIRST_PERSON_DELIVERY.test(rendered) || participantIds.length !== 1) return rendered;
+  const label = participantLabel(participantIds[0]);
+  return rendered.startsWith(`${label} —`) ? rendered : `${label} — ${rendered}`;
+}
+
+function deliveryManifestSection(item: GovernedDeliveryItem & { role: string; preservationClass: DeliveryPreservationClass }): DeliveryManifestSectionId {
+  const roles = item.roles || [];
+  if (roles.includes("next_action") || /\bnext (?:materially correct )?action\b/iu.test(item.statement)) return "next";
+  if (roles.includes("correction") || /\b(?:supersed|replac|rejected|obsolete|do not revive)\b/iu.test(item.statement)) return "replaced";
+  if (item.deliveryLayer === "continuation_frontier") return "next";
+  if (roles.includes("unresolved")) return "open";
+  if (/\b(?:current governed orientation|reservation finalized|food plan finalized)\b/iu.test(item.statement)) return "current_plan";
+  if ((item.participantIds || []).length
+    || /\b(?:roster|traveler|participant|passenger|driver|drives|vehicle plan|gear assignment|food count|medical|allergy|ankle|asthma)\b/iu.test(item.statement)) return "people";
+  if (item.preservationClass === "immutable_state"
+    || roles.some((role) => ["constraint", "conditional", "semantic_identity"].includes(role))) return "constraints";
+  return "current_plan";
+}
+
+function deliveryManifest(
+  items: Array<GovernedDeliveryItem & {
+    rendered: string;
+    role: string;
+    preservationClass: DeliveryPreservationClass;
+  }>,
+  orientation: string | null,
+): DeliveryManifest {
+  const manifestItems = items.map((item): DeliveryManifestItem => ({
+    id: item.id,
+    sourceType: item.sourceType || "Mechanism",
+    sourceId: item.sourceId || item.id,
+    sourceVersionId: item.sourceVersionId ?? item.versionId ?? null,
+    statement: item.rendered,
+    roles: item.roles || [],
+    primaryRole: item.role,
+    section: deliveryManifestSection(item),
+    required: item.required !== false,
+    reason: item.materialityReason || "Selected from governed project state because omission could change continuation.",
+    authority: item.authority,
+    participantIds: item.participantIds || [],
+    sourceEventIds: item.sourceEventIds || [],
+  }));
+  return {
+    version: 1,
+    orientation,
+    exclusions: [],
+    sections: DELIVERY_MANIFEST_SECTIONS
+      .map((section) => ({
+        ...section,
+        items: manifestItems.filter((item) => item.section === section.id),
+      }))
+      .filter((section) => section.items.length > 0),
+  };
 }
 
 function governedSemanticSignatures(value: string) {
+  const source = normalizeDeliveryStatement(value);
   const signatures: string[] = [];
-  if (/\b(?:no|not|never|cannot|can't|don't|do not|without)\b/i.test(value)) signatures.push("negation");
-  if (/\b(?:if|unless|only if|only after|until|otherwise|subject to)\b/i.test(value)) signatures.push("condition");
-  if (/\b(?:before|after|requires?|required|prerequisite|depends on)\b/i.test(value)) signatures.push("prerequisite");
-  if (/\b(?:at least as|no worse than|no less than|better than|worse than|versus|compared? (?:with|to)|baseline)\b/i.test(value)) signatures.push("comparison");
-  if (/\b(?:replac(?:e|ed|es)|supersed(?:e|ed|es)|instead|is out|are out|reject(?:ed)?|obsolete|scratch|no longer)\b/i.test(value)) signatures.push("supersession");
-  if (/\b(?:because|therefore|\bso\b|caused|the reason|rationale|in order to)\b/i.test(value)) signatures.push("rationale");
-  if (/\b(?:unresolved|undecided|open|pending|not (?:yet )?(?:confirmed|established|settled)|deferred)\b/i.test(value)) signatures.push("unresolved");
-  if (/\b(?:next action|next step|before anything else|begin with)\b/i.test(value)) signatures.push("next_action");
-  if (/\b(?:commit|version|release|deployment|packet|receipt|run|artifact)\b[^\n]{0,80}\b(?:[a-f0-9]{7,64}|v\d+(?:\.\d+){0,3})\b/i.test(value)) signatures.push("semantic_identity");
+  if (/\b(?:no|not|never|cannot|can't|don't|do not|without)\b/i.test(source)) signatures.push("negation");
+  if (/\b(?:if|unless|only if|only after|until|otherwise|subject to)\b/i.test(source)) signatures.push("condition");
+  if (/\b(?:before|after|requires?|required|prerequisite|depends on)\b/i.test(source)) signatures.push("prerequisite");
+  if (/\b(?:at least as|no worse than|no less than|better than|worse than|versus|compared? (?:with|to)|baseline)\b/i.test(source)) signatures.push("comparison");
+  if (/\b(?:replac(?:e|ed|es)|supersed(?:e|ed|es)|instead|is out|are out|reject(?:ed)?|obsolete|scratch|no longer)\b/i.test(source)) signatures.push("supersession");
+  if (/\b(?:because|therefore|\bso\b|caused|the reason|rationale|in order to)\b/i.test(source)) signatures.push("rationale");
+  if (/\b(?:unresolved|undecided|open|pending|not (?:yet )?(?:confirmed|established|settled)|deferred)\b/i.test(source)) signatures.push("unresolved");
+  if (/\b(?:next (?:materially |actual )?(?:action|step)|before anything else|begin with)\b/i.test(source)) signatures.push("next_action");
+  if (/\b(?:commit|version|release|deployment|packet|receipt|run|artifact)\b[^\n]{0,80}\b(?:[a-f0-9]{7,64}|v\d+(?:\.\d+){0,3})\b/i.test(source)
+    || immutableSemanticAtoms(source).some((atom) => atom.kind === "identifier")) signatures.push("semantic_identity");
+  signatures.push(...immutableSemanticSignatures(source));
   return [...new Set(signatures)];
 }
 
-function renderGovernedDelivery(items: GovernedDeliveryItem[]) {
+function renderGovernedDelivery(items: GovernedDeliveryItem[], orientation: string | null = null) {
   const recoveryActions: Array<{ id: string; signatures: string[] }> = [];
   const normalized = items.map((item) => {
     const original = item.statement.replace(/\s+/g, " ").trim();
-    let rendered = (item.renderedStatement || original).replace(/\s+/g, " ").trim();
+    const preservationClass = item.preservationClass || deliveryPreservationClass(original, item.roles || []);
+    let rendered = participantAnchoredStatement(item.renderedStatement || original, item.participantIds || []);
     const requiredSignatures = item.semanticSignatures || governedSemanticSignatures(original);
     const renderedSignatures = governedSemanticSignatures(rendered);
     const missing = requiredSignatures.filter((signature) => !renderedSignatures.includes(signature));
@@ -572,19 +924,89 @@ function renderGovernedDelivery(items: GovernedDeliveryItem[]) {
       rendered = original;
       recoveryActions.push({ id: item.id, signatures: missing });
     }
-    return { ...item, rendered, role: deliveryRole(item) };
+    return { ...item, preservationClass, rendered, role: deliveryRole(item) };
   }).sort((left, right) => (
     DELIVERY_ROLE_ORDER.indexOf(left.role) - DELIVERY_ROLE_ORDER.indexOf(right.role)
     || (left.dependencyDepth || 0) - (right.dependencyDepth || 0)
     || left.id.localeCompare(right.id)
   ));
-  const sections = ["Current state", "Next", "Must preserve", "Why / dependencies", "Open"]
-    .map((title) => {
-      const sectionItems = normalized.filter((item) => deliverySection(item.role) === title);
-      return sectionItems.length ? `## ${title}\n${sectionItems.map((item) => `- ${item.rendered}`).join("\n")}` : "";
-    })
-    .filter(Boolean);
-  return { body: sections.join("\n\n"), recoveryActions };
+  const manifest = deliveryManifest(normalized, orientation);
+  const sections = manifest.sections.map((section) => (
+    `## ${section.title}\n${section.items.map((item) => `- ${item.statement}`).join("\n")}`
+  ));
+  return { body: sections.join("\n\n"), recoveryActions, items: normalized, manifest };
+}
+
+function verifyCompiledContinuity(
+  content: string,
+  rendered: ReturnType<typeof renderGovernedDelivery>,
+  closure: ContinuationClosureDiagnostics | null,
+) {
+  const missing: string[] = [];
+  const required = rendered.items.filter((item) => item.required !== false);
+  const contentNormalized = content.replace(/\s+/gu, " ").trim().toLowerCase();
+  for (const item of required) {
+    if (!content.includes(`- ${item.rendered}`)) missing.push(`rendered_item:${item.id}`);
+    const expectedSignatures = item.semanticSignatures || governedSemanticSignatures(item.statement);
+    const actualSignatures = governedSemanticSignatures(item.rendered);
+    for (const signature of expectedSignatures) {
+      if (!actualSignatures.includes(signature)) missing.push(`signature:${item.id}:${signature}`);
+    }
+    for (const atom of item.immutableAtoms || immutableSemanticAtoms(item.statement)) {
+      if (!contentNormalized.includes(atom.value.replace(/\s+/gu, " ").trim().toLowerCase())) {
+        missing.push(`immutable_atom:${item.id}:${atom.signature}`);
+      }
+    }
+  }
+  const requiredRoleCoverage = [...new Set(required.flatMap((item) => item.roles || []))].sort();
+  if (closure?.workingSummary?.text && !content.includes(closure.workingSummary.text)) {
+    missing.push("working_summary");
+  }
+  for (const source of closure?.sourceLineage || []) {
+    if (!required.some((item) => item.id === source.id && item.versionId === source.versionId)) {
+      missing.push(`source_lineage:${source.id}:${source.versionId}`);
+    }
+  }
+  if (closure?.continuationFrontier) {
+    const frontier = required.find((item) => item.id === closure.continuationFrontier?.mechanismId);
+    if (!frontier || frontier.deliveryLayer !== "continuation_frontier") {
+      missing.push(`continuation_frontier:${closure.continuationFrontier.mechanismId}`);
+    } else {
+      for (const eventId of closure.continuationFrontier.sourceEventIds) {
+        if (!(frontier.sourceEventIds || []).includes(eventId)) missing.push(`frontier_lineage:${eventId}`);
+      }
+    }
+  }
+  return {
+    complete: missing.length === 0,
+    missing: [...new Set(missing)],
+    requiredItemCount: required.length,
+    renderedItemCount: rendered.items.length,
+    requiredRoleCoverage,
+    immutableAtomCount: required.reduce((count, item) => count + (item.immutableAtoms || []).length, 0),
+  };
+}
+
+function deliveryBudgetPlan(
+  items: ReturnType<typeof renderGovernedDelivery>["items"],
+  finalTokens: number,
+  tokenBudget: number,
+  optionalAvailable: number,
+) {
+  const required = items.filter((item) => item.required !== false);
+  const optional = items.filter((item) => item.required === false);
+  const requiredByRole: Record<string, number> = {};
+  for (const item of required) requiredByRole[item.role] = (requiredByRole[item.role] || 0) + 1;
+  const requiredTokens = tokenCount(required.map((item) => `- ${item.rendered}`).join("\n"));
+  return {
+    requiredItems: required.length,
+    optionalItems: optional.length,
+    optionalOmitted: Math.max(0, optionalAvailable - optional.length),
+    requiredTokens,
+    finalTokens,
+    unusedTokens: Math.max(0, tokenBudget - finalTokens),
+    requiredByRole,
+  };
 }
 
 export async function compileGovernedDeliveryPacket(
@@ -624,8 +1046,44 @@ export async function compileGovernedDeliveryPacket(
       failure: { reason: "source_grounded_state_unavailable" },
     };
   }
+  if (request.closure && !request.closure.completeness.complete) {
+    return {
+      status: "semantic_completeness_failed",
+      packet: null,
+      receipt: null,
+      idempotentReplay: false,
+      failure: {
+        reason: "immutable_state_closure_incomplete",
+        missing: request.closure.completeness.missing,
+        message: "Atlas stopped because a required condition refers to context that could not be recovered from this room.",
+      },
+    };
+  }
 
-  const renderedDelivery = renderGovernedDelivery(request.items);
+  const requiredItems = request.items.filter((item) => item.required !== false);
+  const optionalCandidates = request.items.filter((item) => item.required === false);
+  const selectedItems = [...requiredItems];
+  for (const optional of optionalCandidates) {
+    const candidate = renderGovernedDelivery(
+      [...selectedItems, optional],
+      request.closure?.workingSummary?.text || null,
+    );
+    const candidateContent = [
+      `# Atlas transfer packet v${PACKET_VERSION}`,
+      `Delivery: ${request.level.toUpperCase()}`,
+      `Continue: ${request.literalTask}`,
+      "",
+      ...(request.closure?.workingSummary?.text
+        ? ["## Working summary", `- ${request.closure.workingSummary.text}`, ""]
+        : []),
+      candidate.body,
+    ].join("\n");
+    if (tokenCount(candidateContent) <= request.tokenBudget) selectedItems.push(optional);
+  }
+  const renderedDelivery = renderGovernedDelivery(
+    selectedItems,
+    request.closure?.workingSummary?.text || null,
+  );
   const closure = request.closure ? {
     ...request.closure,
     semanticRecoveryActions: renderedDelivery.recoveryActions,
@@ -635,10 +1093,32 @@ export async function compileGovernedDeliveryPacket(
     `Delivery: ${request.level.toUpperCase()}`,
     `Continue: ${request.literalTask}`,
     "",
+    ...(closure?.workingSummary?.text
+      ? ["## Working summary", `- ${closure.workingSummary.text}`, ""]
+      : []),
     renderedDelivery.body,
   ].join("\n");
   const finalTokenCount = tokenCount(content);
-  if (closure) closure.packetSize = finalTokenCount;
+  const reconstructionVerification = verifyCompiledContinuity(content, renderedDelivery, closure);
+  const budgetPlan = deliveryBudgetPlan(renderedDelivery.items, finalTokenCount, request.tokenBudget, optionalCandidates.length);
+  if (closure) {
+    closure.packetSize = finalTokenCount;
+    closure.reconstructionVerification = reconstructionVerification;
+    closure.budgetPlan = budgetPlan;
+  }
+  if (!reconstructionVerification.complete) {
+    return {
+      status: "semantic_completeness_failed",
+      packet: null,
+      receipt: null,
+      idempotentReplay: false,
+      failure: {
+        reason: "compiled_packet_failed_reconstruction_verification",
+        missing: reconstructionVerification.missing,
+        message: "Atlas stopped because the finished packet could not reconstruct every required continuity unit.",
+      },
+    };
+  }
   if (finalTokenCount > request.tokenBudget) {
     return {
       status: "unsafe_under_selected_budget",
@@ -653,7 +1133,8 @@ export async function compileGovernedDeliveryPacket(
     };
   }
 
-  const snapshots: PacketItemSnapshot[] = request.items.map((item, index) => ({
+  const renderedById = new Map(renderedDelivery.items.map((item) => [item.id, item]));
+  const snapshots: PacketItemSnapshot[] = selectedItems.map((item, index) => ({
     sourceType: "Mechanism",
     sourceId: item.id,
     sourceVersionId: item.versionId,
@@ -677,15 +1158,32 @@ export async function compileGovernedDeliveryPacket(
       dependencyDepth: item.dependencyDepth || 0,
       clusterId: item.clusterId || null,
       semanticSignatures: item.semanticSignatures || governedSemanticSignatures(item.statement),
+      preservationClass: item.preservationClass || deliveryPreservationClass(item.statement, item.roles || []),
+      immutableAtoms: item.immutableAtoms || immutableSemanticAtoms(item.statement),
+      deliveryLayer: item.deliveryLayer || "governed_abstraction",
+      sourceEventIds: item.sourceEventIds || [],
+      participantIds: item.participantIds || [],
+      compiledStatement: renderedById.get(item.id)?.rendered || normalizeDeliveryStatement(item.statement),
+      manifestSection: renderedDelivery.manifest.sections.find((section) => (
+        section.items.some((manifestItem) => manifestItem.sourceId === item.id)
+      ))?.id || "current_plan",
+      primaryContinuationRole: renderedById.get(item.id)?.role || "direction",
     },
   }));
   const comparison = await sha256(json({
+    contract: "governed_continuation_v2",
     projectId,
     caseId: request.caseId,
-    contextDeliveryLevel: request.level,
   }));
-  const prior = await priorPacket(db, projectId, comparison);
+  const prior = await priorContinuationPacket(db, projectId, request.caseId);
   const priorPacketId = prior ? String(prior.id) : null;
+  if (closure) {
+    closure.stateDelta = semanticStateDelta(
+      priorPacketId,
+      await priorSemanticItems(db, projectId, priorPacketId),
+      snapshots,
+    );
+  }
   const difference = packetDifference(
     await priorItems(db, projectId, priorPacketId),
     snapshots,

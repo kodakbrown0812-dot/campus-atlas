@@ -41,3 +41,6 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+
+# Private run evidence belongs in the separate durable local evidence workspace.
+/fixtures/camping/runs/immutable-state-v2/

@@ -1,3 +1,10 @@
+import type { DeliveryManifest } from "../../../../shared/delivery-manifest";
+export type {
+  DeliveryManifest,
+  DeliveryManifestItem,
+  DeliveryManifestSectionId,
+} from "../../../../shared/delivery-manifest";
+
 export type Roadway = {
   id: string;
   versionId: string;
@@ -116,6 +123,7 @@ export type PacketResult = {
     status: string;
     createdAt: string;
   };
+  deliveryManifest?: DeliveryManifest;
   items?: Array<Record<string, unknown>>;
   receipt: {
     id: string;
@@ -283,6 +291,7 @@ export type PreparedContext = {
   projectId: string;
   literalTask: string;
   packet: PreparedPacket;
+  deliveryManifest: DeliveryManifest | null;
   receipt: PreparedReceipt;
   links: {
     packet: string;
@@ -313,6 +322,7 @@ export type ReconstructionRunResult = {
     | "compiled"
     | "clarification_required"
     | "missing_required_state"
+    | "semantic_completeness_failed"
     | "unsafe_under_selected_budget";
   projectId: string;
   caseId: string | null;
@@ -338,7 +348,16 @@ export type ReconstructionRunResult = {
     next: { action: string; reconstructionRunAvailable: boolean };
   };
   packet: PreparedPacket | null;
+  deliveryManifest?: DeliveryManifest | null;
   receipt: PreparedReceipt | null;
+  failure?: {
+    reason?: string;
+    message?: string;
+    missing?: string[];
+    missingRequiredState?: string[];
+    estimatedSafeMinimum?: number;
+    selectedBudget?: number;
+  };
   effects: {
     packetCreated: boolean;
     receiptCreated: boolean;

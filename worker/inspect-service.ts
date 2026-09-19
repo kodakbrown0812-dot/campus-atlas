@@ -153,7 +153,7 @@ export async function inspectOverview(db: D1Database, projectId: string) {
        ORDER BY m.updated_at DESC`,
     ).bind(projectId)),
     all<Row>(db.prepare(
-      `SELECT p.id, p.task, p.primary_roadway_id, p.primary_roadway_version_id,
+      `SELECT p.id, p.case_id, p.task, p.primary_roadway_id, p.primary_roadway_version_id,
               p.token_budget, p.final_token_count, p.status, p.created_at,
               p.prior_comparable_packet_id, r.diff_summary, r.governance_causes,
               h.receiving_model, h.handoff_status, h.final_answer_reference
@@ -238,7 +238,7 @@ export async function inspectOverview(db: D1Database, projectId: string) {
     };
   }));
 
-  const transfers = await listTransfers(db, projectId);
+  const transfers = await listTransfers(db, projectId, true);
   return {
     projectId,
     cases: caseViews,
@@ -271,6 +271,7 @@ export async function inspectOverview(db: D1Database, projectId: string) {
     },
     packets: packets.map((row) => ({
       id: row.id,
+      caseId: row.case_id,
       task: row.task,
       primaryRoadwayId: row.primary_roadway_id,
       primaryRoadwayVersionId: row.primary_roadway_version_id,
@@ -330,11 +331,33 @@ export async function inspectOverview(db: D1Database, projectId: string) {
   };
 }
 
-export async function inspectTransfer(db: D1Database, projectId: string, transferId: string) {
+export async function inspectTransfer(
+  db: D1Database,
+  projectId: string,
+  transferId: string,
+  options: { summaryOnly?: boolean } = {},
+) {
   const transfer = await getTransfer(db, projectId, transferId);
   const generated = transfer.generatedRecordIds as Record<string, unknown>;
   const findingIds = Array.isArray(generated.findingIds) ? generated.findingIds : [];
   const mechanismIds = Array.isArray(generated.mechanismIds) ? generated.mechanismIds : [];
+  if (options.summaryOnly) {
+    const counts = transfer.actualCounts && typeof transfer.actualCounts === "object"
+      ? transfer.actualCounts as Record<string, unknown>
+      : {};
+    return {
+      projectId,
+      transfer,
+      sourceSummary: {
+        immutableMessages: Number(counts.messages || 0),
+        canonicalSourceEvents: Number(counts.sourceEvents || 0),
+        durableCandidates: Number(counts.durableCandidates || findingIds.length),
+        governedProjectState: new Set(mechanismIds.map(String)).size,
+        decisionsNeeded: Number(counts.reviewItems || 0),
+      },
+      rawAvailable: true,
+    };
+  }
   const [conversation, messages, events, checkpoint, findings, governance, mechanisms, packets] = await Promise.all([
     first<Row>(db.prepare(
       "SELECT * FROM conversations WHERE id = ? AND project_id = ? LIMIT 1",
@@ -374,7 +397,7 @@ export async function inspectTransfer(db: D1Database, projectId: string, transfe
       : Promise.resolve([]),
     mechanismIds.length
       ? all<Row>(db.prepare(
-        `SELECT p.id, p.task, p.status, p.compiled_content
+        `SELECT DISTINCT p.id, p.task, p.status, p.compiled_content
          FROM packet_items pi JOIN packets p
            ON p.id = pi.packet_id AND p.project_id = pi.project_id
          WHERE pi.project_id = ? AND pi.source_id IN (${mechanismIds.map(() => "?").join(",")})`,

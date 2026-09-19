@@ -5,6 +5,7 @@ import { HandoffResult, PreparedContext, ReceivingModel } from "./ask-types";
 import styles from "./ask.module.css";
 
 type CopyState = "copied" | "failed" | null;
+const FRESH_CHATGPT_ROOM_URL = "https://chatgpt.com/";
 
 function selectPreparedContext() {
   const node = document.getElementById("prepared-context-content");
@@ -34,21 +35,27 @@ export default function HandoffPresentation({
     }
   }
 
+  function copyAndOpen() {
+    window.open(FRESH_CHATGPT_ROOM_URL, "_blank", "noopener,noreferrer");
+    void copy();
+  }
+
   return (
-    <section className={styles.continuationActions} aria-label="Prepared context destinations">
-      <h3>Ready for a fresh room</h3>
+    <section className={styles.continuationActions} aria-label="Continue in a fresh room">
+      <h3>Continue the work</h3>
       <div className={styles.destinationGrid}>
         <article className={styles.primaryDestination}>
-          <strong>Transfer packet</strong>
-          <p>Paste this exact packet into the fresh conversation before continuing the work.</p>
-          <button onClick={() => void copy()} type="button">Copy for fresh room</button>
+          <strong>Fresh ChatGPT room</strong>
+          <p>Atlas will copy the finished transfer and open a clean room. Paste once, then continue normally.</p>
+          <button onClick={copyAndOpen} type="button">Copy packet and open ChatGPT</button>
         </article>
       </div>
 
       {copyState === "copied" ? (
         <div className={styles.copySuccess} role="status">
-          <strong>Transfer packet copied</strong>
-          <span>Paste it into the fresh room before continuing the work.</span>
+          <strong>Ready in the fresh room</strong>
+          <span>The exact transfer is copied. Paste it into the ChatGPT room that just opened.</span>
+          <a href={FRESH_CHATGPT_ROOM_URL} rel="noreferrer" target="_blank">Open the fresh room again</a>
         </div>
       ) : null}
       {copyState === "failed" ? (
@@ -59,7 +66,7 @@ export default function HandoffPresentation({
         </div>
       ) : null}
 
-      <p className={styles.resultExplanation}>The copied text is the exact immutable packet returned by Atlas.</p>
+      <p className={styles.resultExplanation}>Atlas sends only the exact immutable packet shown in the optional preview.</p>
     </section>
   );
 }

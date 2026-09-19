@@ -39,6 +39,7 @@ function preparedFromPacket(projectId: string, result: PacketResult): PreparedCo
     projectId,
     literalTask: result.packet.task,
     packet: result.packet,
+    deliveryManifest: result.deliveryManifest || null,
     receipt: result.receipt,
     links: {
       packet: packetPath,
@@ -226,6 +227,7 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
           projectId,
           literalTask: complete.literalTask,
           packet: complete.packet!,
+          deliveryManifest: complete.deliveryManifest || null,
           receipt: complete.receipt!,
           links: complete.links!,
           raw: complete,
@@ -245,7 +247,7 @@ export default function ReconstructionWorkspace({ projectId }: { projectId: stri
         return;
       }
       setRun(value.status ? value as ReconstructionRunResult : null);
-      setError(value.error || value.need?.explanation || "Atlas could not prepare context safely.");
+      setError(value.error || value.failure?.message || value.need?.explanation || "Atlas could not prepare context safely.");
       setView("failure");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Atlas could not prepare context safely.");

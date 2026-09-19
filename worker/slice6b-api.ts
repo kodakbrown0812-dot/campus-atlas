@@ -51,7 +51,9 @@ export async function handleSlice6B(
         });
       }
       if (parts[1] === "transfers") {
-        return Response.json(await inspectTransfer(db, projectId, recordId), {
+        return Response.json(await inspectTransfer(db, projectId, recordId, {
+          summaryOnly: url.searchParams.get("view") === "summary",
+        }), {
           headers: { "cache-control": "no-store" },
         });
       }

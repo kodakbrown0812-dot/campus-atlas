@@ -3,10 +3,12 @@ import {
   CHECKPOINT_EXTRACTION_VERSION,
   runCheckpoint,
 } from "./checkpoint-service";
+import { explicitlyNonGoverningStatement } from "./continuation-semantics";
 import { ingestRoomSource } from "./canonical-conversation-intake";
 import { governFinding, materializeApprovedStateTruthMechanisms } from "./governance-service";
 import { ensureExactImportSourceEvents } from "./source-event-materialization";
 import { sha256 } from "./transcript-import";
+import { hasUnsupportedImmutableState } from "./immutable-state";
 import { all, first, json, now, parseJson, Row } from "./slice3-support";
 
 export const TRANSFER_STAGES = [
@@ -49,6 +51,7 @@ type ReconciliationItem = {
     messageIds: string[];
     exactContent: string;
     actorType: string;
+    actorId: string;
     sequence: number | null;
   }>;
   status: string;
@@ -78,9 +81,100 @@ function potentiallySensitive(value: string) {
 }
 
 function likelyTransient(value: string) {
-  return /\b(?:not yet a change to (?:the )?(?:plan|decision|state)|does not affect (?:the )?(?:trip|project|work).{0,40}(?:current|working) state)\b/i.test(value)
+  return explicitlyNonGoverningStatement(value)
     || (/\b(logo|branding|color palette|small talk|off topic)\b/i.test(value)
       && !/\b(decision|constraint|required|approved|selected|will)\b/i.test(value));
+}
+
+function deliveryStateSubjects(value: string) {
+  const families: Array<[string, RegExp]> = [
+    ["date", /\b(?:date|dates|weekend|schedule|timing|september|october|november|december|january|february|march|april|may|june|july|august)\b/iu],
+    ["destination", /\b(?:destination|campground|campsite|site|lodging|cabin|park)\b/iu],
+    ["reservation", /\b(?:reservation|booking|booked|hold|deposit)\b/iu],
+    ["budget", /\b(?:budget|cap|ceiling|cost|price|total|contingency)\b/iu],
+    ["transport", /\b(?:driver|drives?|vehicle|pickup|truck|minivan|subaru|passenger|seat|cargo|ride)\b/iu],
+    ["roster", /\b(?:roster|participant|traveler|attendee|join|joining|drop out|withdraw|food count|(?:i am|i(?:’|')m) tentatively in)\b/iu],
+    ["gear", /\b(?:gear|equipment|tent|stove|fuel|cooler|tarp|lantern|chairs?|filter)\b/iu],
+    ["food", /\b(?:food|menu|meal|grocery|allerg|gluten|pesto|taco|bakery|snack)\b/iu],
+    ["access", /\b(?:access|accessible|accessibility|medical|mobility|walking distance|toilet|stairs?|ankle)\b/iu],
+    ["activity", /\b(?:activity|trail|hike|walk|visitor center|kayak|campfire|fire restriction|forecast|weather)\b/iu],
+  ];
+  return new Set(families.filter(([, pattern]) => pattern.test(value)).map(([family]) => family));
+}
+
+function provisionalDeliveryState(value: string) {
+  return /\b(?:propos(?:al|ed)|tentative(?:ly)?|provisional|explor(?:e|ing)|offer(?:ed)?|on hold|only a hold|not (?:a booking|booked|final|finalized|confirmed)|do not count .{0,40} final|uncertain)\b/iu.test(value);
+}
+
+function closingDeliveryState(value: string) {
+  return /\b(?:this is final|final(?:ized)? (?:decision|plan|choice|date|dates|weekend|destination|site|reservation|roster|budget|cap|vehicle|transportation|passenger|cargo|assignment|assignments|gear|menu)|(?:reservation|booking|decision|plan|choice|roster|assignment|assignments) finalized|confirmed (?:reservation|site|date|dates|weekend|destination|roster|booking)|hard final cap|no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)? out|withdrawn?|unavailable|remove (?:it|him|her|them)|void|obsolete|stale|superseded by|replaced by|changed to)\b/iu.test(value);
+}
+
+function deliveryTermOverlap(left: string, right: string) {
+  const ignored = new Set(["about", "after", "again", "before", "could", "current", "final", "from", "have", "into", "that", "their", "there", "these", "they", "this", "until", "when", "which", "with"]);
+  const terms = (value: string) => new Set(value.toLowerCase().match(/[a-z0-9]+/gu)?.filter((term) => term.length > 3 && !ignored.has(term)) || []);
+  const leftTerms = terms(left);
+  const rightTerms = terms(right);
+  return [...leftTerms].filter((term) => rightTerms.has(term)).length;
+}
+
+function sourceMessageMetadataForDelivery(event: Row) {
+  const metadata = parseJson<Record<string, unknown>>(event.metadata, {});
+  return metadata.sourceMessage && typeof metadata.sourceMessage === "object"
+    ? metadata.sourceMessage as Row
+    : null;
+}
+
+function laterExactResolution(events: Row[], item: ReconciliationItem) {
+  if (!provisionalDeliveryState(item.statement)) return null;
+  const primary = primarySource(item.statement, item.reason, item.exactSources);
+  if (!primary?.sequence) return null;
+  const candidateSubjects = deliveryStateSubjects(item.statement);
+  for (const event of events) {
+    const metadata = parseJson<Record<string, unknown>>(event.metadata, {});
+    const message = metadata.sourceMessage && typeof metadata.sourceMessage === "object"
+      ? metadata.sourceMessage as Row
+      : null;
+    const sequence = Number(message?.sequence);
+    if (!Number.isInteger(sequence) || sequence <= primary.sequence) continue;
+    const statement = String(event.exact_source_span || "");
+    if (!closingDeliveryState(statement)) continue;
+    const sharedSubject = [...candidateSubjects].some((subject) => deliveryStateSubjects(statement).has(subject));
+    if (!sharedSubject) continue;
+    const actorId = String(message?.actorId || "").trim().toLowerCase();
+    if (primary.actorId && actorId === primary.actorId || deliveryTermOverlap(item.statement, statement) >= 1) {
+      return { eventId: String(event.id), sequence, statement };
+    }
+  }
+  return null;
+}
+
+function exactUserSupport(events: Row[], item: ReconciliationItem) {
+  if (item.sourceAuthorship !== "assistant") return [];
+  const candidateSubjects = deliveryStateSubjects(item.statement);
+  const supportingCandidates = events.filter((event) => {
+    const metadata = parseJson<Record<string, unknown>>(event.metadata, {});
+    const message = metadata.sourceMessage && typeof metadata.sourceMessage === "object"
+      ? metadata.sourceMessage as Row
+      : null;
+    const statement = String(event.exact_source_span || "");
+    return String(message?.actorType || "").toLowerCase() === "user"
+      && [...candidateSubjects].some((subject) => deliveryStateSubjects(statement).has(subject))
+      && deliveryTermOverlap(item.statement, statement) >= 2
+      && (closingDeliveryState(statement)
+        || /\b(?:current|intentionally (?:remains?|left|kept) open|deliberately pending)\b/iu.test(statement));
+  });
+  const supporting = [...candidateSubjects].flatMap((subject) => supportingCandidates
+    .filter((event) => deliveryStateSubjects(String(event.exact_source_span || "")).has(subject))
+    .sort((left, right) => {
+      const sequence = (event: Row) => Number(sourceMessageMetadataForDelivery(event)?.sequence || 0);
+      return sequence(right) - sequence(left) || String(left.id).localeCompare(String(right.id));
+    })
+    .slice(0, 1));
+  if (!supporting.length) return [];
+  const combined = supporting.map((event) => String(event.exact_source_span || "")).join("\n");
+  if (hasUnsupportedImmutableState(item.statement, combined)) return [];
+  return [...new Set(supporting.map((event) => String(event.id)))];
 }
 
 function stageTimestamps(row: Row) {
@@ -254,12 +348,10 @@ async function reusableCheckpoint(db: D1Database, row: Row, expected: number) {
     : null;
 }
 
-async function exactSources(db: D1Database, projectId: string, eventIds: string[]) {
+function exactSources(eventsById: Map<string, Row>, eventIds: string[]) {
   const sources: ReconciliationItem["exactSources"] = [];
   for (const eventId of eventIds) {
-    const event = await first<Row>(db.prepare(
-      "SELECT * FROM events WHERE id = ? AND project_id = ? LIMIT 1",
-    ).bind(eventId, projectId));
+    const event = eventsById.get(eventId);
     if (!event) continue;
     const metadata = parseJson<Record<string, unknown>>(event.metadata, {});
     const sourceMessage = metadata.sourceMessage && typeof metadata.sourceMessage === "object"
@@ -271,6 +363,7 @@ async function exactSources(db: D1Database, projectId: string, eventIds: string[
       messageIds: parseJson<string[]>(event.source_message_ids, []),
       exactContent: String(event.exact_source_span),
       actorType: String(sourceMessage?.actorType || "unknown").toLowerCase(),
+      actorId: String(sourceMessage?.actorId || "").trim().toLowerCase(),
       sequence: Number.isInteger(sequence) && sequence > 0 ? sequence : null,
     });
   }
@@ -344,6 +437,12 @@ async function reconcile(db: D1Database, row: Row) {
      WHERE m.project_id = ? AND m.status = 'active'
        AND v.authority_state IN ('approved_local', 'approved_project_wide')`,
   ).bind(row.project_id));
+  const exactEventRows = await all<Row>(db.prepare(
+    `SELECT * FROM events
+     WHERE project_id = ? AND conversation_id = ?
+     ORDER BY ingested_at ASC, id ASC`,
+  ).bind(row.project_id, row.conversation_id));
+  const exactEventsById = new Map(exactEventRows.map((event) => [String(event.id), event]));
 
   const result: ReconciliationItem[] = [];
   for (const finding of findings) {
@@ -368,7 +467,7 @@ async function reconcile(db: D1Database, row: Row) {
         ? "Consider"
         : "Use";
     const eventIds = parseJson<string[]>(finding.source_event_ids, []);
-    const sources = await exactSources(db, String(row.project_id), eventIds);
+    const sources = exactSources(exactEventsById, eventIds);
     const reasonForSurfacing = String(finding.reason_for_surfacing);
     result.push({
       findingId: String(finding.id),
@@ -409,14 +508,78 @@ async function governUnambiguousUserState(db: D1Database, row: Row, items: Recon
     "SELECT ambiguity FROM checkpoints WHERE id = ? AND project_id = ? LIMIT 1",
   ).bind(row.checkpoint_id, row.project_id));
   if (checkpoint?.ambiguity) return [];
-  const hasExplicitResolutionPath = (item: ReconciliationItem) => /\b(?:until|before|after|unless|only if|must confirm|needs? to (?:confirm|verify|check)|pending (?:confirmation|verification)|blocked on|waiting for|if .{1,100} then)\b/iu.test(item.statement);
+  const exactEvents = await all<Row>(db.prepare(
+    `SELECT * FROM events
+     WHERE project_id = ? AND conversation_id = ?
+     ORDER BY ingested_at ASC, id ASC`,
+  ).bind(row.project_id, row.conversation_id));
+  const hasExplicitResolutionPath = (item: ReconciliationItem) => /\b(?:until|before|after|unless|only if|must confirm|needs? to (?:confirm|verify|check)|pending (?:confirmation|verification|[^.!?]{0,100}(?:check|status|forecast|weather|restriction|availability))|blocked on|waiting for|if .{1,100} then)\b/iu.test(item.statement)
+    || /[;:]\s*(?:check|verify|confirm|call|contact|measure|test)\b/iu.test(item.statement);
+  const intentionalOpenState = (item: ReconciliationItem) => /\b(?:intentionally (?:remains?|left|kept) open|uncertainty is intentional|deliberately pending)\b/iu.test(item.statement)
+    && hasExplicitResolutionPath(item);
+  const explicitSensitiveContinuityConstraint = (item: ReconciliationItem) => item.sensitivity === "potentially_sensitive"
+    && /\b(?:constraint|required|requires|must|must not|do not|don't|never|avoid|allerg|celiac|epinephrine|medication|accessibility)\b/iu.test(item.statement)
+    && !item.uncertainty;
+  const superseded = new Set<string>();
+  const userSupported = new Set<string>();
+  for (const item of items) {
+    if (!item.reviewRequired
+      || item.status !== "proposed"
+      || item.sourceAuthorship !== "user"
+      || item.sensitivity !== "standard"
+      || item.hasCounterevidence) continue;
+    const resolution = laterExactResolution(exactEvents, item);
+    if (!resolution) continue;
+    await governFinding(
+      db,
+      String(row.project_id),
+      item.findingId,
+      {
+        action: "reject",
+        actorId: "atlas-transfer-source-governor",
+        sourceVersionId: item.findingVersionId,
+        reviewedStatement: item.statement,
+        scope: "local",
+        reason: `Later Exact source sequence ${resolution.sequence} closes this provisional state (${resolution.eventId}); Atlas preserved both events as history without creating obsolete authority.`,
+      },
+      `transfer-room:${row.id}:source-governance:${item.findingId}:superseded`,
+    );
+    superseded.add(item.findingId);
+  }
+  for (const item of items) {
+    if (!item.reviewRequired
+      || superseded.has(item.findingId)
+      || item.status !== "proposed"
+      || item.sensitivity !== "standard"
+      || item.hasCounterevidence) continue;
+    const supportingEvidence = exactUserSupport(exactEvents, item);
+    if (!supportingEvidence.length) continue;
+    await governFinding(
+      db,
+      String(row.project_id),
+      item.findingId,
+      {
+        action: "keep_local",
+        actorId: "atlas-transfer-source-governor",
+        sourceVersionId: item.findingVersionId,
+        reviewedStatement: item.statement,
+        supportingEvidence,
+        scope: "local",
+        reason: "Atlas matched this assistant paraphrase to source-supported user state, including every immutable value, so it adds evidence rather than a user decision.",
+      },
+      `transfer-room:${row.id}:source-governance:${item.findingId}:user-supported`,
+    );
+    userSupported.add(item.findingId);
+  }
   const eligible = items.filter((item) => item.reviewRequired
+    && !superseded.has(item.findingId)
+    && !userSupported.has(item.findingId)
     && item.status === "proposed"
     && item.sourceAuthorship === "user"
-    && item.sensitivity === "standard"
+    && (item.sensitivity === "standard" || explicitSensitiveContinuityConstraint(item))
     && item.scope === "local"
-    && item.proposedTreatment === "Use"
-    && (!item.uncertainty || hasExplicitResolutionPath(item))
+    && (item.proposedTreatment === "Use" || explicitSensitiveContinuityConstraint(item))
+    && (!item.uncertainty || intentionalOpenState(item) || hasExplicitResolutionPath(item))
     && !item.hasCounterevidence);
   for (const item of eligible) {
     await governFinding(
@@ -429,12 +592,16 @@ async function governUnambiguousUserState(db: D1Database, row: Row, items: Recon
         sourceVersionId: item.findingVersionId,
         reviewedStatement: item.statement,
         scope: "local",
-        reason: "Atlas preserved a complete, non-sensitive, unambiguous user-authored statement as room-local continuity.",
+        reason: intentionalOpenState(item)
+          ? "Atlas preserved this source-grounded open state and its explicit future resolution path without settling it."
+          : explicitSensitiveContinuityConstraint(item)
+            ? "Atlas preserved this complete user-authored safety or accessibility constraint as room-local continuity; no ambiguous decision was inferred."
+          : "Atlas preserved a complete, non-sensitive, unambiguous user-authored statement as room-local continuity.",
       },
       `transfer-room:${row.id}:source-governance:${item.findingId}:keep-local`,
     );
   }
-  return eligible.map((item) => item.findingId);
+  return [...superseded, ...userSupported, ...eligible.map((item) => item.findingId)];
 }
 
 async function saveRunState(

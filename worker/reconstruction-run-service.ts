@@ -28,6 +28,7 @@ function stoppedStatus(preflight: Awaited<ReturnType<typeof checkContinuity>>) {
 function stoppedResult(
   preflight: Awaited<ReturnType<typeof checkContinuity>>,
   status = stoppedStatus(preflight),
+  failure?: Record<string, unknown>,
 ) {
   return {
     apiVersion: "v1.7.1",
@@ -48,6 +49,7 @@ function stoppedResult(
     packet: null,
     summary: null,
     receipt: null,
+    ...(failure ? { failure } : {}),
     effects: {
       packetCreated: false,
       receiptCreated: false,
@@ -149,6 +151,7 @@ function compactProjection(
       priorComparablePacketId: detail.packet.priorComparablePacketId,
       createdAt: detail.packet.createdAt,
     },
+    deliveryManifest: detail.deliveryManifest,
     capsule: null,
     summary: {
       governingMechanismsSupplied: use.filter((item) => item.sourceType === "Mechanism").length,
@@ -237,7 +240,7 @@ export async function runReconstruction(
         : undefined,
     }, idempotencyKey);
     if (!compiled.packet || !compiled.receipt) {
-      return stoppedResult(preflight, String(compiled.status));
+      return stoppedResult(preflight, String(compiled.status), compiled.failure);
     }
     return compactProjection(compiled, preflight, compiled.idempotentReplay);
   }
@@ -254,7 +257,7 @@ export async function runReconstruction(
     },
   });
   if (!compiled.packet || !compiled.receipt) {
-    return stoppedResult(preflight, String(compiled.status));
+    return stoppedResult(preflight, String(compiled.status), compiled.failure);
   }
   return compactProjection(compiled, preflight, compiled.idempotentReplay);
 }
