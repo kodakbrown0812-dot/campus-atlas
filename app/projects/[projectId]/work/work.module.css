@@ -540,6 +540,47 @@
   color: #7f92af;
 }
 
+.transferSelector {
+  display: grid;
+  gap: 7px;
+  max-width: 520px;
+  color: #8fa2bd;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.transferSelector select {
+  min-height: 42px;
+  padding: 9px 11px;
+  border: 1px solid rgba(137, 160, 197, .24);
+  border-radius: 9px;
+  color: #dce6f5;
+  background: rgba(4, 16, 32, .82);
+}
+
+.noTransferState {
+  display: grid;
+  gap: 9px;
+  padding: 18px;
+  border: 1px solid rgba(137, 160, 197, .16);
+  border-radius: 12px;
+  color: #d6e0ef;
+  background: rgba(4, 16, 32, .42);
+}
+
+.noTransferState p {
+  max-width: 620px;
+  margin: 0;
+  color: #879bb9;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.noTransferState a {
+  justify-self: start;
+  color: #aebff2;
+}
+
 .transferResult {
   display: grid;
   gap: 16px;
@@ -815,6 +856,100 @@
 .embeddedPacket {
   display: grid;
   gap: 12px;
+}
+
+.transferCompletion {
+  display: grid;
+  gap: 16px;
+}
+
+.transferCompletion > header p {
+  margin: 0;
+  color: #91a5c4;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.transferOutcome {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.transferOutcome div {
+  padding: 11px;
+  border: 1px solid rgba(137, 160, 197, .14);
+  border-radius: 9px;
+  background: rgba(3, 14, 29, .34);
+}
+
+.transferOutcome dt,
+.nextActionPreview span {
+  color: #7186a6;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+
+.transferOutcome dd {
+  margin: 5px 0 0;
+  color: #dce6f5;
+  font-size: 11px;
+}
+
+.nextActionPreview {
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border-left: 2px solid #4fd1c5;
+  border-radius: 0 9px 9px 0;
+  background: rgba(39, 212, 199, .05);
+}
+
+.nextActionPreview strong {
+  color: #dce6f5;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.transferCompletionLinks {
+  display: grid;
+  gap: 10px;
+  padding-top: 2px;
+}
+
+.transferCompletionLinks > a {
+  justify-self: start;
+  color: #aebff2;
+  font-size: 11px;
+}
+
+.packetPreviewDisclosure {
+  padding: 11px 12px;
+  border: 1px solid rgba(137, 160, 197, .15);
+  border-radius: 9px;
+  background: rgba(3, 14, 29, .28);
+}
+
+.packetPreviewDisclosure summary {
+  color: #aebed3;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.packetPreviewDisclosure pre {
+  max-height: 440px;
+  margin: 12px 0 0;
+  padding: 13px;
+  overflow: auto;
+  border-radius: 8px;
+  color: #c4d2e6;
+  background: rgba(2, 10, 22, .78);
+  white-space: pre-wrap;
+  font: 10px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .directionControl {

@@ -1,11 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStewardTask } from "../../../components/steward-task";
 import { useWriteSession } from "../../../components/write-session";
 import HandoffPresentation from "../ask/handoff-presentation";
-import PacketPreview from "../ask/packet-preview";
 import type { PreparedContext, ReconstructionRunResult } from "../ask/ask-types";
 import styles from "./work.module.css";
 
@@ -68,11 +68,16 @@ function count(value: Record<string, number>, key: string) {
 }
 
 const DEFAULT_CONTINUATION_TASK = "Continue this room from its current governed state. Start with the next materially correct action.";
+const STANDARD_TRANSFER_TOKEN_BUDGET = 800;
+const EXPANDED_TRANSFER_TOKEN_BUDGET = 1600;
 
 function inferredRoomTitle(transcript: string) {
   const trimmed = transcript.trim();
   try {
-    const parsed = JSON.parse(trimmed) as { messages?: Array<{ role?: string; content?: string; text?: string }> };
+    const parsed = JSON.parse(trimmed) as { title?: unknown; messages?: Array<{ role?: string; content?: string; text?: string }> };
+    if (typeof parsed.title === "string" && parsed.title.trim()) {
+      return parsed.title.trim().replace(/\s+/g, " ").slice(0, 72);
+    }
     const message = parsed.messages?.find((item) => item.role === "user") || parsed.messages?.[0];
     const content = String(message?.content || message?.text || "").trim();
     if (content) return content.replace(/\s+/g, " ").slice(0, 72);
@@ -95,17 +100,57 @@ function inferredRoomFormat(transcript: string) {
   }
 }
 
+function manifestItems(context: PreparedContext, sectionId: string) {
+  return context.deliveryManifest?.sections.find((section) => section.id === sectionId)?.items || [];
+}
+
+function ReadyTransfer({ context, preserved }: { context: PreparedContext; preserved: number }) {
+  const next = manifestItems(context, "next")[0]?.statement || null;
+  const open = manifestItems(context, "open");
+  const factCount = context.deliveryManifest?.sections.reduce((count, section) => count + section.items.length, 0)
+    || context.receipt.treatmentSummary.Use.filter((item) => item.sourceType !== "RoadwayCheck").length;
+  const run = context.raw as Partial<ReconstructionRunResult>;
+  const deliveryLevel = run.need?.level ? run.need.level.toUpperCase() : "PREPARED";
+  return (
+    <section className={styles.transferCompletion} aria-labelledby="transfer-complete-title">
+      <header>
+        <span className={styles.eyebrow}>Final transfer checkpoint</span>
+        <h3 id="transfer-complete-title">Ready to continue in a fresh room.</h3>
+        <p>Atlas needs nothing else from you. It reconstructed the room and prepared the smallest complete continuation it can safely deliver.</p>
+      </header>
+      <dl className={styles.transferOutcome}>
+        <div><dt>Source</dt><dd>{preserved.toLocaleString()} messages</dd></div>
+        <div><dt>Transfer</dt><dd>{deliveryLevel} · {context.packet.finalTokenCount.toLocaleString()} estimated tokens</dd></div>
+        <div><dt>Carried forward</dt><dd>{factCount} governing facts</dd></div>
+        <div><dt>Still open</dt><dd>{open.length ? `${open.length} intentionally unresolved · no answer needed` : "None"}</dd></div>
+      </dl>
+      {next ? <article className={styles.nextActionPreview}><span>Start here</span><strong>{next}</strong></article> : null}
+      <HandoffPresentation context={context} />
+      <div className={styles.transferCompletionLinks}>
+        <details className={styles.packetPreviewDisclosure}>
+          <summary>Preview transfer packet</summary>
+          <pre id="prepared-context-content" tabIndex={0}>{context.packet.compiledContent}</pre>
+        </details>
+        <Link href={context.links.inspect}>Inspect why Atlas carried this forward →</Link>
+      </div>
+    </section>
+  );
+}
+
 export default function TransferRoom({
   projectId,
-  conversations,
+  conversations = [],
   onCanonicalChange,
   preferredConversationId,
+  surface = "home",
 }: {
   projectId: string;
-  conversations: ConversationChoice[];
-  onCanonicalChange: () => void;
+  conversations?: ConversationChoice[];
+  onCanonicalChange?: () => void;
   preferredConversationId?: string | null;
+  surface?: "home" | "transfer";
 }) {
+  const router = useRouter();
   const { session, authorizationHeaders } = useWriteSession();
   const { rememberDelivery } = useStewardTask();
   const [transfers, setTransfers] = useState<Transfer[]>([]);
@@ -122,6 +167,15 @@ export default function TransferRoom({
   const packetAttempt = useRef<{ signature: string; key: string } | null>(null);
   const legacyReviewAttempt = useRef(new Set<string>());
   const canWrite = Boolean(session?.writeAuthorization.authorized);
+
+  function notifyCanonicalChange() {
+    onCanonicalChange?.();
+    window.dispatchEvent(new Event("atlas:project-lifecycle"));
+  }
+
+  function openTransfer(id: string) {
+    router.push(`/projects/${encodeURIComponent(projectId)}/ask?transfer=${encodeURIComponent(id)}`);
+  }
 
   function resetPreparedPacket() {
     setDirectionNote("");
@@ -140,11 +194,19 @@ export default function TransferRoom({
     };
     if (!response.ok || !value.transfers) throw new Error(value.error || "Transfers unavailable.");
     setTransfers(value.transfers);
+    const requestedTransferId = surface === "transfer"
+      ? new URLSearchParams(window.location.search).get("transfer")
+      : null;
+    const requestedConversationId = surface === "transfer"
+      ? new URLSearchParams(window.location.search).get("conversation")
+      : null;
     setCurrent((prior) => value.transfers?.find((item) => item.id === prior?.id)
+      || value.transfers?.find((item) => item.id === requestedTransferId)
+      || value.transfers?.find((item) => item.conversationId === requestedConversationId)
       || value.transfers?.find((item) => item.conversationId === preferredConversationId)
       || value.transfers?.[0]
       || null);
-  }, [preferredConversationId, projectId]);
+  }, [preferredConversationId, projectId, surface]);
 
   useEffect(() => {
     let active = true;
@@ -160,7 +222,17 @@ export default function TransferRoom({
       .then((value) => {
         if (!active) return;
         setTransfers(value);
-        setCurrent(value.find((item) => item.conversationId === preferredConversationId) || value[0] || null);
+        const requestedTransferId = surface === "transfer"
+          ? new URLSearchParams(window.location.search).get("transfer")
+          : null;
+        const requestedConversationId = surface === "transfer"
+          ? new URLSearchParams(window.location.search).get("conversation")
+          : null;
+        setCurrent(value.find((item) => item.id === requestedTransferId)
+          || value.find((item) => item.conversationId === requestedConversationId)
+          || value.find((item) => item.conversationId === preferredConversationId)
+          || value[0]
+          || null);
         setStatus("ready");
       })
       .catch((caught) => {
@@ -169,7 +241,7 @@ export default function TransferRoom({
         setStatus("error");
       });
     return () => { active = false; };
-  }, [preferredConversationId, projectId]);
+  }, [preferredConversationId, projectId, surface]);
 
   async function transfer(body: Record<string, unknown>) {
     setStatus("saving");
@@ -194,9 +266,9 @@ export default function TransferRoom({
     resetPreparedPacket();
     setCurrent(value);
     await load();
-    onCanonicalChange();
+    notifyCanonicalChange();
     setStatus("ready");
-    return true;
+    return value;
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -204,12 +276,15 @@ export default function TransferRoom({
     const form = event.currentTarget;
     const data = new FormData(form);
     const transcript = String(data.get("transcript") || "");
-    const succeeded = await transfer({
+    const created = await transfer({
       title: inferredRoomTitle(transcript),
       format: inferredRoomFormat(transcript),
       transcript,
     });
-    if (succeeded) form.reset();
+    if (created) {
+      form.reset();
+      openTransfer(created.id);
+    }
   }
 
   async function resume(id: string) {
@@ -235,7 +310,7 @@ export default function TransferRoom({
     resetPreparedPacket();
     setCurrent(value);
     await load();
-    onCanonicalChange();
+    notifyCanonicalChange();
     setStatus("ready");
   }
 
@@ -285,7 +360,7 @@ export default function TransferRoom({
       packetAttempt.current = {
         signature,
         key: task === DEFAULT_CONTINUATION_TASK
-          ? `room-transfer-auto:${current.id}`
+          ? `room-transfer-auto-manifest-v1:${current.id}`
           : `room-transfer-direction:${current.id}:${crypto.randomUUID()}`,
       };
     }
@@ -294,28 +369,41 @@ export default function TransferRoom({
     setPrepared(null);
     setPacketError("");
     try {
-      const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/reconstruction/run`, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          "idempotency-key": packetAttempt.current.key,
-          ...authorizationHeaders(),
-        },
-        body: JSON.stringify({
-          task,
-          ...(current.caseId ? { caseId: current.caseId } : {}),
-          tokenBudget: 800,
-        }),
-      });
-      const value = await response.json().catch(() => ({ error: "Transfer packet preparation failed." })) as (
-        Partial<ReconstructionRunResult> & { error?: string }
-      );
+      const requestPacket = async (tokenBudget: number, idempotencyKey: string) => {
+        const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/reconstruction/run`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "idempotency-key": idempotencyKey,
+            ...authorizationHeaders(),
+          },
+          body: JSON.stringify({
+            task,
+            ...(current.caseId ? { caseId: current.caseId } : {}),
+            tokenBudget,
+          }),
+        });
+        return response.json().catch(() => ({ error: "Transfer packet preparation failed." })) as Promise<(
+          Partial<ReconstructionRunResult> & { error?: string }
+        )>;
+      };
+      let value = await requestPacket(STANDARD_TRANSFER_TOKEN_BUDGET, packetAttempt.current.key);
+      const safeMinimum = Number(value.failure?.estimatedSafeMinimum || 0);
+      if (value.status === "unsafe_under_selected_budget"
+        && safeMinimum > STANDARD_TRANSFER_TOKEN_BUDGET
+        && safeMinimum <= EXPANDED_TRANSFER_TOKEN_BUDGET) {
+        value = await requestPacket(
+          EXPANDED_TRANSFER_TOKEN_BUDGET,
+          `${packetAttempt.current.key}:safe-${EXPANDED_TRANSFER_TOKEN_BUDGET}`,
+        );
+      }
       if (value.status === "compiled" && value.packet && value.receipt && value.links && value.literalTask) {
         const complete = value as ReconstructionRunResult;
         const context: PreparedContext = {
           projectId,
           literalTask: complete.literalTask,
           packet: complete.packet!,
+          deliveryManifest: complete.deliveryManifest || null,
           receipt: complete.receipt!,
           links: complete.links!,
           raw: complete,
@@ -329,7 +417,13 @@ export default function TransferRoom({
       const stopped = value.status ? value as ReconstructionRunResult : null;
       setPacketRun(stopped);
       setPacketStatus(value.status === "clarification_required" ? "needs_input" : "failure");
-      setPacketError(value.error || value.need?.explanation || "Atlas could not prepare a truthful transfer packet.");
+      const unresolvedMinimum = Number(value.failure?.estimatedSafeMinimum || 0);
+      setPacketError(value.error
+        || value.failure?.message
+        || (value.status === "unsafe_under_selected_budget" && unresolvedMinimum > EXPANDED_TRANSFER_TOKEN_BUDGET
+          ? `The smallest complete transfer needs about ${unresolvedMinimum} tokens, above Atlas's ${EXPANDED_TRANSFER_TOKEN_BUDGET}-token safety ceiling.`
+          : value.need?.explanation)
+        || "Atlas could not prepare a truthful transfer packet.");
     } catch (caught) {
       setPacketStatus("failure");
       setPacketError(caught instanceof Error ? caught.message : "Atlas could not prepare a truthful transfer packet.");
@@ -357,17 +451,17 @@ export default function TransferRoom({
     resetPreparedPacket();
     setRemoveConfirmation(null);
     await load();
-    onCanonicalChange();
+    notifyCanonicalChange();
     setActionMessage("Transfer removed from active work. Its source and history remain available in Inspect.");
     setStatus("ready");
   }
 
   useEffect(() => {
-    if (!canWrite || current?.stage !== "ready_for_steward" || prepared || packetStatus !== "idle") return;
+    if (surface !== "transfer" || !canWrite || current?.stage !== "ready_for_steward" || prepared || packetStatus !== "idle") return;
     const pending = window.setTimeout(() => void preparePacket(DEFAULT_CONTINUATION_TASK), 0);
     return () => window.clearTimeout(pending);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canWrite, current?.id, current?.stage, packetStatus, prepared]);
+  }, [canWrite, current?.id, current?.stage, packetStatus, prepared, surface]);
 
   const imported = useMemo(
     () => conversations.filter((conversation) => conversation.sourceType === "imported" && conversation.status !== "archived"),
@@ -386,7 +480,7 @@ export default function TransferRoom({
       complete: Boolean(current.stageTimestamps.analyzed || current.stageTimestamps.reconciled),
     },
     ...(reviewItems.length && !legacyReview ? [{
-      label: `Needs review · ${reviewItems.length}`,
+      label: `Needs your decision · ${reviewItems.length}`,
       complete: current.stage === "awaiting_review" || current.stage === "ready_for_steward",
     }] : []),
     {
@@ -411,22 +505,26 @@ export default function TransferRoom({
   return (
     <section className={styles.transferRoom}>
       <header>
-        <span className={styles.eyebrow}>Room transfer</span>
-        <h2>Paste the room you want to continue.</h2>
-        <p>That’s it. Atlas will name it, preserve it, reconstruct what is current, and create the fresh-room transfer.</p>
+        <span className={styles.eyebrow}>{surface === "home" ? "Room transfer" : "Final transfer filter"}</span>
+        <h2>{surface === "home" ? "Paste the room you want to continue." : "Atlas handles the handoff from here."}</h2>
+        <p>{surface === "home"
+          ? "That’s it. Atlas will name it, preserve it, reconstruct what is current, and create the fresh-room transfer."
+          : "Atlas checks governing clarity, applies the final task-specific filter, and prepares the fresh-room packet."}</p>
       </header>
 
-      <form className={styles.transferForm} onSubmit={submit}>
-        <label className={styles.transferTranscript}>
-          Conversation
-          <textarea name="transcript" placeholder="Paste the whole ChatGPT conversation here." required />
-        </label>
-        <button disabled={!canWrite || status === "saving"} type="submit">
-          {status === "saving" ? "Atlas is reconstructing…" : "Continue this room"}
-        </button>
-      </form>
+      {surface === "home" ? (
+        <form className={styles.transferForm} onSubmit={submit}>
+          <label className={styles.transferTranscript}>
+            Conversation
+            <textarea name="transcript" placeholder="Paste the whole ChatGPT conversation here." required />
+          </label>
+          <button disabled={!canWrite || status === "saving"} type="submit">
+            {status === "saving" ? "Atlas is reconstructing…" : "Continue this room"}
+          </button>
+        </form>
+      ) : null}
 
-      {imported.length ? (
+      {surface === "home" && imported.length ? (
         <div className={styles.preservedRooms}>
           <span>Continue a previous transfer</span>
           {imported.map((conversation) => {
@@ -435,7 +533,12 @@ export default function TransferRoom({
               <button
                 disabled={!canWrite || status === "saving"}
                 key={conversation.id}
-                onClick={() => existing ? resume(existing.id) : transfer({ conversationId: conversation.id })}
+                onClick={() => {
+                  if (existing) openTransfer(existing.id);
+                  else void transfer({ conversationId: conversation.id }).then((created) => {
+                    if (created) openTransfer(created.id);
+                  });
+                }}
                 type="button"
               >
                 <strong>{conversation.title}</strong>
@@ -446,11 +549,36 @@ export default function TransferRoom({
         </div>
       ) : null}
 
-      {!canWrite && <p className={styles.readOnlyNotice}>Sign in as the owner to transfer a room or make review decisions.</p>}
+      {surface === "transfer" && transfers.length > 1 ? (
+        <label className={styles.transferSelector}>
+          Room
+          <select
+            onChange={(event) => {
+              const selected = transfers.find((item) => item.id === event.target.value) || null;
+              resetPreparedPacket();
+              setCurrent(selected);
+              if (selected) window.history.replaceState({}, "", `?transfer=${encodeURIComponent(selected.id)}`);
+            }}
+            value={current?.id || ""}
+          >
+            {transfers.map((item) => <option key={item.id} value={item.id}>{item.conversationTitle}</option>)}
+          </select>
+        </label>
+      ) : null}
+
+      {!canWrite && <p className={styles.readOnlyNotice}>Sign in as the owner to transfer a room or make governing decisions.</p>}
       {actionMessage && <p className={styles.lifecycleMessage} role="status">{actionMessage}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
 
-      {current ? (
+      {surface === "transfer" && !current && status === "ready" ? (
+        <div className={styles.noTransferState}>
+          <strong>No room is ready to transfer yet.</strong>
+          <p>Connect an existing conversation on Home. Atlas will reconstruct it and bring you back here only if it needs clarity.</p>
+          <Link href={`/projects/${encodeURIComponent(projectId)}/work`}>Connect a room</Link>
+        </div>
+      ) : null}
+
+      {surface === "transfer" && current ? (
         <article className={styles.transferResult} aria-live="polite">
           <div className={styles.transferResultHeader}>
             <div>
@@ -497,18 +625,18 @@ export default function TransferRoom({
 
           {current.stage === "awaiting_review" && !legacyReview && (
             <details className={styles.transferReview} open>
-              <summary>Needs your judgment · {reviewItems.length}</summary>
+              <summary>{reviewItems.length === 1 ? "Atlas needs one decision" : `Atlas needs ${reviewItems.length} decisions`}</summary>
               {reviewItems.map((item) => (
                 <article key={item.findingId}>
-                  <span>Atlas genuinely needs one decision</span>
+                  <span>Governing clarity</span>
                   <strong className={styles.reviewStatement}>{item.statement}</strong>
-                  <p>{item.reason}</p>
+                  <p>Atlas cannot safely decide from the conversation alone whether this should guide the fresh room.</p>
                   <details>
                     <summary>View the supporting conversation</summary>
                     {item.exactSources.map((source) => <pre key={source.eventId}>{source.exactContent}</pre>)}
                   </details>
                   <div className={styles.reviewActions}>
-                    <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Use")} type="button">Accept</button>
+                    <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Use")} type="button">Keep</button>
                     <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Consider")} type="button">Decide later</button>
                     <button disabled={!canWrite || status === "saving"} onClick={() => govern(item, "Exclude")} type="button">Do not keep</button>
                   </div>
@@ -519,35 +647,11 @@ export default function TransferRoom({
 
           {current.stage === "ready_for_steward" && (
             <div className={styles.roomReady}>
-              <header>
-                <span className={styles.eyebrow}>Room ready</span>
-                <h3>Atlas reconstructed the current state of this work.</h3>
-              </header>
-              <dl className={styles.roomStateSummary}>
-                <div>
-                  <dt>Preserved current state</dt>
-                  <dd>{current.reconstructedState.governedStatementCount} governing statement{current.reconstructedState.governedStatementCount === 1 ? "" : "s"}</dd>
-                </div>
-                <div>
-                  <dt>Current direction</dt>
-                  <dd>{current.reconstructedState.currentDirection || "No accepted direction was established."}</dd>
-                </div>
-                {current.reconstructedState.nextAction ? <div><dt>Next action</dt><dd>{current.reconstructedState.nextAction}</dd></div> : null}
-                <div>
-                  <dt>Important constraints</dt>
-                  <dd>{current.reconstructedState.importantConstraints.length
-                    ? current.reconstructedState.importantConstraints.join(" ")
-                    : "No separate governing constraint was established."}</dd>
-                </div>
-                {current.reconstructedState.changedOrReplaced.length ? (
-                  <div><dt>Changed or replaced</dt><dd>{current.reconstructedState.changedOrReplaced.join(" ")}</dd></div>
-                ) : null}
-              </dl>
               {!prepared && ["idle", "preparing"].includes(packetStatus) ? (
                 <div className={styles.automaticTransfer} role="status">
-                  <span className={styles.eyebrow}>Preparing the transfer</span>
-                  <strong>Atlas is deciding what the fresh room needs.</strong>
-                  <p>No prompt or packet setup is required.</p>
+                  <span className={styles.eyebrow}>Reconstruction complete</span>
+                  <strong>Atlas is preparing the final continuation.</strong>
+                  <p>{preserved.toLocaleString()} messages are preserved. No prompt or packet setup is required.</p>
                 </div>
               ) : null}
               {!prepared && packetStatus === "needs_input" ? (
@@ -577,11 +681,7 @@ export default function TransferRoom({
               ) : null}
               {prepared ? (
                 <div className={styles.embeddedPacket}>
-                  <PacketPreview
-                    actions={<HandoffPresentation context={prepared} />}
-                    advancedActions={null}
-                    context={prepared}
-                  />
+                  <ReadyTransfer context={prepared} preserved={preserved} />
                   {packetRun?.need.level === "full" ? (
                     <details className={styles.directionControl}>
                       <summary>Adjust direction <span>Optional</span></summary>
@@ -604,9 +704,6 @@ export default function TransferRoom({
                       </form>
                     </details>
                   ) : null}
-                  <div className={styles.transferReady}>
-                    <Link href={prepared.links.inspect}>Inspect transfer</Link>
-                  </div>
                 </div>
               ) : (
                 <div className={styles.transferReady}>

@@ -22,7 +22,6 @@ type WorkOverview = {
     id: string;
     name: string;
     description: string | null;
-    pendingFindingCount: number;
   };
   activeConversationId: string | null;
   conversations: WorkConversation[];
@@ -276,7 +275,7 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
           </div>
           <button
             className={styles.continueButton}
-            onClick={() => setMode("transfer")}
+            onClick={() => router.push(`/projects/${encodeURIComponent(projectId)}/ask?conversation=${encodeURIComponent(activeConversation.id)}`)}
             type="button"
           >
             Continue transfer
@@ -292,14 +291,6 @@ export default function WorkWorkspace({ projectId }: { projectId: string }) {
 
       {lifecycleMessage && <p className={styles.lifecycleMessage} role="status">{lifecycleMessage}</p>}
       {error && <p className={styles.error} role="alert">{error}</p>}
-
-      {overview.project.pendingFindingCount > 0 ? (
-        <Link className={styles.reviewNotice} href={`/projects/${encodeURIComponent(projectId)}/findings`}>
-          <strong>Needs review · {overview.project.pendingFindingCount}</strong>
-          <span>Atlas needs your judgment before this can become part of the project’s working truth.</span>
-          <small>Review now →</small>
-        </Link>
-      ) : null}
 
       <details className={styles.moreActions}>
         <summary>Advanced / Internal records</summary>

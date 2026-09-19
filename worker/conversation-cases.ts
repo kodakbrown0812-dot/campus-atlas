@@ -406,15 +406,10 @@ export async function importConversation(db: D1Database, projectId: string, body
     ),
   ];
 
+  const messageRows: unknown[][] = [];
   for (let index = 0; index < parsed.messages.length; index += 1) {
     const message = parsed.messages[index];
-    statements.push(db.prepare(
-      `INSERT INTO messages (
-        id, project_id, conversation_id, sequence_number, actor_type, actor_id,
-        exact_content, original_timestamp, ingested_at, source_reference,
-        source_message_key, content_hash, metadata
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
+    messageRows.push([
       canonicalId("message"),
       projectId,
       conversationId,
@@ -434,7 +429,20 @@ export async function importConversation(db: D1Database, projectId: string, body
         representationType,
         authorityState,
       }),
-    ));
+    ]);
+  }
+  // D1 permits at most 100 bound parameters per statement. Seven message rows
+  // use 91 bindings and reduce a 1,000-message import from 1,000 statements to
+  // 143 while retaining one atomic import transaction.
+  for (let offset = 0; offset < messageRows.length; offset += 7) {
+    const rows = messageRows.slice(offset, offset + 7);
+    statements.push(db.prepare(
+      `INSERT INTO messages (
+        id, project_id, conversation_id, sequence_number, actor_type, actor_id,
+        exact_content, original_timestamp, ingested_at, source_reference,
+        source_message_key, content_hash, metadata
+      ) VALUES ${rows.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ")}`,
+    ).bind(...rows.flat()));
   }
 
   const diagnostics = {

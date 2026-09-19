@@ -259,18 +259,14 @@ export async function ensureExactImportSourceEvents(
   }
 
   const specs = await Promise.all(messages.map((message) => eventSpec(projectId, conversationId, record, message)));
-  const existingBefore = await Promise.all(specs.map((spec) => first<Row>(db.prepare(
-    "SELECT * FROM events WHERE id = ? AND project_id = ? AND conversation_id = ? LIMIT 1",
-  ).bind(spec.id, projectId, conversationId))));
+  const existingEventRows = await all<Row>(db.prepare(
+    `SELECT * FROM events
+     WHERE project_id = ? AND conversation_id = ? AND event_type = 'source_message'`,
+  ).bind(projectId, conversationId));
+  const existingEvents = new Map(existingEventRows.map((event) => [String(event.id), event]));
+  const existingBefore = specs.map((spec) => existingEvents.get(spec.id) || null);
   const preparedAt = new Date().toISOString();
-  await db.batch(specs.map((spec) => db.prepare(
-    `INSERT OR IGNORE INTO events (
-      id, project_id, conversation_id, case_id, event_type, exact_source_span,
-      compressed_representation, source_message_ids, actor_id, observed_at,
-      ingested_at, extraction_method, extraction_version, confidence,
-      authority_state, assignment_state, version, metadata
-    ) VALUES (?, ?, ?, NULL, 'source_message', ?, NULL, ?, ?, ?, ?, ?, ?, NULL, 'observed', 'unassigned', 1, ?)`,
-  ).bind(
+  const eventRows = specs.map((spec) => [
     spec.id,
     projectId,
     conversationId,
@@ -282,11 +278,27 @@ export async function ensureExactImportSourceEvents(
     EXTRACTION_METHOD,
     EXTRACTION_VERSION,
     JSON.stringify(spec.metadata),
-  )));
+  ]);
+  const eventStatements: D1PreparedStatement[] = [];
+  for (let offset = 0; offset < eventRows.length; offset += 9) {
+    const rows = eventRows.slice(offset, offset + 9);
+    eventStatements.push(db.prepare(
+      `INSERT OR IGNORE INTO events (
+        id, project_id, conversation_id, case_id, event_type, exact_source_span,
+        compressed_representation, source_message_ids, actor_id, observed_at,
+        ingested_at, extraction_method, extraction_version, confidence,
+        authority_state, assignment_state, version, metadata
+      ) VALUES ${rows.map(() => "(?, ?, ?, NULL, 'source_message', ?, NULL, ?, ?, ?, ?, ?, ?, NULL, 'observed', 'unassigned', 1, ?)").join(", ")}`,
+    ).bind(...rows.flat()));
+  }
+  await db.batch(eventStatements);
 
-  const materialized = await Promise.all(specs.map((spec) => first<Row>(db.prepare(
-    "SELECT * FROM events WHERE id = ? AND project_id = ? AND conversation_id = ? LIMIT 1",
-  ).bind(spec.id, projectId, conversationId))));
+  const materializedRows = await all<Row>(db.prepare(
+    `SELECT * FROM events
+     WHERE project_id = ? AND conversation_id = ? AND event_type = 'source_message'`,
+  ).bind(projectId, conversationId));
+  const materializedById = new Map(materializedRows.map((event) => [String(event.id), event]));
+  const materialized = specs.map((spec) => materializedById.get(spec.id) || null);
   const missingMessageIds = specs
     .filter((spec, index) => !materialized[index] || !eventMatches(materialized[index]!, spec, projectId, conversationId))
     .map((spec) => spec.message.id);
@@ -320,29 +332,36 @@ export async function ensureExactImportSourceEvents(
       eventId: spec.id,
       id: `case-event:exact-message:${(await sha256(`${projectId}\n${caseId}\n${spec.id}`)).slice(0, 32)}`,
     })));
-    const attachedBefore = await Promise.all(attachmentSpecs.map((attachment) => first<Row>(db.prepare(
-      `SELECT id FROM case_event_attachments
-       WHERE id = ? AND project_id = ? AND case_id = ? AND event_id = ? AND ended_at IS NULL
-       LIMIT 1`,
-    ).bind(attachment.id, projectId, caseId, attachment.eventId))));
-    await db.batch(attachmentSpecs.map((attachment) => db.prepare(
-      `INSERT OR IGNORE INTO case_event_attachments (
-        id, project_id, case_id, event_id, attachment_state, attached_by,
-        attachment_reason, created_at
-      ) VALUES (?, ?, ?, ?, 'attached', 'atlas_source_preparation', ?, ?)`,
-    ).bind(
+    const attachedBeforeRows = await all<Row>(db.prepare(
+      `SELECT id, event_id FROM case_event_attachments
+       WHERE project_id = ? AND case_id = ? AND ended_at IS NULL`,
+    ).bind(projectId, caseId));
+    const attachedBeforeIds = new Set(attachedBeforeRows.map((attachment) => String(attachment.id)));
+    const attachmentRows = attachmentSpecs.map((attachment) => [
       attachment.id,
       projectId,
       caseId,
       attachment.eventId,
       "Exact imported message prepared for the active case.",
       preparedAt,
-    )));
-    const attachedAfter = await Promise.all(attachmentSpecs.map((attachment) => first<Row>(db.prepare(
-      `SELECT id FROM case_event_attachments
-       WHERE id = ? AND project_id = ? AND case_id = ? AND event_id = ? AND ended_at IS NULL
-       LIMIT 1`,
-    ).bind(attachment.id, projectId, caseId, attachment.eventId))));
+    ]);
+    const attachmentStatements: D1PreparedStatement[] = [];
+    for (let offset = 0; offset < attachmentRows.length; offset += 16) {
+      const rows = attachmentRows.slice(offset, offset + 16);
+      attachmentStatements.push(db.prepare(
+        `INSERT OR IGNORE INTO case_event_attachments (
+          id, project_id, case_id, event_id, attachment_state, attached_by,
+          attachment_reason, created_at
+        ) VALUES ${rows.map(() => "(?, ?, ?, ?, 'attached', 'atlas_source_preparation', ?, ?)").join(", ")}`,
+      ).bind(...rows.flat()));
+    }
+    await db.batch(attachmentStatements);
+    const attachedAfterRows = await all<Row>(db.prepare(
+      `SELECT id, event_id FROM case_event_attachments
+       WHERE project_id = ? AND case_id = ? AND ended_at IS NULL`,
+    ).bind(projectId, caseId));
+    const attachedAfterIds = new Set(attachedAfterRows.map((attachment) => String(attachment.id)));
+    const attachedAfter = attachmentSpecs.map((attachment) => attachedAfterIds.has(attachment.id));
     if (attachedAfter.some((attachment) => !attachment)) {
       return blocked(
         record.messageCount,
@@ -352,7 +371,7 @@ export async function ensureExactImportSourceEvents(
         "Canonical source events could not be attached to the active case.",
       );
     }
-    attachedEventCount = attachedBefore.filter((attachment) => !attachment).length;
+    attachedEventCount = attachmentSpecs.filter((attachment) => !attachedBeforeIds.has(attachment.id)).length;
   }
 
   const createdEventCount = existingBefore.filter((event) => !event).length;

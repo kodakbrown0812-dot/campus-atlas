@@ -1,5 +1,18 @@
 import { canonicalId } from "./canonical-records";
 import { sha256 } from "./transcript-import";
+import {
+  hasDistinctImmutableState,
+  hasExplicitCorrectionLanguage,
+  hasUnsupportedImmutableState,
+  immutableSemanticAtoms,
+} from "./immutable-state";
+import {
+  CONTINUATION_STATE_FAMILY_ORDER,
+  continuationFamilyBaseSpecificity,
+  continuationStateFamilies,
+  explicitlyNonGoverningStatement,
+  type ContinuationStateFamily,
+} from "./continuation-semantics";
 import { messageAnchorHref } from "../shared/message-anchors";
 import { hasUnresolvedConflict } from "./reasoning-semantics";
 import {
@@ -44,9 +57,16 @@ const FINDING_TYPES = new Set([
 const SCOPES = new Set(["local", "project_wide", "cross_project"]);
 const MAX_SELECTED_NODES = 7;
 const MAX_MATURE_SELECTED_NODES = 21;
-const MAX_MATURE_FINDINGS = 12;
+// State Truth construction may retain more governed propositions than any one
+// packet uses. Twenty remains bounded while allowing a large room to carry one
+// primary fact per state family plus a few distinct immutable constraints.
+const MAX_MATURE_FINDINGS = 20;
+// Opt into the recovery selector only when explicit non-governing material is a
+// substantial share of a mature room. Ordinary mature rooms retain the frozen
+// chronology/signal discovery path byte-for-byte.
+const HIGH_NOISE_RECOVERY_RATIO = 0.4;
 export const CHECKPOINT_EXTRACTION_VERSION = "slice3-mature-coverage-v1";
-export const CHECKPOINT_CANDIDATE_VERSION = "slice3-continuation-closure-v3";
+export const CHECKPOINT_CANDIDATE_VERSION = "slice3-continuation-closure-v7";
 const SERVER_FINDING_SOURCE = "canonical_case_events";
 const ANALYZER_CANDIDATE_SOURCES = new Set([
   "explicit_analyzer_candidates",
@@ -271,6 +291,10 @@ function sourceActorType(event: Row) {
   return String(sourceMessageMetadata(event)?.actorType || "unknown").toLowerCase();
 }
 
+function sourceActorId(event: Row) {
+  return String(sourceMessageMetadata(event)?.actorId || "").trim().toLowerCase();
+}
+
 function eventTypePriority(event: Row) {
   const priority: Record<string, number> = {
     correction: 0,
@@ -410,16 +434,16 @@ const CONTINUITY_SIGNAL_ORDER: ContinuitySignal[] = [
 
 function continuitySignals(value: string): ContinuitySignal[] {
   const signals: ContinuitySignal[] = [];
-  if (/\b(?:correction|corrected|incorrect|misunderstood|mistaken|wrong|not the right|no longer applies|no longer (?:the )?plan|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale)\b/i.test(value)) {
+  if (hasExplicitCorrectionLanguage(value)) {
     signals.push("correction");
   }
   if (/\b(?:supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|previously (?:planned|decided|current|governing)|earlier (?:plan|decision|direction)|historical rather than current|no longer (?:current|governing|the plan)|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale|instead)\b/i.test(value)) {
     signals.push("supersession");
   }
-  if (/\b(?:must(?: not)?|has to|have to|needs? to|do not|does not|don't|never|avoid|preserve|required|requires|under\s+\$?\d|no more than|at most|ceiling|limit|prohibits?|not (?:supplied|provided|allowed)|bring (?:their|your|our|his|her|its) own|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/i.test(value)) {
+  if (/\b(?:constraint|must(?: not)?|has to|have to|needs? to|do not|does not|don't|never|avoid|preserve|required|requires|under\s+\$?\d|no more than|at most|ceiling|limit|prohibits?|not (?:supplied|provided|allowed)|bring (?:their|your|our|his|her|its) own|until|unless|only if|only after|before|after|stop|defer|frozen|remain frozen)\b/i.test(value)) {
     signals.push("constraint");
   }
-  if (/\b(?:current (?:direction|plan|work|state|objective|phase|surface|choice|decision|site|timing|gear|transportation|food|(?:important )?packing requirements)|working choice|preferred (?:choice|option|site|direction)|remains? (?:preferred|current|the plan)|is now|are now|begins now|prioriti[sz]e|proceed with|the next task is|make .{1,80} (?:current|preferred)|responsib(?:le|ility)|will bring)\b/i.test(value)) {
+  if (/\b(?:current (?:direction|plan|work|state|objective|phase|surface|choice|decision|site|timing|gear|transportation|food|(?:important )?packing requirements)|working choice|preferred (?:choice|option|site|direction)|remains? (?:preferred|current|the plan)|is now|are now|begins now|prioriti[sz]e|proceed with|the next task is|make .{1,80} (?:current|preferred)|responsib(?:le|ility)|will bring|final(?:ized)? (?:decision|plan|choice|date|dates|weekend|destination|site|reservation|roster|budget|cap|vehicle|transportation|passenger|cargo|assignment|assignments|gear|menu)|(?:decision|plan|choice|date|dates|weekend|destination|site|reservation|roster|budget|cap|vehicle|transportation|passenger|cargo|assignment|assignments|gear|menu) (?:is|are) final|(?:reservation|booking|decision|plan|choice|roster|assignment|assignments) finalized|confirmed (?:reservation|site|date|dates|weekend|destination|roster|booking))\b/i.test(value)) {
     signals.push("current_direction");
   }
   if (/\b(?:next (?:actual )?action|next (?:actual )?step|next task|do next|build next|before anything else|continue (?:now|with)|begin (?:now|with)|start (?:now|with)|immediate(?:ly)? after|choose and (?:freeze|continue|begin|start)|reserve .{0,100} next|check .{0,100} then (?:reserve|book|continue))\b/i.test(value)) {
@@ -720,9 +744,10 @@ function matureUnits(events: Row[]) {
   return [...baseUnits, ...expanded];
 }
 
-function discoveryMatureUnits(events: Row[]) {
+function discoveryMatureUnits(events: Row[], excludeExplicitNonGoverning = false) {
   const maximumSequence = Math.max(0, ...events.map((event) => sourceSequence(event) || 0));
   return events.flatMap((event) => discoveryAtomicUnits(event).flatMap((statement) => {
+    if (excludeExplicitNonGoverning && explicitlyNonGoverningStatement(statement)) return [];
     const signals = discoveryContinuitySignals(statement);
     if (!signals.length) return [];
     return [{
@@ -735,6 +760,22 @@ function discoveryMatureUnits(events: Row[]) {
       clusterKind: "atomic" as const,
     } satisfies MatureUnit];
   }));
+}
+
+function stateFamilySpecificity(unit: MatureUnit, family: ContinuationStateFamily) {
+  return continuationFamilyBaseSpecificity(unit.statement, family)
+    + Number(explicitCurrentOrientation(unit)) * 5
+    + Number(unit.signals.includes("constraint")) * 3
+    + Number(unit.signals.includes("correction") || unit.signals.includes("supersession")) * 3
+    + Number(unit.signals.includes("uncertainty")) * 2;
+}
+
+function familySourceAuthority(unit: MatureUnit) {
+  // A direct user statement is the safest seed for a state family. An
+  // assistant-only synthesis remains eligible when the room contains no user
+  // statement for that family, but it must not displace comparable Exact user
+  // evidence and manufacture a governing-review question.
+  return sourceActorType(unit.event) === "user" ? 1 : 0;
 }
 
 function compareMatureUnits(left: MatureUnit, right: MatureUnit) {
@@ -763,7 +804,8 @@ function explicitCurrentOrientation(unit: MatureUnit) {
 
 function specificCurrentOrientation(unit: MatureUnit) {
   return /\bcurrent\s+(?!direction\b)[a-z][a-z-]{1,30}(?:\s+[a-z][a-z-]{1,30})?\s+(?:decision|plan|choice|state|rule|requirements|is|are)\b/iu.test(unit.statement)
-    || /\b(?:is now|are now|remains?|stays?)\s+(?:the )?(?:governing|preferred|current)\b/iu.test(unit.statement);
+    || /\b(?:is now|are now|remains?|stays?)\s+(?:the )?(?:governing|preferred|current)\b/iu.test(unit.statement)
+    || finalizedState(unit.statement);
 }
 
 function orientationSubject(unit: MatureUnit) {
@@ -819,6 +861,7 @@ function candidateClusterOverlap(left: string, right: string) {
 }
 
 function functionallyRedundant(left: CandidateSeed, right: CandidateSeed) {
+  if (hasDistinctImmutableState(left.unit.statement, right.unit.statement)) return false;
   for (const protectedRole of ["correction_guard", "uncertainty", "shared_term"] satisfies CandidateRole[]) {
     if (left.roles.includes(protectedRole) && !right.roles.includes(protectedRole)) return false;
   }
@@ -858,10 +901,18 @@ function assistantRestatementOfUser(unit: MatureUnit, candidates: MatureUnit[]) 
   if (sourceActorType(unit.event) !== "assistant") return false;
   return candidates.some((candidate) => {
     if (sourceActorType(candidate.event) !== "user") return false;
+    if (hasUnsupportedImmutableState(unit.statement, candidate.statement)) return false;
     const overlap = termOverlap(unit.statement, candidate.statement);
+    const termFamily = (term: string) => term.endsWith("ies") && term.length > 4
+      ? `${term.slice(0, -3)}y`
+      : term;
+    const assistantFamilies = new Set([...normalizedTerms(unit.statement)].map(termFamily));
+    const userFamilies = new Set([...normalizedTerms(candidate.statement)].map(termFamily));
+    const familyOverlap = [...assistantFamilies].filter((term) => userFamilies.has(term)).length;
     const adjacent = Math.abs(unit.sequence - candidate.sequence) <= 2;
     return overlap.count >= 3 && overlap.ratio >= 0.3
       || adjacent && overlap.count >= 1
+      || adjacent && familyOverlap >= 1
       || candidateRoles(unit).includes("current_direction")
         && candidateRoles(candidate).includes("current_direction")
         && sameOrientationCluster(unit, candidate);
@@ -897,9 +948,11 @@ function completeSupersession(unit: MatureUnit) {
   if (unit.clusterKind === "supersession_cluster" || unit.clusterKind === "causal_state_cluster") {
     return completeCausalSupersession(unit.statement);
   }
-  const closesPriorState = /\b(?:correction|corrected|wrong|mistaken|supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale|instead)\b/iu.test(unit.statement);
-  const statesResult = /\b(?:current|now|remains?|use|take|leave|bring|reserve|keep|decide|defer|out|scratch|rejected|dropped|obsolete|stale|cannot|do not|don't|not (?:provided|supplied|allowed))\b/iu.test(unit.statement);
-  return closesPriorState && statesResult && unit.signals.includes("supersession");
+  const closesPriorState = hasExplicitCorrectionLanguage(unit.statement)
+    || /\b(?:no longer|cannot work|is out|are out|scratch)\b/iu.test(unit.statement);
+  const statesResult = /\b(?:current|now|remains?|use|take|leave|bring|reserve|keep|decide|defer|out|scratch|rejected|dropped|obsolete|stale|cannot|do not|don't|not (?:provided|supplied|allowed)|final(?:ized)?|confirmed|required|unavailable|superseded|replaced|overrides?)\b/iu.test(unit.statement);
+  return closesPriorState && statesResult
+    && (unit.signals.includes("supersession") || unit.signals.includes("correction"));
 }
 
 function completeConstraint(value: string) {
@@ -907,7 +960,7 @@ function completeConstraint(value: string) {
   if (!directive) return true;
   const remainder = value.slice((directive.index || 0) + directive[0].length).match(/[A-Za-z0-9][A-Za-z0-9_-]*/gu) || [];
   const relationalBoundary = /^(?:until|unless|only if|only after|before|after)$/iu.test(directive[0]);
-  return remainder.length >= (relationalBoundary ? 1 : 3) && !nakedStructuralFragment(value);
+  return remainder.length >= (relationalBoundary ? 1 : 2) && !nakedStructuralFragment(value);
 }
 
 function completeProposition(unit: MatureUnit) {
@@ -917,7 +970,8 @@ function completeProposition(unit: MatureUnit) {
     && !/\b(?:instead|rather|next action is to|next action remains|then (?:update|check|confirm|reserve|book|prepare|send|build|run))\b/iu.test(unit.statement)) return false;
   if (unit.signals.length === 1
     && unit.signals[0] === "constraint"
-    && !/\b(?:must|has to|have to|do not|don't|never|only if|only after|unless|required|fixed|limit|ceiling|stop|defer|frozen)\b/iu.test(unit.statement)) return false;
+    && !/\b(?:constraint|must|has to|have to|do not|don't|never|only if|only after|unless|required|fixed|limit|ceiling|stop|defer|frozen)\b/iu.test(unit.statement)
+    && !/\b[^.!?;]{1,100}\bdoes not\b[^.!?;]{1,100}[.!?;]\s*[^.!?;]{1,100}\bdoes\b/iu.test(unit.statement)) return false;
   const roles = candidateRoles(unit);
   if (roles.includes("correction_guard") && !completeSupersession(unit)) return false;
   if (roles.includes("constraint") && !completeConstraint(unit.statement)) return false;
@@ -927,7 +981,12 @@ function completeProposition(unit: MatureUnit) {
 }
 
 function completionEvidence(event: Row) {
-  return /\b(?:is complete|are complete|has completed|have completed|completed|committed|accepted|passed|now verified|successfully simplified|successfully completed|ready for|is now frozen|are now frozen|now frozen)\b/iu.test(eventStatement(event));
+  const statement = eventStatement(event);
+  if (/\b(?:incorrect(?:ly)?|wrong(?:ly)?)\b[\s\S]{0,100}\b(?:complete|completed|committed|accepted|passed|verified|frozen)\b/iu.test(statement)
+    || /\b(?:not|isn(?:’|')t|aren(?:’|')t|wasn(?:’|')t|weren(?:’|')t)\s+(?:complete|completed|committed|accepted|passed|verified|frozen)\b/iu.test(statement)) {
+    return false;
+  }
+  return /\b(?:is complete|are complete|has completed|have completed|completed|committed|accepted|passed|now verified|successfully simplified|successfully completed|ready for|is now frozen|are now frozen|now frozen)\b/iu.test(statement);
 }
 
 function assistantWorkflowStatus(unit: MatureUnit) {
@@ -937,7 +996,7 @@ function assistantWorkflowStatus(unit: MatureUnit) {
 }
 
 function explicitlyNonGoverningUnit(unit: MatureUnit) {
-  return /\b(?:not yet a change to (?:the )?(?:plan|decision|state)|does not affect (?:the )?(?:trip|project|work).{0,40}(?:current|working) state|can wait and does not govern)\b/iu.test(unit.statement);
+  return explicitlyNonGoverningStatement(unit.statement);
 }
 
 function phaseBoundInstruction(event: Row) {
@@ -1018,7 +1077,59 @@ function expirationRelationships(events: Row[]) {
 
 function criticalConstraint(unit: MatureUnit) {
   return unit.signals.includes("constraint")
-    && /\b(?:stopping rule|stop at|do not repair|only after|only if|until|unless|must|has to|have to|under\s+\$?\d|no more than|at most|ceiling|not (?:provided|supplied|allowed))\b/iu.test(unit.statement);
+    && /\b(?:stopping rule|stop at|do not repair|only after|only if|until|unless|must|has to|have to|under\s+\$?\d|no more than|at most|ceiling|not (?:provided|supplied|allowed)|does not cancel|warning does cancel)\b/iu.test(unit.statement);
+}
+
+type StateSubject = "date" | "destination" | "reservation" | "budget" | "transport" | "roster" | "gear" | "food" | "access" | "activity";
+
+function stateSubjects(value: string) {
+  const families: Array<[StateSubject, RegExp]> = [
+    ["date", /\b(?:date|dates|weekend|schedule|timing|september|october|november|december|january|february|march|april|may|june|july|august)\b/iu],
+    ["destination", /\b(?:destination|campground|campsite|site|lodging|cabin|park)\b/iu],
+    ["reservation", /\b(?:reservation|booking|booked|hold|deposit)\b/iu],
+    ["budget", /\b(?:budget|cap|ceiling|cost|price|total|contingency)\b/iu],
+    ["transport", /\b(?:driver|drives?|vehicle|pickup|truck|minivan|subaru|passenger|seat|cargo|ride)\b/iu],
+    ["roster", /\b(?:roster|participant|traveler|attendee|join|joining|drop out|withdraw|food count|(?:i am|i(?:’|')m) tentatively in)\b/iu],
+    ["gear", /\b(?:gear|equipment|tent|stove|fuel|cooler|tarp|lantern|chairs?|filter)\b/iu],
+    ["food", /\b(?:food|menu|meal|grocery|allerg|gluten|pesto|taco|bakery|snack)\b/iu],
+    ["access", /\b(?:access|accessible|accessibility|medical|mobility|walking distance|toilet|stairs?|ankle)\b/iu],
+    ["activity", /\b(?:activity|trail|hike|walk|visitor center|kayak|campfire|fire restriction|forecast|weather)\b/iu],
+  ];
+  return new Set(families.filter(([, pattern]) => pattern.test(value)).map(([family]) => family));
+}
+
+function provisionalState(value: string) {
+  return /\b(?:propos(?:al|ed)|tentative(?:ly)?|provisional|explor(?:e|ing)|offer(?:ed)?|on hold|only a hold|not (?:a booking|booked|final|finalized|confirmed)|do not count .{0,40} final|uncertain)\b/iu.test(value);
+}
+
+function finalizedState(value: string) {
+  return /\b(?:this is final|final(?:ized)? (?:decision|plan|choice|date|dates|weekend|destination|site|reservation|roster|budget|cap|vehicle|transportation|passenger|cargo|assignment|assignments|gear|menu)|(?:decision|plan|choice|date|dates|weekend|destination|site|reservation|roster|budget|cap|vehicle|transportation|passenger|cargo|assignment|assignments|gear|menu) (?:is|are) final|(?:reservation|booking|decision|plan|choice|roster|assignment|assignments) finalized|confirmed (?:reservation|site|date|dates|weekend|destination|roster|booking)|hard final cap)\b/iu.test(value);
+}
+
+function closesPriorState(value: string) {
+  return finalizedState(value)
+    || /\b(?:no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)? out|withdrawn?|unavailable|remove (?:it|him|her|them)|void|obsolete|stale|superseded by|replaced by|changed to)\b/iu.test(value);
+}
+
+function negativelyClosesPriorState(value: string) {
+  return /\b(?:no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)? out|withdrawn?|unavailable|remove (?:it|him|her|them)|void|obsolete|stale|superseded by|replaced by|changed to)\b/iu.test(value);
+}
+
+function materiallyRelatedState(unit: MatureUnit, possibleReplacement: MatureUnit) {
+  const leftSubjects = stateSubjects(unit.statement);
+  const rightSubjects = stateSubjects(possibleReplacement.statement);
+  const sharedSubjects = [...leftSubjects].filter((subject) => rightSubjects.has(subject));
+  const overlap = candidateClusterOverlap(unit.statement, possibleReplacement.statement);
+  if (!sharedSubjects.length) return overlap >= 2;
+  const sameActor = Boolean(sourceActorId(unit.event))
+    && sourceActorId(unit.event) === sourceActorId(possibleReplacement.event);
+  // Actor identity safely connects a participant's own offer/availability
+  // changes. Other state requires a shared semantic subject plus at least one
+  // lexical anchor, except an explicit finalization can close the same narrow
+  // subject without repeating the old option.
+  return overlap >= 1
+    || (sameActor && sharedSubjects.includes("roster"))
+    || (finalizedState(possibleReplacement.statement) && sharedSubjects.length >= 1);
 }
 
 function explicitSupersessionOf(unit: MatureUnit, possibleReplacement: MatureUnit) {
@@ -1026,15 +1137,37 @@ function explicitSupersessionOf(unit: MatureUnit, possibleReplacement: MatureUni
   // Close an older direction when a later event rejects or replaces it. A later
   // paraphrase of an already-rejected option is corroborating evidence, not a
   // supersession of the source-grounded rejection and its rationale.
-  if (!unit.signals.includes("current_direction")
-    || unit.signals.includes("correction")
-    || unit.signals.includes("supersession")) return false;
+  const assertsPriorState = unit.signals.includes("current_direction")
+    || /\b(?:let(?:’|')s|let us)\s+(?:use|take|choose|book|reserve)\b/iu.test(unit.statement)
+    || /\b(?:working|initial|early|preferred)\s+(?:choice|plan|option|site|direction)\b/iu.test(unit.statement)
+    || provisionalState(unit.statement);
+  if (!assertsPriorState) return false;
+  // A correction that explicitly remains exploratory is still an intermediate
+  // state and may be closed by a later final decision.
+  if ((unit.signals.includes("correction") || unit.signals.includes("supersession"))
+    && !provisionalState(unit.statement)
+    && !finalizedState(unit.statement)) return false;
   if (!possibleReplacement.signals.includes("correction")
-    && !possibleReplacement.signals.includes("supersession")) return false;
+    && !possibleReplacement.signals.includes("supersession")
+    && !finalizedState(possibleReplacement.statement)) return false;
   if (/\b(?:do not|don't|must not)\s+(?:replace|supersede|drop|reject)\b/iu.test(possibleReplacement.statement)
     || /\b(?:remains?|stays?)\s+(?:preferred|current|the plan)\b/iu.test(possibleReplacement.statement)) return false;
-  const closesPriorState = /\b(?:no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale|superseded by|replaced by)\b/iu.test(possibleReplacement.statement);
-  return closesPriorState && candidateClusterOverlap(unit.statement, possibleReplacement.statement) >= 2;
+  // Once a source explicitly finalizes a state, a later correction must do more
+  // than close an older option in the same broad family. It must either provide
+  // another finalized state or introduce a materially different immutable value
+  // in the relevant closing clause. This preserves the complete accepted roster,
+  // reservation, menu, vehicle, and gear state alongside compatible guards.
+  if (finalizedState(unit.statement)) {
+    const relevantClosingClauses = possibleReplacement.statement
+      .split(/(?<=[.!?;])\s+|,\s+|\s+and\s+/giu)
+      .filter((clause) => negativelyClosesPriorState(clause)
+        && candidateClusterOverlap(unit.statement, clause) >= 1);
+    if (!relevantClosingClauses.length) return false;
+    if (!relevantClosingClauses.some((clause) => finalizedState(clause)
+      || hasUnsupportedImmutableState(clause, unit.statement))) return false;
+  }
+  return closesPriorState(possibleReplacement.statement)
+    && materiallyRelatedState(unit, possibleReplacement);
 }
 
 function shortRoomClosureUnits(events: Row[]) {
@@ -1172,11 +1305,45 @@ function selectEventsForAnalysis(events: Row[]): EventSelection {
     };
   }
 
-  const units = discoveryMatureUnits(sourceEvents);
+  const explicitNoiseCount = sourceEvents.filter((event) => discoveryAtomicUnits(event)
+    .some((statement) => explicitlyNonGoverningStatement(statement))).length;
+  const stressRecovery = explicitNoiseCount / sourceEvents.length >= HIGH_NOISE_RECOVERY_RATIO;
+  const units = discoveryMatureUnits(sourceEvents, stressRecovery);
   const eventUnits = new Map<string, MatureUnit[]>();
   for (const unit of units) {
     const id = String(unit.event.id);
     eventUnits.set(id, [...(eventUnits.get(id) || []), unit]);
+  }
+  // The accepted discovery classifier remains frozen. Delivery planning gets a
+  // bounded recovery view so a plain user-authored final state (for example,
+  // "reservation finalized") can replace an earlier provisional warning even
+  // when the final sentence does not contain a legacy discovery keyword.
+  const familyEventUnits = new Map<string, MatureUnit[]>(eventUnits);
+  const maximumSourceSequence = Math.max(0, ...sourceEvents.map((event) => sourceSequence(event) || 0));
+  for (const event of sourceEvents) {
+    for (const statement of discoveryAtomicUnits(event)) {
+      if (explicitlyNonGoverningStatement(statement)) continue;
+      const families = continuationStateFamilies(statement);
+      if (!families.length) continue;
+      const signals = continuitySignals(statement);
+      if (!signals.some((signal) => [
+        "correction", "supersession", "constraint", "current_direction", "next_action", "uncertainty",
+      ].includes(signal))) continue;
+      const unit = {
+        event,
+        evidenceEvents: [event],
+        statement,
+        sequence: sourceSequence(event) || 0,
+        signals,
+        score: matureUnitScore(event, statement, signals, maximumSourceSequence),
+        clusterKind: "atomic" as const,
+      } satisfies MatureUnit;
+      const id = String(event.id);
+      const existing = familyEventUnits.get(id) || [];
+      if (!existing.some((candidate) => candidate.statement === statement)) {
+        familyEventUnits.set(id, [...existing, unit]);
+      }
+    }
   }
   const rankedEvents = sourceEvents.map((event) => {
     const values = eventUnits.get(String(event.id)) || [];
@@ -1191,17 +1358,123 @@ function selectEventsForAnalysis(events: Row[]): EventSelection {
     || right.sequence - left.sequence
     || String(left.event.id).localeCompare(String(right.event.id)));
 
+  if (!stressRecovery) {
+    const selected = new Map<string, Row>();
+    const include = (event: Row | undefined) => {
+      if (event) selected.set(String(event.id), event);
+    };
+    const maximumSequence = Math.max(...rankedEvents.map(({ sequence }) => sequence));
+    for (const [start, end] of [[1, Math.ceil(maximumSequence / 3)], [Math.ceil(maximumSequence / 3) + 1, Math.ceil(maximumSequence * 2 / 3)], [Math.ceil(maximumSequence * 2 / 3) + 1, maximumSequence]]) {
+      include(rankedEvents.find(({ sequence }) => sequence >= start && sequence <= end)?.event);
+    }
+    for (const entry of [...rankedEvents].sort((left, right) => right.sequence - left.sequence).slice(0, 3)) include(entry.event);
+    for (const signal of CONTINUITY_SIGNAL_ORDER) include(rankedEvents.find(({ signals }) => signals.has(signal))?.event);
+    for (const entry of rankedEvents) {
+      if (selected.size >= MAX_MATURE_SELECTED_NODES) break;
+      if (entry.score >= 0) include(entry.event);
+    }
+    for (const event of events.filter((candidate) => String(candidate.event_type).toLowerCase() !== "source_message")) {
+      if (selected.size >= MAX_MATURE_SELECTED_NODES) break;
+      include(event);
+    }
+    const bounded = [...selected.values()].sort(chronologicalEventOrder).slice(0, MAX_MATURE_SELECTED_NODES);
+    const selectedSequences = bounded.flatMap((event) => sourceSequence(event) ?? []);
+    const categories = [...new Set(bounded.flatMap((event) =>
+      (eventUnits.get(String(event.id)) || []).flatMap((unit) => unit.signals),
+    ))].sort((left, right) => CONTINUITY_SIGNAL_ORDER.indexOf(left) - CONTINUITY_SIGNAL_ORDER.indexOf(right));
+    return {
+      events: bounded,
+      mature: true,
+      metadata: {
+        strategy: "mature_room_chronology_signal_coverage_v1",
+        classifierVersion: "mature_room_discovery_signals_v1",
+        totalEvents: events.length,
+        totalSourceMessageEvents: sourceEvents.length,
+        selectedSourceSequences: selectedSequences,
+        chronologySpan: selectedSequences.length ? { first: Math.min(...selectedSequences), last: Math.max(...selectedSequences) } : null,
+        signalCategoriesRepresented: categories,
+        omittedCount: Math.max(0, events.length - bounded.length),
+        selectionStoppedBecause: `The deterministic mature-room bound of ${MAX_MATURE_SELECTED_NODES} reasoning nodes was reached after chronology thirds, current tail, continuity-signal categories, and ranked fill were covered.`,
+      },
+    };
+  }
+
   const selected = new Map<string, Row>();
   const include = (event: Row | undefined) => {
     if (event) selected.set(String(event.id), event);
   };
+  const governingRankedEvents = rankedEvents.filter(({ score }) => score >= 0);
   const maximumSequence = Math.max(...rankedEvents.map(({ sequence }) => sequence));
   for (const [start, end] of [[1, Math.ceil(maximumSequence / 3)], [Math.ceil(maximumSequence / 3) + 1, Math.ceil(maximumSequence * 2 / 3)], [Math.ceil(maximumSequence * 2 / 3) + 1, maximumSequence]]) {
-    include(rankedEvents.find(({ sequence }) => sequence >= start && sequence <= end)?.event);
+    include(governingRankedEvents.find(({ sequence }) => sequence >= start && sequence <= end)?.event);
   }
-  for (const entry of [...rankedEvents].sort((left, right) => right.sequence - left.sequence).slice(0, 3)) include(entry.event);
+  for (const entry of [...governingRankedEvents].sort((left, right) => right.sequence - left.sequence).slice(0, 3)) include(entry.event);
+  const familySelectionDiagnostics: Array<{ family: ContinuationStateFamily; sequence: number; score: number }> = [];
+  for (const family of CONTINUATION_STATE_FAMILY_ORDER) {
+    const familyCandidates = rankedEvents.filter(({ event }) => (
+      familyEventUnits.get(String(event.id)) || []
+    ).some((unit) => continuationStateFamilies(unit.statement).includes(family)));
+    const best = (entry: (typeof familyCandidates)[number]) => Math.max(
+      ...(familyEventUnits.get(String(entry.event.id)) || [])
+        .filter((unit) => continuationStateFamilies(unit.statement).includes(family))
+        .map((unit) => stateFamilySpecificity(unit, family)),
+      0,
+    );
+    familyCandidates.sort((left, right) => {
+      const leftUnits = familyEventUnits.get(String(left.event.id)) || [];
+      const rightUnits = familyEventUnits.get(String(right.event.id)) || [];
+      const leftAuthority = Math.max(0, ...leftUnits.map(familySourceAuthority));
+      const rightAuthority = Math.max(0, ...rightUnits.map(familySourceAuthority));
+      return rightAuthority - leftAuthority
+      || best(right) - best(left)
+      || right.sequence - left.sequence
+      || String(left.event.id).localeCompare(String(right.event.id));
+    });
+    const chosen = familyCandidates[0];
+    include(chosen?.event);
+    const chosenUnit = chosen
+      ? (familyEventUnits.get(String(chosen.event.id)) || [])
+        .filter((unit) => continuationStateFamilies(unit.statement).includes(family))
+        .sort((left, right) => stateFamilySpecificity(right, family) - stateFamilySpecificity(left, family))[0]
+      : undefined;
+    if (chosen && chosenUnit) familySelectionDiagnostics.push({
+      family,
+      sequence: chosen.sequence,
+      score: stateFamilySpecificity(chosenUnit, family),
+    });
+  }
+  const secondaryFamilyCandidates = CONTINUATION_STATE_FAMILY_ORDER.flatMap((family) => {
+    const primarySequence = familySelectionDiagnostics.find((item) => item.family === family)?.sequence;
+    return rankedEvents.flatMap((entry) => (familyEventUnits.get(String(entry.event.id)) || [])
+      .filter((unit) => continuationStateFamilies(unit.statement).includes(family)
+        && entry.sequence !== primarySequence
+        && sourceActorType(unit.event) === "user"
+        && !provisionalState(unit.statement)
+        && (unit.signals.includes("constraint")
+          || immutableSemanticAtoms(unit.statement).length > 0))
+      .map((unit) => ({ entry, unit, score: stateFamilySpecificity(unit, family) })));
+  }).sort((left, right) => right.score - left.score
+    || right.entry.sequence - left.entry.sequence
+    || String(left.entry.event.id).localeCompare(String(right.entry.event.id)));
+  const secondaryEvents = new Set<string>();
+  for (const candidate of secondaryFamilyCandidates) {
+    if (secondaryEvents.size >= 4) break;
+    const id = String(candidate.entry.event.id);
+    if (selected.has(id) || secondaryEvents.has(id)) continue;
+    include(candidate.entry.event);
+    secondaryEvents.add(id);
+  }
   for (const signal of CONTINUITY_SIGNAL_ORDER) {
     include(rankedEvents.find(({ signals }) => signals.has(signal))?.event);
+    if (signal === "uncertainty") {
+      const firstUncertainty = rankedEvents.find(({ signals }) => signals.has(signal));
+      include(rankedEvents.find(({ event, signals }) => signals.has(signal)
+        && event !== firstUncertainty?.event
+        && candidateClusterOverlap(
+          eventStatement(event),
+          firstUncertainty ? eventStatement(firstUncertainty.event) : "",
+        ) < 2)?.event);
+    }
   }
   for (const entry of rankedEvents) {
     if (selected.size >= MAX_MATURE_SELECTED_NODES) break;
@@ -1212,9 +1485,11 @@ function selectEventsForAnalysis(events: Row[]): EventSelection {
     include(event);
   }
 
+  // Preserve selection priority, then restore source order for analysis. Sorting
+  // before slicing silently discarded high-priority late current-state seeds.
   const bounded = [...selected.values()]
-    .sort(chronologicalEventOrder)
-    .slice(0, MAX_MATURE_SELECTED_NODES);
+    .slice(0, MAX_MATURE_SELECTED_NODES)
+    .sort(chronologicalEventOrder);
   const selectedSequences = bounded.flatMap((event) => sourceSequence(event) ?? []);
   const categories = [...new Set(bounded.flatMap((event) =>
     (eventUnits.get(String(event.id)) || []).flatMap((unit) => unit.signals),
@@ -1227,9 +1502,15 @@ function selectEventsForAnalysis(events: Row[]): EventSelection {
       classifierVersion: "mature_room_discovery_signals_v1",
       totalEvents: events.length,
       totalSourceMessageEvents: sourceEvents.length,
+      explicitNonGoverningSourceEvents: explicitNoiseCount,
       selectedSourceSequences: selectedSequences,
       chronologySpan: selectedSequences.length ? { first: Math.min(...selectedSequences), last: Math.max(...selectedSequences) } : null,
       signalCategoriesRepresented: categories,
+      familySelections: familySelectionDiagnostics,
+      secondaryFamilySequences: [...secondaryEvents].flatMap((eventId) => {
+        const event = rankedEvents.find((entry) => String(entry.event.id) === eventId)?.event;
+        return event ? sourceSequence(event) ?? [] : [];
+      }),
       omittedCount: Math.max(0, events.length - bounded.length),
       selectionStoppedBecause: `The deterministic mature-room bound of ${MAX_MATURE_SELECTED_NODES} reasoning nodes was reached after chronology thirds, current tail, continuity-signal categories, and ranked fill were covered.`,
     },
@@ -1283,9 +1564,11 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
       && !unit.signals.includes("supersession")
       && !unit.signals.includes("constraint")
       && !unit.signals.includes("shared_term")
+      && !finalizedState(unit.statement)
       && !specificCurrentOrientation(unit)) return "superseded";
     if (unit.signals.includes("uncertainty")) return "unresolved";
-    if (explicitCurrentOrientation(unit)
+    if (finalizedState(unit.statement)
+      || explicitCurrentOrientation(unit)
       || (sourceActorType(unit.event) === "user"
         && (unit.signals.includes("current_direction") || unit.signals.includes("next_action")))) return "current";
     if (unit.sequence >= boundary) return "current";
@@ -1354,6 +1637,21 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
         || (role === "constraint" ? right.statement.length - left.statement.length : 0)
         || compareForRole(left, right, role, boundary);
     });
+
+  // Preserve the best complete proposition for each distinct current state
+  // family before generic role scoring can spend the bounded candidate set.
+  const familyPrioritySeeds: CandidateSeed[] = [];
+  for (const family of CONTINUATION_STATE_FAMILY_ORDER) {
+    const candidate = units
+      .filter((unit) => continuationStateFamilies(unit.statement).includes(family))
+      .sort((left, right) => familySourceAuthority(right) - familySourceAuthority(left)
+        || stateFamilySpecificity(right, family) - stateFamilySpecificity(left, family)
+        || compareMatureUnits(left, right))[0];
+    if (candidate && !familyPrioritySeeds.some((seed) => seed.unit === candidate)) {
+      familyPrioritySeeds.push({ unit: candidate, roles: candidateRoles(candidate) });
+    }
+    add(candidate);
+  }
 
   // Reserve compact global orientation across distinct current subjects before
   // local dependency roles can consume the bounded candidate set.
@@ -1467,6 +1765,23 @@ async function matureFindingCandidates(selectedEvents: Row[]): Promise<Candidate
     if (selected.length >= MAX_MATURE_FINDINGS) break;
     if (!criticalConstraint(unit) || selected.some((candidate) => candidate.unit === unit)) continue;
     add(unit);
+  }
+
+  // Reassert distinct family representatives after generic cluster pruning.
+  // The family seeds are already state-valid and source-grounded; placing them
+  // first prevents a broad next-action sentence from crowding out the actual
+  // roster, reservation, vehicle, gear, or safety state it merely references.
+  const optionalSeeds = [...selected];
+  selected.splice(0, selected.length);
+  for (const seed of familyPrioritySeeds) {
+    if (selected.length >= MAX_MATURE_FINDINGS) break;
+    if (!seed.roles.length || selected.some((candidate) => candidate.unit === seed.unit)) continue;
+    selected.push(seed);
+  }
+  for (const seed of optionalSeeds) {
+    if (selected.length >= MAX_MATURE_FINDINGS) break;
+    if (selected.some((candidate) => candidate.unit === seed.unit)) continue;
+    add(seed.unit);
   }
 
   for (const unit of units) {

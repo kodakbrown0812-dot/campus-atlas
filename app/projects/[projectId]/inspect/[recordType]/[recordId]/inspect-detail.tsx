@@ -14,7 +14,12 @@ type Detail = Record<string, unknown> & {
 function endpoint(projectId: string, recordType: string, recordId: string) {
   const prefix = `/api/v1/projects/${encodeURIComponent(projectId)}`;
   if (recordType === "packets") return `${prefix}/packets/${encodeURIComponent(recordId)}`;
-  return `${prefix}/inspect/${encodeURIComponent(recordType)}/${encodeURIComponent(recordId)}`;
+  const path = `${prefix}/inspect/${encodeURIComponent(recordType)}/${encodeURIComponent(recordId)}`;
+  return recordType === "transfers" ? `${path}?view=summary` : path;
+}
+
+function rawEndpoint(projectId: string, recordType: string, recordId: string) {
+  return `/api/v1/projects/${encodeURIComponent(projectId)}/inspect/${encodeURIComponent(recordType)}/${encodeURIComponent(recordId)}`;
 }
 
 function titleFor(recordType: string, detail: Detail) {
@@ -74,6 +79,8 @@ export default function InspectDetail({
   const [status, setStatus] = useState<"loading" | "ready" | "saving" | "error">("loading");
   const [error, setError] = useState("");
   const [result, setResult] = useState<Record<string, unknown> | null>(null);
+  const [rawTransfer, setRawTransfer] = useState<Detail | null>(null);
+  const [rawStatus, setRawStatus] = useState<"idle" | "loading" | "error">("idle");
 
   const load = useCallback(async () => {
     const response = await fetch(endpoint(projectId, recordType, recordId), { cache: "no-store" });
@@ -135,6 +142,23 @@ export default function InspectDetail({
     setStatus("ready");
   }
 
+  async function loadInternalTransferRecords() {
+    if (rawTransfer || rawStatus === "loading") return;
+    setRawStatus("loading");
+    try {
+      const response = await fetch(rawEndpoint(projectId, recordType, recordId), { cache: "no-store" });
+      const value = await response.json().catch(() => ({ error: "Internal transfer records unavailable." })) as Detail;
+      if (!response.ok) {
+        setRawStatus("error");
+        return;
+      }
+      setRawTransfer(value);
+      setRawStatus("idle");
+    } catch {
+      setRawStatus("error");
+    }
+  }
+
   const currentStatement = useMemo(() => detail?.versions?.at(-1)?.statement || "", [detail]);
   if (status === "loading") return <main className={styles.page}><section className={styles.panel}>Loading exact lineage and versions…</section></main>;
   if (status === "error" || !detail) {
@@ -161,6 +185,9 @@ export default function InspectDetail({
   const treatmentCount = (name: string) => Array.isArray(treatments[name]) ? treatments[name].length : 0;
   const transfer = recordType === "transfers" && detail.transfer && typeof detail.transfer === "object"
     ? detail.transfer as Record<string, unknown>
+    : null;
+  const sourceSummary = transfer && detail.sourceSummary && typeof detail.sourceSummary === "object"
+    ? detail.sourceSummary as Record<string, unknown>
     : null;
   const mechanism = recordType === "mechanisms" && detail.mechanism && typeof detail.mechanism === "object"
     ? detail.mechanism as Record<string, unknown>
@@ -242,7 +269,7 @@ export default function InspectDetail({
           </section>
           <section className={styles.record}>
             <header><strong>Governing truth selected</strong><span>{governedPacketItems.length} supplied</span></header>
-            <p>These are task-specific selections from canonical State Truth. Generic Roadway / Blueprint checks are shown separately below.</p>
+            <p>These are the important facts Atlas supplied to the fresh room. Open a fact to trace its governed wording and Exact source.</p>
             {governedPacketItems.length ? governedPacketItems.map((item) => (
               <div key={String(item.id || `${item.sourceType}:${item.sourceId}`)}>
                 <strong>{selectedItemLabel(item)}</strong>
@@ -256,48 +283,50 @@ export default function InspectDetail({
               </div>
             )) : <p>No governing Use item is recorded in this packet.</p>}
           </section>
-          <section className={`${styles.record} ${styles.scaffoldingRecord}`}>
-            <header><strong>Roadway / Blueprint scaffolding</strong><span>Delivery machinery</span></header>
-            <p>This is generic packet-construction scaffolding, not governed project State Truth. It is shown so an authentic proof can detect irrelevant or costly delivery structure rather than hiding it.</p>
-            <dl>
-              <DetailRow label="Primary roadway" value={selectedRoadway?.name || packet.primaryRoadwayId} />
-              <DetailRow label="Roadway version" value={selectedRoadway?.version || packet.primaryRoadwayVersionId} />
-              <DetailRow label="Why selected" value={packetReceipt?.selectedRoadwayReason} />
-              <DetailRow label="Generic required checks supplied" value={scaffoldingItems.length} />
-              <DetailRow label="Total packet estimate" value={`${readableValue(packet.finalTokenCount)} tokens`} />
-            </dl>
-            {scaffoldingItems.length ? (
-              <ol className={styles.scaffoldingList}>
-                {scaffoldingItems.map((item, index) => <li key={String(item.sourceId || index)}>{readableValue(item.statement)}</li>)}
-              </ol>
-            ) : <p>No generic Roadway check was supplied.</p>}
-            <small>No separate canonical token cost is stored for individual checks; the total packet estimate above is the available measurement.</small>
-          </section>
-          <section className={styles.record}>
-            <header><strong>Delivery receipt</strong><span>Saved</span></header>
-            <dl>
-              <DetailRow label="Used" value={treatmentCount("Use")} />
-              <DetailRow label="Considered" value={treatmentCount("Consider")} />
-              <DetailRow label="Excluded" value={treatmentCount("Exclude")} />
-            </dl>
-            <details>
-              <summary>Why this selection was safe</summary>
-              <dl>
-                <DetailRow label="Inference disclosure" value={packetReceipt?.inferenceDisclosure} />
-                <DetailRow label="Unresolved conflicts" value={packetReceipt?.unresolvedConflicts} />
-              </dl>
-            </details>
-            <details>
-              <summary>Context considered or excluded</summary>
-              <div className={styles.exclusionGrid}>
-                <div><strong>Consider · {consideredItems.length}</strong>{consideredItems.length ? consideredItems.map((item, index) => <p key={String(item.sourceId || index)}>{readableValue(item.statement || item.reason)}</p>) : <p>None</p>}</div>
-                <div><strong>Excluded · {excludedItems.length}</strong>{excludedItems.length ? excludedItems.map((item, index) => <p key={String(item.sourceId || index)}>{readableValue(item.statement || item.reason)}</p>) : <p>None</p>}</div>
-              </div>
-            </details>
-          </section>
-          <details className={styles.record}>
-            <summary>Raw canonical packet and receipt</summary>
-            <pre>{JSON.stringify(detail, null, 2)}</pre>
+          <details className={`${styles.record} ${styles.internalRecords}`}>
+            <summary>Advanced / Packet construction records</summary>
+            <p>Roadway checks, receipt counts, inference disclosures, and raw packet anatomy remain available for proof inspection.</p>
+            <div className={styles.internalStack}>
+              <section className={styles.scaffoldingRecord}>
+                <header><strong>Roadway / Blueprint scaffolding</strong><span>Delivery machinery</span></header>
+                <p>This is generic packet-construction scaffolding, not governed project State Truth. It is retained so an authentic proof can detect irrelevant or costly delivery structure.</p>
+                <dl>
+                  <DetailRow label="Primary roadway" value={selectedRoadway?.name || packet.primaryRoadwayId} />
+                  <DetailRow label="Roadway version" value={selectedRoadway?.version || packet.primaryRoadwayVersionId} />
+                  <DetailRow label="Why selected" value={packetReceipt?.selectedRoadwayReason} />
+                  <DetailRow label="Generic required checks supplied" value={scaffoldingItems.length} />
+                  <DetailRow label="Total packet estimate" value={`${readableValue(packet.finalTokenCount)} tokens`} />
+                </dl>
+                {scaffoldingItems.length ? <ol className={styles.scaffoldingList}>{scaffoldingItems.map((item, index) => <li key={String(item.sourceId || index)}>{readableValue(item.statement)}</li>)}</ol> : <p>No generic Roadway check was supplied.</p>}
+                <small>No separate canonical token cost is stored for individual checks; the total packet estimate above is the available measurement.</small>
+              </section>
+              <section>
+                <header><strong>Delivery receipt</strong><span>Saved</span></header>
+                <dl>
+                  <DetailRow label="Used" value={treatmentCount("Use")} />
+                  <DetailRow label="Considered" value={treatmentCount("Consider")} />
+                  <DetailRow label="Excluded" value={treatmentCount("Exclude")} />
+                </dl>
+                <details>
+                  <summary>Why this selection was safe</summary>
+                  <dl>
+                    <DetailRow label="Inference disclosure" value={packetReceipt?.inferenceDisclosure} />
+                    <DetailRow label="Unresolved conflicts" value={packetReceipt?.unresolvedConflicts} />
+                  </dl>
+                </details>
+                <details>
+                  <summary>Context considered or excluded</summary>
+                  <div className={styles.exclusionGrid}>
+                    <div><strong>Consider · {consideredItems.length}</strong>{consideredItems.length ? consideredItems.map((item, index) => <p key={String(item.sourceId || index)}>{readableValue(item.statement || item.reason)}</p>) : <p>None</p>}</div>
+                    <div><strong>Excluded · {excludedItems.length}</strong>{excludedItems.length ? excludedItems.map((item, index) => <p key={String(item.sourceId || index)}>{readableValue(item.statement || item.reason)}</p>) : <p>None</p>}</div>
+                  </div>
+                </details>
+              </section>
+              <details className={styles.rawRecord}>
+                <summary>Raw canonical packet and receipt</summary>
+                <pre>{JSON.stringify(detail, null, 2)}</pre>
+              </details>
+            </div>
           </details>
         </>
       ) : null}
@@ -362,34 +391,39 @@ export default function InspectDetail({
       {transfer ? (
         <>
           <section className={styles.record}>
-            <header><strong>Transfer outcome</strong><span>{readableValue(transfer.stage)}</span></header>
+            <header><strong>Room transfer</strong><span>{readableValue(transfer.stage)}</span></header>
+            <p>Atlas preserved this room and reconstructed its project state. Any finished transfer packet remains separately inspectable, while internal records stay available below without crowding this summary.</p>
             <dl>
               <DetailRow label="Status" value={transfer.status} />
-              <DetailRow label="Exact conversation" value={transfer.conversationId} />
-              <DetailRow label="Expected counts" value={transfer.expectedCounts} />
-              <DetailRow label="Actual counts" value={transfer.actualCounts} />
-              <DetailRow label="Attempts" value={transfer.attemptCount} />
+              <DetailRow label="Room" value={transfer.conversationTitle} />
+              <DetailRow label="Messages preserved" value={sourceSummary?.immutableMessages} />
+              <DetailRow label="Exact source events" value={sourceSummary?.canonicalSourceEvents} />
+              <DetailRow label="Governing facts found" value={sourceSummary?.governedProjectState} />
+              <DetailRow label="Decisions needed" value={sourceSummary?.decisionsNeeded} />
               <DetailRow label="Blocked / failed reason" value={transfer.blockedReason || transfer.failureReason} />
             </dl>
           </section>
-          {[
-            ["Exact conversation", detail.exactConversation],
-            ["Immutable messages", detail.immutableMessages],
-            ["Canonical source events", detail.canonicalSourceEvents],
-            ["Analysis checkpoint", detail.checkpoint],
-            ["Reconciliation result", detail.reconciliation],
-            ["Governance history", detail.governance],
-            ["Governed project state", detail.governedProjectState],
-            ["Steward context artifacts", detail.stewardArtifacts],
-          ].map(([label, item]) => (
-            <section className={styles.record} key={String(label)}>
-              <header><strong>{String(label)}</strong><span>canonical lineage</span></header>
-              <pre>{JSON.stringify(item, null, 2)}</pre>
-            </section>
-          ))}
-          <details className={styles.record}>
-            <summary>Raw canonical transfer record</summary>
-            <pre>{JSON.stringify(detail, null, 2)}</pre>
+          <details className={`${styles.record} ${styles.internalRecords}`}>
+            <summary>Advanced / Internal records</summary>
+            <p>Load the preserved conversation, Exact events, checkpoint, governance, and downstream packet links only when you need to audit Atlas’s canonical evidence.</p>
+            {!rawTransfer ? <button disabled={rawStatus === "loading"} onClick={() => void loadInternalTransferRecords()} type="button">{rawStatus === "loading" ? "Loading internal records…" : "Load internal records"}</button> : null}
+            {rawStatus === "error" ? <p role="alert">Internal records could not be loaded. The transfer summary remains unchanged.</p> : null}
+            {rawTransfer ? [
+              ["Exact conversation", rawTransfer.exactConversation],
+              ["Immutable messages", rawTransfer.immutableMessages],
+              ["Canonical source events", rawTransfer.canonicalSourceEvents],
+              ["Analysis checkpoint", rawTransfer.checkpoint],
+              ["Reconciliation result", rawTransfer.reconciliation],
+              ["Governance history", rawTransfer.governance],
+              ["Governed project state", rawTransfer.governedProjectState],
+              ["Transfer context artifacts", rawTransfer.stewardArtifacts],
+            ].map(([label, item]) => (
+              <details className={styles.rawRecord} key={String(label)}>
+                <summary>{String(label)}</summary>
+                <pre>{JSON.stringify(item, null, 2)}</pre>
+              </details>
+            )) : null}
+            {rawTransfer ? <details className={styles.rawRecord}><summary>Raw canonical transfer record</summary><pre>{JSON.stringify(rawTransfer, null, 2)}</pre></details> : null}
           </details>
         </>
       ) : null}

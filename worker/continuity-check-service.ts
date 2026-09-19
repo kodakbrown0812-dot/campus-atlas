@@ -10,6 +10,27 @@ import {
 } from "./continuity-request-contract";
 import { interpretTask, TaskInterpretation } from "./roadway-service";
 import {
+  type DeliveryPreservationClass,
+  danglingSemanticReferences,
+  deliveryPreservationClass,
+  hasDistinctImmutableState,
+  hasExplicitCorrectionLanguage,
+  hasUnsupportedImmutableState,
+  immutableSemanticAtoms,
+  immutableSemanticSignatures,
+  normalizeDeliveryStatement,
+  suppliesSemanticAntecedent,
+} from "./immutable-state";
+import {
+  CONTINUATION_STATE_FAMILY_ORDER,
+  continuationFamilyBaseSpecificity,
+  continuationStateFamilies,
+  explicitlyNonGoverningStatement,
+  finalizedContinuationState,
+  provisionalContinuationState,
+  type ContinuationStateFamily,
+} from "./continuation-semantics";
+import {
   all,
   assertId,
   first,
@@ -29,10 +50,24 @@ type CompactMechanism = {
   counterevidenceIds: string[];
   scopeConditions: string[];
   exclusions: string[];
+  sourceEventIds: string[];
   createdAt: string;
+  sourceSequence: number | null;
+};
+
+type CompactSourceEvent = {
+  id: string;
+  actorType: string;
+  actorId: string;
+  exactContent: string;
+  sequence: number | null;
 };
 
 type CompactContext = {
+  project: {
+    id: string;
+    name: string;
+  };
   caseRecord: {
     id: string;
     objective: string;
@@ -42,9 +77,12 @@ type CompactContext = {
   mechanisms: CompactMechanism[];
   matchingMechanisms: CompactMechanism[];
   caseMechanisms: CompactMechanism[];
+  sourceEvents: Map<string, CompactSourceEvent>;
   correctionOrConflictIndicators: number;
   recordsScanned: number;
 };
+
+const MAX_REQUIRED_CLOSURE_NODES = 24;
 
 const STOP_WORDS = new Set([
   "about", "after", "again", "against", "also", "and", "are", "before",
@@ -89,6 +127,29 @@ function stringList(value: unknown) {
   }
 }
 
+function exactSourceSequence(value: unknown) {
+  if (typeof value !== "string") return null;
+  try {
+    const metadata = JSON.parse(value) as { sourceMessage?: { sequence?: unknown } };
+    const sequence = Number(metadata.sourceMessage?.sequence);
+    return Number.isInteger(sequence) && sequence > 0 ? sequence : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseEventMetadata(value: unknown) {
+  if (typeof value !== "string") return {} as { sourceMessage?: { actorType?: unknown; actorId?: unknown } };
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object"
+      ? parsed as { sourceMessage?: { actorType?: unknown; actorId?: unknown } }
+      : {};
+  } catch {
+    return {} as { sourceMessage?: { actorType?: unknown; actorId?: unknown } };
+  }
+}
+
 function hasProtectedSensitivity(mechanism: CompactMechanism) {
   return /\b(password|passcode|secret|credential|api key|access token|social security|medical|diagnosis|bank account|credit card|sensitive|confidential|private)\b/i.test([
     mechanism.statement,
@@ -102,14 +163,17 @@ type ContinuationRole = "direction" | "next_action" | "constraint" | "correction
 function continuationRoles(value: string): ContinuationRole[] {
   const roles: ContinuationRole[] = [];
   if (/\b(?:current|governing|working choice|preferred (?:choice|option|route|site|direction)|remains? (?:preferred|current|the plan)|is now|are now|decision|objective|responsib(?:le|ility)|will bring)\b/i.test(value)) roles.push("direction");
-  if (/\b(?:next (?:action|step|task)|before anything else|begin with|reserve .{0,100} next|then (?:reserve|book|continue))\b/i.test(value)) roles.push("next_action");
-  if (/\b(?:must(?: not)?|has to|have to|needs? to|do not|don't|never|avoid|required|requires|under\s+\$?\d|no more than|at most|ceiling|limit|prohibits?|not (?:provided|supplied|allowed)|until|unless|only if|only after|before|after|defer)\b/i.test(value)) roles.push("constraint");
-  if (/\b(?:correction|corrected|wrong|mistaken|supersed(?:e|ed|es|ing)|replac(?:e|ed|es|ing)|no longer|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale)\b/i.test(value)) roles.push("correction");
+  if (/\b(?:next (?:materially |actual )?(?:action|step|task)|before anything else|begin with|reserve .{0,100} next|then (?:reserve|book|continue))\b/i.test(value)
+    || /\bafter\b[^.!?]{1,120},\s*(?:update|confirm|verify|book|prepare|send|build|run|write|contact)\b/i.test(value)) roles.push("next_action");
+  if (/\b(?:must(?: not)?|has to|have to|needs? to|do not|don't|never|avoid|required|requires|under\s+\$?\d|no more than|at most|ceiling|limit|prohibits?|not (?:provided|supplied|allowed)|until|unless|only if|only after|before|after|defer)\b/i.test(value)
+    || /\bdoes not\s+(?:cancel|permit|allow|require|trigger|block|change|replace)\b/iu.test(value)) roles.push("constraint");
+  if (hasExplicitCorrectionLanguage(value)) roles.push("correction");
   if (/\b(?:because|therefore|\bso\b|caused|the reason|rationale|depends on|in order to)\b/i.test(value)) roles.push("rationale");
   if (/\b(?:if|unless|only if|only after|until|subject to|otherwise)\b/i.test(value)) roles.push("conditional");
   if (/\b(?:unresolved|undecided|open (?:question|item|work)|not (?:yet )?(?:confirmed|established|settled)|pending|deferred|stay on hold|remains to be)\b/i.test(value)) roles.push("unresolved");
   if (/\b(?:local term|we call this|call .{0,60}(?:plan|option|route|version)|means|refers to|is defined as)\b/i.test(value)) roles.push("shared_term");
-  if (/\b(?:commit|version|release|deployment|packet|receipt|run|artifact)\b[^\n]{0,80}\b(?:[a-f0-9]{7,64}|v\d+(?:\.\d+){0,3})\b/i.test(value)) roles.push("semantic_identity");
+  if (/\b(?:commit|version|release|deployment|packet|receipt|run|artifact)\b[^\n]{0,80}\b(?:[a-f0-9]{7,64}|v\d+(?:\.\d+){0,3})\b/i.test(value)
+    || immutableSemanticAtoms(value).some((atom) => atom.kind === "identifier")) roles.push("semantic_identity");
   return [...new Set(roles)];
 }
 
@@ -146,16 +210,18 @@ function semanticOverlap(left: string, right: string) {
 }
 
 function semanticSignatures(value: string) {
+  const source = normalizeDeliveryStatement(value);
   const signatures: string[] = [];
-  if (/\b(?:no|not|never|cannot|can't|don't|do not|without)\b/i.test(value)) signatures.push("negation");
-  if (/\b(?:if|unless|only if|only after|until|otherwise|subject to)\b/i.test(value)) signatures.push("condition");
-  if (/\b(?:before|after|requires?|required|prerequisite|depends on)\b/i.test(value)) signatures.push("prerequisite");
-  if (/\b(?:at least as|no worse than|no less than|better than|worse than|versus|compared? (?:with|to)|baseline)\b/i.test(value)) signatures.push("comparison");
-  if (/\b(?:replac(?:e|ed|es)|supersed(?:e|ed|es)|instead|is out|are out|reject(?:ed)?|obsolete|scratch|no longer)\b/i.test(value)) signatures.push("supersession");
-  if (/\b(?:because|therefore|\bso\b|caused|the reason|rationale|in order to)\b/i.test(value)) signatures.push("rationale");
-  if (/\b(?:unresolved|undecided|open|pending|not (?:yet )?(?:confirmed|established|settled)|deferred)\b/i.test(value)) signatures.push("unresolved");
-  if (/\b(?:next action|next step|before anything else|begin with)\b/i.test(value)) signatures.push("next_action");
-  if (continuationRoles(value).includes("semantic_identity")) signatures.push("semantic_identity");
+  if (/\b(?:no|not|never|cannot|can't|don't|do not|without)\b/i.test(source)) signatures.push("negation");
+  if (/\b(?:if|unless|only if|only after|until|otherwise|subject to)\b/i.test(source)) signatures.push("condition");
+  if (/\b(?:before|after|requires?|required|prerequisite|depends on)\b/i.test(source)) signatures.push("prerequisite");
+  if (/\b(?:at least as|no worse than|no less than|better than|worse than|versus|compared? (?:with|to)|baseline)\b/i.test(source)) signatures.push("comparison");
+  if (/\b(?:replac(?:e|ed|es)|supersed(?:e|ed|es)|instead|is out|are out|reject(?:ed)?|obsolete|scratch|no longer)\b/i.test(source)) signatures.push("supersession");
+  if (/\b(?:because|therefore|\bso\b|caused|the reason|rationale|in order to)\b/i.test(source)) signatures.push("rationale");
+  if (/\b(?:unresolved|undecided|open|pending|not (?:yet )?(?:confirmed|established|settled)|deferred)\b/i.test(source)) signatures.push("unresolved");
+  if (/\b(?:next (?:materially |actual )?(?:action|step)|before anything else|begin with)\b/i.test(source)) signatures.push("next_action");
+  if (continuationRoles(source).includes("semantic_identity")) signatures.push("semantic_identity");
+  signatures.push(...immutableSemanticSignatures(source));
   return [...new Set(signatures)];
 }
 
@@ -170,13 +236,37 @@ function mechanismSimilarity(left: CompactMechanism, right: CompactMechanism) {
 }
 
 function explicitlyNonGoverning(value: string) {
-  return /\b(?:does not need to|doesn't need to|need not|can wait|no need to)\b/i.test(value);
+  const source = value.replace(/\s+/gu, " ").trim();
+  if (explicitlyNonGoverningStatement(source)) return true;
+  if (/\b(?:current|governing|must(?: not)?|has to|have to|required|constraint|next action|next step|unresolved|undecided)\b/iu.test(source)) return false;
+  return /^(?:(?:this|that|it|these|those|other|the)\b[^.!?]{0,100})?\b(?:does not need to|doesn't need to|need not|can wait|no need to)\b[^.!?]*[.!?]?$/iu.test(source);
+}
+
+function familySeedSpecificity(mechanism: CompactMechanism, family: ContinuationStateFamily) {
+  const roles = continuationRoles(mechanism.statement);
+  return continuationFamilyBaseSpecificity(mechanism.statement, family)
+    + Number(explicitCurrentScore(mechanism) > 0) * 6
+    + Number(roles.includes("constraint")) * 3
+    + Number(roles.includes("correction")) * 3
+    + Number(roles.includes("unresolved")) * 2
+    + relationshipDensity(mechanism);
+}
+
+function strongestFamilySeed(mechanism: CompactMechanism) {
+  return continuationStateFamilies(mechanism.statement)
+    .map((family) => ({ family, score: familySeedSpecificity(mechanism, family) }))
+    .sort((left, right) => right.score - left.score || left.family.localeCompare(right.family))[0] || null;
+}
+
+function strongestFamilySeedSpecificity(mechanism: CompactMechanism) {
+  return Math.max(0, strongestFamilySeed(mechanism)?.score || 0);
 }
 
 function collapseRepeatedMechanisms(mechanisms: CompactMechanism[]) {
   const selected: CompactMechanism[] = [];
   const ordered = [...mechanisms].sort((left, right) => (
-    relationshipDensity(right) - relationshipDensity(left)
+    strongestFamilySeedSpecificity(right) - strongestFamilySeedSpecificity(left)
+    || relationshipDensity(right) - relationshipDensity(left)
     || semanticSignatures(right.statement).length - semanticSignatures(left.statement).length
     || right.createdAt.localeCompare(left.createdAt)
     || left.id.localeCompare(right.id)
@@ -184,6 +274,17 @@ function collapseRepeatedMechanisms(mechanisms: CompactMechanism[]) {
   for (const mechanism of ordered) {
     const roles = continuationRoles(mechanism.statement);
     const duplicate = selected.some((existing) => {
+      if (hasDistinctImmutableState(mechanism.statement, existing.statement)) return false;
+      const mechanismFamily = strongestFamilySeed(mechanism);
+      const existingFamily = strongestFamilySeed(existing);
+      if (mechanismFamily && existingFamily
+        && mechanismFamily.family !== existingFamily.family
+        && mechanismFamily.score >= 20
+        && existingFamily.score >= 20) return false;
+      if (["answer_set", "condition_set"].some((reference) => (
+        suppliesSemanticAntecedent(mechanism.statement, reference)
+        !== suppliesSemanticAntecedent(existing.statement, reference)
+      ))) return false;
       const existingRoles = continuationRoles(existing.statement);
       const sharedRole = roles.some((role) => existingRoles.includes(role));
       const protectedRoleMismatch = ["next_action", "unresolved", "conditional", "correction", "semantic_identity"]
@@ -211,7 +312,98 @@ type ClosureNode = {
   materialityReason: string;
   depth: number;
   clusterId: string;
+  preservationClass: DeliveryPreservationClass;
+  immutableAtoms: ReturnType<typeof immutableSemanticAtoms>;
+  deliveryLayer: "immutable_spine" | "governed_abstraction" | "continuation_frontier";
+  participantIds: string[];
 };
+
+const FIRST_PERSON_REFERENCE = /\b(?:I|I'm|I’m|I've|I’ve|I'll|I’ll|me|my|mine)\b/iu;
+
+function sourceParticipantIds(mechanism: CompactMechanism, context: CompactContext) {
+  if (!FIRST_PERSON_REFERENCE.test(mechanism.statement)) return [];
+  const namedRoomParticipants = new Set([...context.sourceEvents.values()]
+    .filter((event) => event.actorType === "user" && event.actorId && !/^(?:user|owner|unknown)$/iu.test(event.actorId))
+    .map((event) => event.actorId));
+  if (namedRoomParticipants.size < 2) return [];
+  const candidates = mechanism.sourceEventIds
+    .map((id) => context.sourceEvents.get(id))
+    .filter((event): event is CompactSourceEvent => Boolean(
+      event
+      && event.actorType === "user"
+      && event.actorId
+      && FIRST_PERSON_REFERENCE.test(event.exactContent),
+    ))
+    .map((event) => ({ event, overlap: semanticOverlap(mechanism.statement, event.exactContent) }))
+    .sort((left, right) => right.overlap - left.overlap
+      || (right.event.sequence || 0) - (left.event.sequence || 0)
+      || left.event.id.localeCompare(right.event.id));
+  if (!candidates.length) return [];
+  const strongest = candidates[0];
+  const tiedActors = new Set(candidates
+    .filter((candidate) => candidate.overlap === strongest.overlap)
+    .map((candidate) => candidate.event.actorId));
+  return tiedActors.size === 1 ? [strongest.event.actorId] : [];
+}
+
+function cleanObjective(value: string) {
+  return normalizeDeliveryStatement(value)
+    .replace(/\s+(?:let(?:’|')s|let us|and|but|because|so|then)\.?$/iu, "")
+    .replace(/[\s,;:.-]+$/u, "")
+    .trim();
+}
+
+function workingSummary(
+  context: CompactContext,
+  scope: "narrow" | "continuation" | "broad",
+) {
+  if (scope === "narrow") return null;
+  const projectName = cleanObjective(context.project.name);
+  if (!projectName) return null;
+  const objective = cleanObjective(context.caseRecord?.objective || "");
+  const objectiveIsCurrentOrientation = objective
+    && !/\b(?:v\d+(?:\.\d+)*|stress(?:-test| test)?|\d+[- ]message|proof run|benchmark run)\b/iu.test(objective)
+    && semanticOverlap(objective, projectName) < Math.min(3, objective.split(/\s+/u).length);
+  return {
+    text: `Project: ${projectName}.${objectiveIsCurrentOrientation ? ` Objective: ${objective}.` : ""}`,
+    sourceIds: [context.project.id, ...(objectiveIsCurrentOrientation && context.caseRecord ? [context.caseRecord.id] : [])],
+  };
+}
+
+function continuationFrontier(
+  context: CompactContext,
+  mechanisms: CompactMechanism[],
+  scope: "narrow" | "continuation" | "broad",
+) {
+  if (scope === "narrow") return null;
+  const candidates = mechanisms
+    .filter((mechanism) => continuationRoles(mechanism.statement).includes("next_action"))
+    .sort((left, right) => (
+      (right.sourceSequence || 0) - (left.sourceSequence || 0)
+      || right.createdAt.localeCompare(left.createdAt)
+      || left.id.localeCompare(right.id)
+    ));
+  for (const mechanism of candidates) {
+    const sourceEventIds = mechanism.sourceEventIds
+      .map((id) => context.sourceEvents.get(id))
+      .filter((event): event is CompactSourceEvent => event !== undefined
+        && event.actorType === "user"
+        && continuationRoles(event.exactContent).includes("next_action")
+        && semanticOverlap(event.exactContent, mechanism.statement) >= 2)
+      .sort((left, right) => (right.sequence || 0) - (left.sequence || 0) || left.id.localeCompare(right.id))
+      .slice(0, 2)
+      .map((event) => event.id);
+    if (!sourceEventIds.length) continue;
+    return {
+      mechanismId: mechanism.id,
+      text: normalizeDeliveryStatement(mechanism.statement),
+      sourceEventIds,
+      representation: "governed_abstraction" as const,
+      reason: "The latest user-authored source supporting the governed next action anchors the immediate continuation edge.",
+    };
+  }
+  return null;
+}
 
 function relationshipDensity(mechanism: CompactMechanism) {
   return new Set([
@@ -223,7 +415,11 @@ function relationshipDensity(mechanism: CompactMechanism) {
 }
 
 function explicitCurrentScore(mechanism: CompactMechanism) {
-  return Number(/\b(?:current|governing|preferred|remains?|is now|are now|for now|working choice|objective)\b/i.test(mechanism.statement));
+  const source = mechanism.statement;
+  const positive = /\b(?:current (?:[a-z][a-z-]*\s+){0,2}(?:decision|direction|choice|plan|state|objective|architecture|requirements)|governing (?:[a-z][a-z-]*\s+){0,2}(?:decision|direction|choice|plan|state)|is now preferred|are now preferred|remains? preferred|stays? preferred|working choice|objective)\b/iu.test(source);
+  const negative = /\b(?:do not|don't|not|never|no longer)\b[^.!?]{0,50}\b(?:current|preferred|governing|working choice)\b/iu.test(source)
+    || /\b(?:reject(?:ed)?|drop(?:ped)?|obsolete|stale|is out|are out)\b/iu.test(source);
+  return Number(positive) - Number(negative);
 }
 
 function compareSeedCandidates(task: string, role: ContinuationRole) {
@@ -232,9 +428,53 @@ function compareSeedCandidates(task: string, role: ContinuationRole) {
     || Number(continuationRoles(right.statement).includes(role)) - Number(continuationRoles(left.statement).includes(role))
     || relationshipDensity(right) - relationshipDensity(left)
     || overlap(task, right.statement) - overlap(task, left.statement)
+    || (right.sourceSequence || 0) - (left.sourceSequence || 0)
     || right.createdAt.localeCompare(left.createdAt)
     || left.id.localeCompare(right.id)
   );
+}
+
+function compareOrientationCandidates(task: string, localAction: CompactMechanism | null) {
+  return (left: CompactMechanism, right: CompactMechanism) => (
+    explicitCurrentScore(right) - explicitCurrentScore(left)
+    || (localAction ? semanticOverlap(right.statement, localAction.statement) - semanticOverlap(left.statement, localAction.statement) : 0)
+    || relationshipDensity(right) - relationshipDensity(left)
+    || overlap(task, right.statement) - overlap(task, left.statement)
+    || (right.sourceSequence || 0) - (left.sourceSequence || 0)
+    || right.createdAt.localeCompare(left.createdAt)
+    || left.id.localeCompare(right.id)
+  );
+}
+
+function supersedesMechanismState(prior: CompactMechanism, later: CompactMechanism) {
+  const laterInSource = prior.sourceSequence !== null && later.sourceSequence !== null
+    ? later.sourceSequence > prior.sourceSequence
+    : later.createdAt > prior.createdAt;
+  if (!laterInSource || prior.id === later.id) return false;
+  const priorRoles = continuationRoles(prior.statement);
+  const sharedFamilies = continuationStateFamilies(prior.statement)
+    .filter((family) => continuationStateFamilies(later.statement).includes(family));
+  if (provisionalContinuationState(prior.statement)
+    && finalizedContinuationState(later.statement)
+    && sharedFamilies.length
+    && semanticOverlap(prior.statement, later.statement) >= 1) return true;
+  if (finalizedContinuationState(prior.statement)) {
+    const relevantClosingClauses = later.statement
+      .split(/(?<=[.!?;])\s+|,\s+|\s+and\s+/giu)
+      .filter((clause) => /\b(?:no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale|superseded by|replaced by|changed? (?:from|to))\b/iu.test(clause)
+        && semanticOverlap(prior.statement, clause) >= 1);
+    if (!relevantClosingClauses.length) return false;
+    if (!relevantClosingClauses.some((clause) => finalizedContinuationState(clause)
+      || hasUnsupportedImmutableState(clause, prior.statement))) return false;
+  }
+  if (priorRoles.includes("correction") || !hasExplicitCorrectionLanguage(later.statement)) return false;
+  if (/\b(?:do not|don't|must not)\s+(?:replace|supersede|drop|reject)\b/iu.test(later.statement)) return false;
+  const closesPriorState = /\b(?:no longer|cannot work|is out|are out|scratch|reject(?:ed)?|drop(?:ped)?|obsolete|stale|superseded by|replaced by|changed? (?:from|to))\b/iu.test(later.statement);
+  if (!closesPriorState) return false;
+  const priorAssertsState = priorRoles.includes("direction")
+    || /\b(?:let(?:’|')s|let us)\s+(?:use|take|choose|book|reserve)\b/iu.test(prior.statement)
+    || /\b(?:working|initial|early|preferred)\s+(?:choice|plan|option|site|direction)\b/iu.test(prior.statement);
+  return priorAssertsState && semanticOverlap(prior.statement, later.statement) >= 2;
 }
 
 function continuationClosure(
@@ -251,14 +491,10 @@ function continuationClosure(
     ? lexical
     : context.caseMechanisms.length ? context.caseMechanisms : lexical;
   const newerCorrections = (mechanism: CompactMechanism) => source.some((candidate) => (
-    candidate.createdAt > mechanism.createdAt
-    && continuationRoles(candidate.statement).includes("correction")
-    && semanticOverlap(candidate.statement, mechanism.statement) >= 1
+    supersedesMechanismState(mechanism, candidate)
   ));
   const stateValid = source.filter((mechanism) => !(
-    continuationRoles(mechanism.statement).includes("direction")
-    && !continuationRoles(mechanism.statement).includes("correction")
-    && !explicitCurrentScore(mechanism)
+    !continuationRoles(mechanism.statement).includes("correction")
     && newerCorrections(mechanism)
   ));
   const duplicatesCollapsed = collapseRepeatedMechanisms(stateValid);
@@ -269,18 +505,45 @@ function continuationClosure(
     .filter((item) => !stateValid.some((selected) => selected.id === item.id))
     .map((item) => ({ id: item.id, reason: "A newer governed correction supersedes this direction; the correction guard remains eligible." }));
 
-  const orientationCandidates = duplicatesCollapsed
-    .filter((item) => continuationRoles(item.statement).includes("direction"))
-    .sort(compareSeedCandidates(task, "direction"));
   const actionCandidates = duplicatesCollapsed
     .filter((item) => continuationRoles(item.statement).includes("next_action"))
     .sort(compareSeedCandidates(task, "next_action"));
-  const orientationSeed = scope === "narrow" ? null : orientationCandidates[0] || null;
   const localActionSeed = actionCandidates[0]
     || [...duplicatesCollapsed].sort(compareSeedCandidates(task, "direction"))[0]
     || null;
-  const seedIds = new Set([orientationSeed?.id, localActionSeed?.id].filter((id): id is string => Boolean(id)));
-  const seedStatements = [orientationSeed, localActionSeed].filter((item): item is CompactMechanism => Boolean(item));
+  const orientationCandidates = duplicatesCollapsed
+    .filter((item) => continuationRoles(item.statement).includes("direction") && explicitCurrentScore(item) > 0)
+    .sort(compareOrientationCandidates(task, localActionSeed));
+  const orientationSeeds: CompactMechanism[] = [];
+  if (scope !== "narrow") {
+    const maximumOrientations = scope === "broad" ? 6 : 4;
+    for (const candidate of orientationCandidates) {
+      if (orientationSeeds.length >= maximumOrientations) break;
+      if (orientationSeeds.some((existing) => {
+        const similarity = mechanismSimilarity(candidate, existing);
+        return similarity.count >= 3 && similarity.ratio >= 0.5;
+      })) continue;
+      orientationSeeds.push(candidate);
+    }
+  }
+  const familySeeds: CompactMechanism[] = [];
+  if (scope !== "narrow") {
+    for (const family of CONTINUATION_STATE_FAMILY_ORDER) {
+      const candidate = duplicatesCollapsed
+        .filter((item) => !explicitlyNonGoverning(item.statement)
+          && continuationStateFamilies(item.statement).includes(family))
+        .sort((left, right) => familySeedSpecificity(right, family) - familySeedSpecificity(left, family)
+          || compareOrientationCandidates(task, localActionSeed)(left, right))[0];
+      if (candidate && !familySeeds.some((seed) => seed.id === candidate.id)) familySeeds.push(candidate);
+    }
+  }
+  const seedIds = new Set([
+    ...orientationSeeds.map((seed) => seed.id),
+    ...familySeeds.map((seed) => seed.id),
+    localActionSeed?.id,
+  ].filter((id): id is string => Boolean(id)));
+  const seedStatements = [...orientationSeeds, ...familySeeds, localActionSeed]
+    .filter((item, index, values): item is CompactMechanism => Boolean(item) && values.indexOf(item) === index);
   const directlyConnected = (mechanism: CompactMechanism) => seedStatements.some((seed) => (
     seed.id === mechanism.id || semanticOverlap(seed.statement, mechanism.statement) >= 1
   ));
@@ -301,7 +564,7 @@ function continuationClosure(
   const selected = new Map<string, { depth: number; reason: string }>();
   for (const seed of seedStatements) selected.set(seed.id, {
     depth: 0,
-    reason: seed.id === orientationSeed?.id
+    reason: orientationSeeds.some((candidate) => candidate.id === seed.id)
       ? "Reserved as the compact global orientation seed before local ranking."
       : "Selected as the materially current local continuation seed.",
   });
@@ -338,7 +601,33 @@ function continuationClosure(
       });
     }
   }
-  const selectedMechanisms = duplicatesCollapsed.filter((item) => selected.has(item.id)).slice(0, 24);
+  // A selected proposition may refer to an answer or condition set defined in
+  // another governed proposition. Pull that antecedent into closure instead of
+  // emitting a grammatically valid but semantically dangling instruction.
+  const selectedBeforeAntecedents = duplicatesCollapsed.filter((item) => selected.has(item.id));
+  for (const mechanism of selectedBeforeAntecedents) {
+    for (const reference of danglingSemanticReferences(mechanism.statement)) {
+      const alreadySupplied = selectedBeforeAntecedents.some((candidate) => (
+        candidate.id !== mechanism.id && suppliesSemanticAntecedent(candidate.statement, reference)
+      ));
+      if (alreadySupplied) continue;
+      const antecedent = duplicatesCollapsed
+        .filter((candidate) => candidate.id !== mechanism.id && suppliesSemanticAntecedent(candidate.statement, reference))
+        .sort((left, right) => (
+          semanticOverlap(right.statement, mechanism.statement) - semanticOverlap(left.statement, mechanism.statement)
+          || relationshipDensity(right) - relationshipDensity(left)
+          || right.createdAt.localeCompare(left.createdAt)
+          || left.id.localeCompare(right.id)
+        ))[0];
+      if (antecedent) selected.set(antecedent.id, {
+        depth: 2,
+        reason: `Required to resolve the selected proposition's ${reference.replaceAll("_", " ")} without inference.`,
+      });
+    }
+  }
+  const allSelectedMechanisms = duplicatesCollapsed.filter((item) => selected.has(item.id));
+  const requiredOverflow = allSelectedMechanisms.slice(MAX_REQUIRED_CLOSURE_NODES);
+  const selectedMechanisms = allSelectedMechanisms.slice(0, MAX_REQUIRED_CLOSURE_NODES);
   const optional = duplicatesCollapsed.filter((item) => !selected.has(item.id) && overlap(task, item.statement) >= 2);
   for (const item of duplicatesCollapsed) {
     if (!selected.has(item.id) && !optional.some((candidate) => candidate.id === item.id)) {
@@ -355,10 +644,12 @@ function continuationClosure(
     ));
     componentById.set(mechanism.id, linked ? componentById.get(linked.id)! : `cluster-${++component}`);
   }
+  const frontier = continuationFrontier(context, selectedMechanisms, scope);
   const rolePriority: ContinuationRole[] = ["direction", "next_action", "constraint", "conditional", "correction", "rationale", "unresolved", "semantic_identity", "shared_term"];
-  const nodes: ClosureNode[] = selectedMechanisms.map((mechanism) => {
+  const nodes: ClosureNode[] = selectedMechanisms.map((mechanism): ClosureNode => {
     const roles = continuationRoles(mechanism.statement);
     const selection = selected.get(mechanism.id)!;
+    const preservationClass = deliveryPreservationClass(mechanism.statement, roles);
     return {
       mechanism,
       roles,
@@ -367,6 +658,14 @@ function continuationClosure(
       materialityReason: selection.reason,
       depth: selection.depth,
       clusterId: componentById.get(mechanism.id) || "cluster-1",
+      preservationClass,
+      immutableAtoms: immutableSemanticAtoms(mechanism.statement),
+      deliveryLayer: frontier?.mechanismId === mechanism.id
+        ? "continuation_frontier"
+        : preservationClass === "immutable_state"
+          ? "immutable_spine"
+          : "governed_abstraction",
+      participantIds: sourceParticipantIds(mechanism, context),
     };
   }).sort((left, right) => {
     const leftPriority = Math.min(...left.roles.map((role) => rolePriority.indexOf(role)).filter((value) => value >= 0), rolePriority.length);
@@ -375,14 +674,32 @@ function continuationClosure(
   });
   const mechanisms = nodes.map((node) => node.mechanism);
   const roles = [...new Set(nodes.flatMap((node) => node.roles))];
-  const missing: string[] = [];
-  if (scope !== "narrow" && orientationCandidates.length && !orientationSeed) missing.push("current_orientation");
+  const missing: string[] = requiredOverflow.map((mechanism) => `required_candidate_limit:${mechanism.id}`);
+  if (scope !== "narrow" && orientationCandidates.length && !orientationSeeds.length) missing.push("current_orientation");
   if (actionCandidates.length && !nodes.some((node) => node.roles.includes("next_action"))) missing.push("next_action");
+  if (scope !== "narrow") {
+    const requiredFamilies = [...new Set(duplicatesCollapsed
+      .filter((mechanism) => !explicitlyNonGoverning(mechanism.statement))
+      .flatMap((mechanism) => continuationStateFamilies(mechanism.statement)))];
+    const deliveredFamilies = new Set(nodes.flatMap((node) => continuationStateFamilies(node.mechanism.statement)));
+    for (const family of requiredFamilies) {
+      if (!deliveredFamilies.has(family)) missing.push(`state_family:${family}`);
+    }
+  }
+  for (const node of nodes) {
+    for (const reference of danglingSemanticReferences(node.mechanism.statement)) {
+      if (!nodes.some((candidate) => (
+        candidate.mechanism.id !== node.mechanism.id
+        && suppliesSemanticAntecedent(candidate.mechanism.statement, reference)
+      ))) missing.push(`antecedent:${node.mechanism.id}:${reference}`);
+    }
+  }
+  const summary = workingSummary(context, scope);
   const diagnostics: ContinuationClosureDiagnostics = {
     scope,
     scopeReason: classification.reason,
     seeds: {
-      orientation: orientationSeed ? [orientationSeed.id] : [],
+      orientation: orientationSeeds.map((seed) => seed.id),
       localAction: localActionSeed ? [localActionSeed.id] : [],
     },
     requiredDependencyAdditions: nodes.filter((node) => node.depth > 0).map((node) => ({
@@ -397,15 +714,27 @@ function continuationClosure(
     semanticIdentities: nodes.filter((node) => node.roles.includes("semantic_identity")).map((node) => node.mechanism.id),
     sourceLineage: nodes.map((node) => ({ id: node.mechanism.id, versionId: node.mechanism.versionId })),
     completeness: { complete: missing.length === 0, missing },
-    closureSizeBeforeCompaction: nodes.length,
+    closureSizeBeforeCompaction: allSelectedMechanisms.length,
     packetSize: null,
     relationshipTypes: [...new Set(nodes.flatMap((node) => node.relationshipTypes))],
     traversalDepth: Math.max(0, ...nodes.map((node) => node.depth)),
     clusterCount: new Set(nodes.map((node) => node.clusterId)).size,
     pruned,
     semanticRecoveryActions: [],
-    stopReason: nodes.length >= 24
-      ? "bounded_candidate_limit_reached"
+    reconstructionVerification: null,
+    budgetPlan: null,
+    stateDelta: null,
+    continuationFrontier: frontier,
+    immutableStates: nodes
+      .filter((node) => node.preservationClass === "immutable_state")
+      .map((node) => ({
+        id: node.mechanism.id,
+        preservationClass: node.preservationClass,
+        atoms: node.immutableAtoms,
+      })),
+    workingSummary: summary,
+    stopReason: requiredOverflow.length
+      ? "required_candidate_limit_exceeded"
       : "no_omitted_fact_can_plausibly_change_continuation",
   };
   return {
@@ -428,7 +757,7 @@ async function compactContext(
   caseId: string | null,
   task: string,
 ): Promise<CompactContext> {
-  await requireProject(db, projectId);
+  const project = await requireProject(db, projectId);
   let caseRecord: CompactContext["caseRecord"] = null;
   if (caseId) {
     assertId(caseId, "case ID");
@@ -447,11 +776,16 @@ async function compactContext(
   const mechanismRows = await all<Row>(db.prepare(
     `SELECT m.id, m.current_governing_version_id, v.statement, v.created_at,
             v.authority_state, v.supporting_case_ids, v.counterevidence_ids,
-            v.scope_conditions, v.exclusions
+            v.scope_conditions, v.exclusions, f.source_event_ids,
+            fv.reason_for_surfacing
      FROM mechanisms m
      JOIN mechanism_versions v
        ON v.id = m.current_governing_version_id
       AND v.project_id = m.project_id
+     LEFT JOIN findings f
+       ON f.id = m.source_finding_id AND f.project_id = m.project_id
+     LEFT JOIN finding_versions fv
+       ON fv.id = f.current_version_id AND fv.project_id = f.project_id
      WHERE m.project_id = ?
        AND m.status = 'active'
        AND v.authority_state IN (
@@ -459,6 +793,27 @@ async function compactContext(
        )
      ORDER BY v.created_at DESC, m.id ASC`,
   ).bind(projectId));
+  const sourceEventIds = [...new Set(mechanismRows.flatMap((row) => stringList(row.source_event_ids)))];
+  const sourceSequenceByEvent = new Map<string, number>();
+  const sourceEvents = new Map<string, CompactSourceEvent>();
+  if (sourceEventIds.length) {
+    const eventRows = await all<Row>(db.prepare(
+      `SELECT id, metadata, exact_source_span FROM events
+       WHERE project_id = ? AND id IN (${sourceEventIds.map(() => "?").join(", ")})`,
+    ).bind(projectId, ...sourceEventIds));
+    for (const event of eventRows) {
+      const sequence = exactSourceSequence(event.metadata);
+      if (sequence !== null) sourceSequenceByEvent.set(String(event.id), sequence);
+      const metadata = parseEventMetadata(event.metadata);
+      sourceEvents.set(String(event.id), {
+        id: String(event.id),
+        actorType: String(metadata.sourceMessage?.actorType || "unknown").toLowerCase(),
+        actorId: String(metadata.sourceMessage?.actorId || "").trim(),
+        exactContent: String(event.exact_source_span || ""),
+        sequence,
+      });
+    }
+  }
   const mechanisms = mechanismRows.map((row): CompactMechanism => {
     const caseIds = stringList(row.supporting_case_ids);
     const authority = String(row.authority_state);
@@ -472,7 +827,14 @@ async function compactContext(
       counterevidenceIds: stringList(row.counterevidence_ids),
       scopeConditions: stringList(row.scope_conditions),
       exclusions: stringList(row.exclusions),
+      sourceEventIds: stringList(row.source_event_ids),
       createdAt: String(row.created_at),
+      sourceSequence: Math.max(
+        0,
+        ...stringList(row.source_event_ids).flatMap((eventId) => sourceSequenceByEvent.get(eventId) ?? []),
+      ) || (String(row.reason_for_surfacing || "").match(/Exact source sequence (\d+)/iu)
+        ? Number(String(row.reason_for_surfacing).match(/Exact source sequence (\d+)/iu)?.[1])
+        : null),
     };
   });
 
@@ -489,12 +851,17 @@ async function compactContext(
   ).bind(projectId, caseId, caseId));
 
   return {
+    project: {
+      id: String(project.id),
+      name: String(project.name || project.id),
+    },
     caseRecord,
     mechanisms,
     matchingMechanisms: mechanisms.filter((mechanism) => mechanismMatchesTask(task, mechanism, caseId)),
     caseMechanisms: caseId
       ? mechanisms.filter((mechanism) => mechanism.caseIds.includes(caseId))
       : [],
+    sourceEvents,
     correctionOrConflictIndicators: Number(indicator?.count || 0),
     recordsScanned: 1 + (caseRecord ? 1 : 0) + mechanisms.length + Number(indicator?.count || 0),
   };
@@ -797,6 +1164,12 @@ function closureDeliveryItems(closure: ReturnType<typeof continuationClosure>): 
     dependencyDepth: node.depth,
     clusterId: node.clusterId,
     semanticSignatures: semanticSignatures(node.mechanism.statement),
+    renderedStatement: normalizeDeliveryStatement(node.mechanism.statement),
+    preservationClass: node.preservationClass,
+    immutableAtoms: node.immutableAtoms,
+    deliveryLayer: node.deliveryLayer,
+    sourceEventIds: node.mechanism.sourceEventIds,
+    participantIds: node.participantIds,
   }));
 }
 

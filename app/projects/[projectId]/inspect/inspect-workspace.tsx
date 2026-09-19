@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import type { DeliveryManifest, DeliveryManifestSectionId } from "../ask/ask-types";
 import styles from "./inspect.module.css";
 
 type CaseRecord = Record<string, unknown> & {
@@ -37,6 +38,7 @@ type MechanismRecord = Record<string, unknown> & {
 
 type PacketRecord = Record<string, unknown> & {
   id: string;
+  caseId?: string | null;
   task: string;
   status?: string;
   createdAt?: string;
@@ -52,7 +54,7 @@ type Overview = {
   blueprint: Record<string, unknown> & { proposedRevisions: Array<Record<string, unknown>> };
   packets: PacketRecord[];
   advanced: {
-    transfers: Array<Record<string, unknown> & { id: string; conversationTitle?: string; stage?: string }>;
+    transfers: TransferRecord[];
     governance: Array<Record<string, unknown> & { id: string }>;
     roadways: Array<Record<string, unknown> & { id: string; name: string }>;
     liveState: Array<Record<string, unknown> & { id: string }>;
@@ -62,32 +64,6 @@ type Overview = {
   };
 };
 
-type MechanismVersion = {
-  id: string;
-  statement: string;
-  authority?: string;
-  status?: string;
-  supersedesVersionId?: string | null;
-};
-
-type SourceEvent = {
-  id: string;
-  representation?: string;
-  conversationTitle?: string | null;
-  exactSourceSpan?: string | null;
-  sourceLinks?: Array<{ messageId: string; href: string }>;
-};
-
-type MechanismDetail = {
-  mechanism: { id: string; currentVersionId: string; status?: string };
-  versions: MechanismVersion[];
-  governance: Array<Record<string, unknown>>;
-  sourceFinding: (Record<string, unknown> & { proposal_statement?: string }) | null;
-  sourceEvents: SourceEvent[];
-  packetUsage: Array<Record<string, unknown>>;
-  historicalLimitations: string[];
-};
-
 type PacketDetail = {
   packet: Record<string, unknown> & {
     id: string;
@@ -95,6 +71,7 @@ type PacketDetail = {
     compiledContent: string;
     finalTokenCount?: number;
   };
+  deliveryManifest?: DeliveryManifest;
   items: Array<Record<string, unknown> & {
     sourceType?: string;
     sourceId?: string;
@@ -102,11 +79,54 @@ type PacketDetail = {
     authority?: string;
     reason?: string;
     protectedRole?: string | null;
+    metadata?: Record<string, unknown>;
   }>;
-  receipt: Record<string, unknown> & { id: string };
+  receipt: Record<string, unknown> & {
+    id: string;
+    treatmentSummary?: Record<string, Array<Record<string, unknown>>>;
+  };
 };
 
-const views = ["Overview", "Preserved", "Packets", "Advanced"] as const;
+type ReconciliationItem = Record<string, unknown> & {
+  findingId?: string;
+  statement?: string;
+  uncertainty?: string | null;
+  reviewRequired?: boolean;
+  reason?: string;
+  mechanismId?: string | null;
+  relatedMechanismId?: string | null;
+};
+
+type TransferRecord = Record<string, unknown> & {
+  id: string;
+  caseId?: string | null;
+  conversationTitle?: string;
+  conversationStatus?: string;
+  stage?: string;
+  status?: string;
+  updatedAt?: string;
+  actualCounts?: Record<string, number>;
+  reconstructedState?: {
+    governedStatementCount?: number;
+  };
+  blockedReason?: string | null;
+  failureReason?: string | null;
+  reconciliation?: ReconciliationItem[];
+};
+
+type InspectFact = {
+  key: string;
+  statement: string;
+  role: string;
+  section?: DeliveryManifestSectionId;
+  reason?: string;
+  sourceId?: string;
+  authority?: string;
+  actionRequired?: boolean;
+  resolutionPath?: boolean;
+};
+
+const views = ["Transfer", "History", "Advanced"] as const;
 const technicalViews = [
   "Cases",
   "Reasoning",
@@ -139,23 +159,6 @@ function humanize(item: unknown) {
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 }
 
-function authorityLabel(authority: unknown, status: unknown) {
-  const authorityText = String(authority || "").toLowerCase();
-  const combined = `${authorityText} ${String(status || "")}`.toLowerCase();
-  if (combined.includes("supersed") || combined.includes("historical")) return "Superseded";
-  if (combined.includes("challeng")) return "Challenged";
-  if (combined.includes("reject") || combined.includes("exclude")) return "Excluded";
-  if (combined.includes("propos") || combined.includes("pending")) return "Proposed";
-  if (combined.includes("consider")) return "Consider";
-  if (authorityText.includes("observed") || authorityText.includes("inferred")) return "Observed";
-  if (authorityText.includes("approved") || authorityText.includes("governing")) return "Governing";
-  return "Observed";
-}
-
-function isGoverning(record: MechanismRecord) {
-  return authorityLabel(record.authority, record.status) === "Governing";
-}
-
 function readableDate(item: unknown) {
   if (!hasValue(item)) return null;
   const date = new Date(item);
@@ -168,12 +171,95 @@ function detailHref(projectId: string, type: string, id: string) {
   return `/projects/${encodeURIComponent(projectId)}/inspect/${type}/${encodeURIComponent(id)}`;
 }
 
+const roleLabels: Record<string, string> = {
+  direction: "Current direction",
+  next_action: "Next action",
+  constraint: "Must preserve",
+  conditional: "Condition",
+  correction: "Correction guard",
+  rationale: "Why it matters",
+  unresolved: "Still open",
+  conflict: "Open conflict",
+  semantic_identity: "Exact identity",
+  shared_term: "Project term",
+};
+
+function packetStatement(item: Record<string, unknown>) {
+  const metadata = item.metadata && typeof item.metadata === "object"
+    ? item.metadata as Record<string, unknown>
+    : null;
+  if (hasValue(metadata?.statement)) return metadata.statement.trim();
+  if (hasValue(item.statement)) return item.statement.trim();
+  return hasValue(item.reason) ? item.reason.trim() : "Preserved project context";
+}
+
+function packetRole(item: Record<string, unknown>) {
+  const metadata = item.metadata && typeof item.metadata === "object"
+    ? item.metadata as Record<string, unknown>
+    : null;
+  const roles = Array.isArray(metadata?.continuationRoles)
+    ? metadata.continuationRoles.filter((role): role is string => typeof role === "string")
+    : [];
+  return String(roles[0] || item.protectedRole || "direction").toLowerCase();
+}
+
+function hasResolutionPath(statement: string) {
+  return /\b(?:until|unless|only if|pending|blocked on|waiting for|after .{1,80}(?:check|confirm|verify)|before .{1,80}(?:check|confirm|verify)|must (?:check|confirm|verify))\b/iu.test(statement);
+}
+
+function normalizedFact(statement: string) {
+  return statement.toLowerCase().replace(/[^a-z0-9]+/gu, " ").trim();
+}
+
+function factsFromPacket(packet: PacketDetail | null): InspectFact[] {
+  if (!packet) return [];
+  if (packet.deliveryManifest?.sections.length) {
+    return packet.deliveryManifest.sections.flatMap((section) => section.items.map((item) => ({
+      key: item.id,
+      statement: item.statement,
+      role: item.primaryRole,
+      section: section.id,
+      reason: item.reason,
+      sourceId: item.sourceId,
+      authority: item.authority,
+      resolutionPath: hasResolutionPath(item.statement),
+    })));
+  }
+  return packet.items
+    .filter((item) => item.treatment === "Use" && item.sourceType !== "RoadwayCheck")
+    .map((item, index) => {
+      const statement = packetStatement(item);
+      return {
+        key: String(item.id || `${item.sourceType}:${item.sourceId || index}`),
+        statement,
+        role: packetRole(item),
+        reason: hasValue(item.reason) ? item.reason : undefined,
+        sourceId: hasValue(item.sourceId) ? item.sourceId : undefined,
+        authority: hasValue(item.authority) ? item.authority : undefined,
+        resolutionPath: hasResolutionPath(statement),
+      };
+    });
+}
+
+function factLabel(fact: InspectFact) {
+  if (fact.section === "current_plan") return "Current plan";
+  if (fact.section === "people") return "Person or responsibility";
+  if (fact.section === "constraints") return "Governing constraint";
+  if (fact.section === "open") return "Still open";
+  if (fact.section === "next") return "Next action";
+  if (fact.section === "replaced") return "Supersession guard";
+  return roleLabels[fact.role] || humanize(fact.role);
+}
+
+function treatmentItems(packet: PacketDetail | null, treatment: "Consider" | "Exclude") {
+  const summary = packet?.receipt?.treatmentSummary;
+  return summary && Array.isArray(summary[treatment]) ? summary[treatment] : [];
+}
+
 export default function InspectWorkspace({ projectId }: { projectId: string }) {
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [mechanismDetails, setMechanismDetails] = useState<Record<string, MechanismDetail>>({});
   const [latestPacket, setLatestPacket] = useState<PacketDetail | null>(null);
-  const [hasActiveWork, setHasActiveWork] = useState(false);
-  const [view, setView] = useState<typeof views[number]>("Overview");
+  const [view, setView] = useState<typeof views[number]>("Transfer");
   const [technicalView, setTechnicalView] = useState<typeof technicalViews[number]>("Cases");
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
@@ -182,36 +268,20 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
     let active = true;
     async function load() {
       try {
-        const [response, workResponse] = await Promise.all([
-          fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/inspect`, { cache: "no-store" }),
-          fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/work`, { cache: "no-store" }),
-        ]);
+        const response = await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/inspect`, { cache: "no-store" });
         const result = await response.json().catch(() => ({ error: "Inspect unavailable." })) as Overview & { error?: string };
-        const workResult = await workResponse.json().catch(() => ({ error: "Work state unavailable." })) as {
-          activeConversationId?: string | null;
-          error?: string;
-        };
-        if (!response.ok || !workResponse.ok) throw new Error(result.error || workResult.error || "Inspect unavailable.");
+        if (!response.ok) throw new Error(result.error || "Inspect unavailable.");
+        const latestTransfer = result.advanced.transfers.find((transfer) => transfer.conversationStatus !== "archived")
+          || null;
+        const relevantPacket = latestTransfer?.caseId
+          ? result.packets.find((packet) => packet.caseId === latestTransfer.caseId) || null
+          : null;
+        const packet = relevantPacket
+          ? await fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/packets/${encodeURIComponent(relevantPacket.id)}`, { cache: "no-store" })
+              .then(async (packetResponse) => packetResponse.ok ? await packetResponse.json() as PacketDetail : null)
+          : null;
         if (!active) return;
         setOverview(result);
-        setHasActiveWork(Boolean(workResult.activeConversationId));
-
-        const [details, packet] = await Promise.all([
-          Promise.all(result.mechanisms.map(async (record) => {
-            const detailResponse = await fetch(
-              `/api/v1/projects/${encodeURIComponent(projectId)}/inspect/mechanisms/${encodeURIComponent(record.id)}`,
-              { cache: "no-store" },
-            );
-            if (!detailResponse.ok) return null;
-            return await detailResponse.json() as MechanismDetail;
-          })),
-          result.packets[0]
-            ? fetch(`/api/v1/projects/${encodeURIComponent(projectId)}/packets/${encodeURIComponent(result.packets[0].id)}`, { cache: "no-store" })
-                .then(async (packetResponse) => packetResponse.ok ? await packetResponse.json() as PacketDetail : null)
-            : Promise.resolve(null),
-        ]);
-        if (!active) return;
-        setMechanismDetails(Object.fromEntries(details.filter((item): item is MechanismDetail => Boolean(item)).map((item) => [item.mechanism.id, item])));
         setLatestPacket(packet);
         setStatus("ready");
       } catch (caught) {
@@ -224,51 +294,49 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
     return () => { active = false; };
   }, [projectId]);
 
-  const changes = useMemo(() => Object.values(mechanismDetails).flatMap((detail) => {
-    const current = detail.versions.find((item) => item.id === detail.mechanism.currentVersionId);
-    if (!current?.supersedesVersionId) return [];
-    const previous = detail.versions.find((item) => item.id === current.supersedesVersionId);
-    if (!previous) return [];
-    const governance = detail.governance.find((item) => item.resultingVersionId === current.id || item.resulting_version_id === current.id)
-      || detail.governance.at(-1);
-    return [{ detail, current, previous, reason: governance?.reason }];
-  }), [mechanismDetails]);
+  const facts = useMemo(() => factsFromPacket(latestPacket), [latestPacket]);
+  const latestTransfer = overview?.advanced.transfers.find((transfer) => transfer.conversationStatus !== "archived")
+    || null;
+  const actionableOpen = (latestTransfer?.reconciliation || [])
+    .filter((item) => item.reviewRequired)
+    .map((item, index): InspectFact => ({
+      key: String(item.findingId || `review:${index}`),
+      statement: hasValue(item.statement) ? item.statement : "Atlas found a decision the conversation did not settle.",
+      role: "unresolved",
+      reason: hasValue(item.uncertainty) ? item.uncertainty : hasValue(item.reason) ? item.reason : undefined,
+      sourceId: hasValue(item.mechanismId) ? item.mechanismId : hasValue(item.relatedMechanismId) ? item.relatedMechanismId : undefined,
+      actionRequired: true,
+      resolutionPath: false,
+    }));
+  const openFacts = [...actionableOpen, ...facts.filter((fact) => fact.section === "open" || ["unresolved", "conflict"].includes(fact.role))]
+    .filter((fact, index, all) => all.findIndex((candidate) => normalizedFact(candidate.statement) === normalizedFact(fact.statement)) === index);
+  const nextFacts = facts.filter((fact) => fact.section === "next" || fact.role === "next_action");
+  const currentPlan = facts.filter((fact) => fact.section === "current_plan");
+  const preservedFacts = facts.filter((fact) => ["people", "constraints"].includes(fact.section || ""));
+  const changes = facts.filter((fact) => fact.section === "replaced" || fact.role === "correction");
+  const considered = treatmentItems(latestPacket, "Consider");
+  const excluded = treatmentItems(latestPacket, "Exclude");
+  const manifestExclusions = latestPacket?.deliveryManifest?.exclusions || [];
 
-  if (status === "loading") return <main className={styles.page}><section className={styles.panel}>Reading governed project truth and lineage…</section></main>;
+  if (status === "loading") return <main className={styles.page}><section className={styles.panel}>Reading the latest transfer and its exact sources…</section></main>;
   if (status === "error" || !overview) {
     return (
       <main className={styles.page}>
         <section className={`${styles.panel} ${styles.failure}`} role="alert">
           <span>Inspect unavailable</span>
-          <h1>Project truth could not load</h1>
+          <h1>The transfer could not be inspected</h1>
           <p>{error}</p>
-          <strong>No seeded records or browser reconstruction were substituted.</strong>
+          <strong>No substitute project data was shown.</strong>
         </section>
       </main>
     );
   }
 
-  const activeCase = hasActiveWork
-    ? overview.cases.find((record) => record.status === "active") || null
-    : null;
-  const governing = overview.mechanisms.filter(isGoverning);
-  const unresolved = overview.reasoning.filter((record) => {
-    const state = `${record.status || ""} ${record.authority || ""}`.toLowerCase();
-    return Boolean(record.uncertainty) || /proposed|challenged|pending|conflict/.test(state);
-  });
-  const lineageDetail = governing.map((record) => mechanismDetails[record.id]).find(Boolean) || null;
-  const lineageRecord = lineageDetail
-    ? governing.find((record) => record.id === lineageDetail.mechanism.id) || null
-    : null;
-
   return (
     <main className={styles.page}>
       <header className={styles.header}>
-        <div><span>Inspect</span><h1>What Atlas preserved</h1></div>
-        <div>
-          <p>See what carries forward, what changed, what was left out, and where each important statement came from.</p>
-          <Link href={`/projects/${encodeURIComponent(projectId)}/findings`}>Open items needing your decision</Link>
-        </div>
+        <div><span>Inspect</span><h1>Understand this transfer</h1></div>
+        <div><p>See what the fresh room will know, what remains open, what changed, and the exact evidence behind it.</p></div>
       </header>
 
       <nav className={styles.tabs} aria-label="Inspect views">
@@ -281,95 +349,67 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
         </select>
       </label>
 
-      {view === "Overview" ? (
+      {view === "Transfer" ? (
         <div className={styles.overviewStack}>
-          <OverviewState activeCase={activeCase} governing={governing} unresolved={unresolved} />
           <section className={styles.section}>
-            <SectionHeading eyebrow="Correction history" title="What changed" />
-            {changes.length ? changes.map((change) => (
-              <article className={styles.changeCard} key={change.current.id}>
-                <div><span>Previous</span><p>{change.previous.statement}</p></div>
-                <i aria-hidden="true">↓</i>
-                <div><span>Changed to</span><p>{change.current.statement}</p></div>
-                <div className={styles.changeReason}>
-                  <span>Why</span>
-                  <p>{hasValue(change.reason) ? change.reason : "Atlas records the supersession relationship, but no human-readable reason is attached."}</p>
-                </div>
-                <Link href={detailHref(projectId, "mechanisms", change.detail.mechanism.id)}>Trace this change</Link>
+            <SectionHeading eyebrow="Continuation brief" title="What the fresh room will know" />
+            {latestPacket ? <DeliverySummary latestPacket={latestPacket} projectId={projectId} /> : latestTransfer ? (
+              <article className={styles.packetHero}>
+                <span>Room reconstructed · packet not saved</span>
+                <strong>No fresh-room packet has been prepared yet.</strong>
+                <p>Atlas preserved {Number(latestTransfer.actualCounts?.messages || 0).toLocaleString()} messages and reconstructed {Number(latestTransfer.reconstructedState?.governedStatementCount || 0)} governing facts, but packet preparation is not complete.</p>
+                {hasValue(latestTransfer.blockedReason || latestTransfer.failureReason) ? <p>{latestTransfer.blockedReason || latestTransfer.failureReason}</p> : null}
+                <Link href={`/projects/${encodeURIComponent(projectId)}/ask?transfer=${encodeURIComponent(latestTransfer.id)}`}>Return to Transfer →</Link>
               </article>
-            )) : (
-              <Empty text="Atlas has not recorded a change to the preserved project state." detail="Internal history remains available under Advanced." />
-            )}
+            ) : <Empty text="No transfer packet has been prepared yet." detail="Transfer a room first. Inspect will explain the exact packet Atlas creates." />}
           </section>
 
-          <section className={styles.section}>
-            <SectionHeading eyebrow="Decisions and limits" title="What needs attention" />
-            <CollaborationSignals
-              activeCase={activeCase}
-              changes={changes}
-              reasoning={overview.reasoning}
-            />
-          </section>
+          {nextFacts.length ? <section className={styles.section}>
+            <SectionHeading eyebrow="Immediate continuation" title="Next action" />
+            <InspectFacts facts={nextFacts} projectId={projectId} />
+          </section> : null}
+
+          {currentPlan.length ? <section className={styles.section}>
+            <SectionHeading eyebrow="Current state" title="Current plan" />
+            <InspectFacts facts={currentPlan} projectId={projectId} />
+          </section> : null}
+
+          {preservedFacts.length ? <section className={styles.section}>
+            <SectionHeading eyebrow="Carried forward" title="Must preserve" />
+            <InspectFacts facts={preservedFacts} projectId={projectId} />
+          </section> : null}
+
+          {openFacts.length ? <section className={styles.section}>
+            <SectionHeading eyebrow="Decision state" title="Still open" />
+            <OpenState facts={openFacts} projectId={projectId} />
+          </section> : null}
+
+          {changes.length ? <section className={styles.section}>
+            <SectionHeading eyebrow="Current versus earlier" title="What changed" />
+            <InspectFacts facts={changes} projectId={projectId} />
+          </section> : null}
 
           <section className={styles.section}>
-            <SectionHeading eyebrow="Fresh-room context" title="Recent transfer packet" />
-            <DeliverySummary latestPacket={latestPacket} projectId={projectId} />
+            <SectionHeading eyebrow="Pruned context" title="What Atlas left out" />
+            {!considered.length && !excluded.length && !manifestExclusions.length ? <Empty text="No omitted governed candidates were recorded." detail="Atlas does not fill Inspect with unrelated project history. The exact room remains preserved in Advanced." /> : <article className={styles.omissionCard}><p>Atlas kept the exact room but withheld <strong>{excluded.length + manifestExclusions.length}</strong> irrelevant, stale, repeated, replaced, or unnecessary candidate{excluded.length + manifestExclusions.length === 1 ? "" : "s"}. It held back <strong>{considered.length}</strong> additional item{considered.length === 1 ? "" : "s"} that may matter to another continuation.</p>{considered.length ? <OmissionDetails label="Considered but not needed" items={considered} /> : null}{excluded.length ? <OmissionDetails label="Excluded from the packet" items={excluded} /> : null}{manifestExclusions.length ? <details><summary>Pruned before delivery · {manifestExclusions.length}</summary><p>These candidates were redundant, stale, weak, or outside the bounded continuation. Their exact source remains available in Advanced.</p></details> : null}</article>}
           </section>
 
-          <section className={styles.section}>
-            <SectionHeading eyebrow="Source confidence" title="Where this came from" />
-            <LineageSummary detail={lineageDetail} projectId={projectId} record={lineageRecord} />
-          </section>
         </div>
       ) : null}
 
-      {view === "Preserved" ? (
+      {view === "History" ? (
         <div className={styles.overviewStack}>
           <section className={styles.section}>
-            <SectionHeading eyebrow="Preserved state" title="What carries forward" />
-            {overview.mechanisms.length ? (
-              <div className={styles.truthList}>
-                {overview.mechanisms.map((record) => (
-                  <Link className={styles.truthRow} href={detailHref(projectId, "mechanisms", record.id)} key={record.id}>
-                    <span className={styles.stateBadge} data-state={authorityLabel(record.authority, record.status).toLowerCase()}>{isGoverning(record) ? "Preserved" : "Not settled"}</span>
-                    <div><strong>{record.statement}</strong><p>{isGoverning(record) ? "Available for future room transfers." : "Visible for review, but not treated as settled."}</p></div>
-                    <span>See source →</span>
-                  </Link>
-                ))}
-              </div>
-            ) : <Empty text="No project statements have been preserved for future transfers." />}
+            <SectionHeading eyebrow="Saved transfers" title="Transfer history" />
+            <div className={styles.deliveryList}>{overview.advanced.transfers.map((transfer) => <Link className={styles.deliveryRow} href={detailHref(projectId, "transfers", transfer.id)} key={transfer.id}><span>Room</span><div><strong>{transfer.conversationTitle || "Transferred room"}</strong><p>{humanize(transfer.stage || transfer.status || "received")} · {readableDate(transfer.updatedAt) || "Saved history"}</p></div><span>Inspect →</span></Link>)}</div>
+            {!overview.advanced.transfers.length ? <Empty text="No room transfers are preserved yet." /> : null}
           </section>
           <section className={styles.section}>
-            <SectionHeading eyebrow="Not yet settled" title="Open questions and source notes" />
-            {overview.reasoning.length ? (
-              <div className={styles.truthList}>
-                {overview.reasoning.map((record) => (
-                  <Link className={styles.truthRow} href={detailHref(projectId, "reasoning", record.id)} key={record.id}>
-                    <span className={styles.stateBadge} data-state={authorityLabel(record.authority, record.status).toLowerCase()}>{record.uncertainty ? "Needs review" : "Source note"}</span>
-                    <div><strong>{record.statement}</strong><p>{record.uncertainty ? `Uncertainty: ${record.uncertainty}` : "No explicit uncertainty recorded."}</p></div>
-                    <span>Inspect →</span>
-                  </Link>
-                ))}
-              </div>
-            ) : <Empty text="No open questions or additional source notes are recorded." />}
+            <SectionHeading eyebrow="Saved packets" title="Packet history" />
+            <div className={styles.deliveryList}>{overview.packets.map((packet) => <Link className={styles.deliveryRow} href={detailHref(projectId, "packets", packet.id)} key={packet.id}><span>Packet</span><div><strong>{packet.task}</strong><p>{readableDate(packet.createdAt) || "Saved delivery"}</p></div><span>Inspect →</span></Link>)}</div>
+            {!overview.packets.length ? <Empty text="No transfer packets have been prepared yet." /> : null}
           </section>
         </div>
-      ) : null}
-
-      {view === "Packets" ? (
-        <section className={styles.section}>
-          <SectionHeading eyebrow="Fresh-room context" title="Prepared transfer packets" />
-          <div className={styles.deliveryList}>
-            {overview.packets.map((packet) => (
-              <Link className={styles.deliveryRow} href={detailHref(projectId, "packets", packet.id)} key={packet.id}>
-                <span>Transfer packet</span>
-                <div><strong>{packet.task}</strong><p>{readableDate(packet.createdAt) || "Saved delivery"}</p></div>
-                <span>Inspect packet →</span>
-              </Link>
-            ))}
-          </div>
-          {!overview.packets.length ? <Empty text="No transfer packets have been prepared yet." detail="Prepare one in Transfer when a fresh room needs project context." /> : null}
-        </section>
       ) : null}
 
       {view === "Advanced" ? (
@@ -384,114 +424,59 @@ export default function InspectWorkspace({ projectId }: { projectId: string }) {
   );
 }
 
-function OverviewState({ activeCase, governing, unresolved }: { activeCase: CaseRecord | null; governing: MechanismRecord[]; unresolved: ReasoningRecord[] }) {
-  const constraints = Array.isArray(activeCase?.activeConstraints) ? activeCase.activeConstraints : [];
-  const thesis = activeCase?.currentThesis;
-  const decision = activeCase?.currentDecision;
-  const outcome = activeCase?.outcomeState;
-  const pending = Number(activeCase?.pendingFindingCount || 0);
-  const nextAction = activeCase?.reasoningHealth?.recommendedNextAction;
+function InspectFacts({ facts, projectId }: { facts: InspectFact[]; projectId: string }) {
+  if (!facts.length) return <Empty text="Nothing in this category affects the transfer." detail="Atlas leaves empty categories out of the fresh-room packet." />;
   return (
-    <section className={styles.section}>
-      <SectionHeading eyebrow="Preserved state" title="Current state" />
-      <div className={styles.currentState}>
-        <div className={styles.orientation}>
-          <span>Current work</span>
-          <h2>{activeCase?.objective || "No current work is recorded"}</h2>
-        </div>
-        <div className={styles.stateColumns}>
-          <article><span>Current direction</span><p>{hasValue(decision) ? decision : "No current decision has been preserved yet."}</p></article>
-          <article><span>Important constraints</span>{constraints.length ? <ul>{constraints.map((item) => <li key={item}>{item}</li>)}</ul> : <p>No active constraints have been preserved yet.</p>}</article>
-          <article><span>Open / unresolved</span><p>{pending ? `${pending} item${pending === 1 ? " needs" : "s need"} your decision.` : unresolved.length ? `${unresolved.length} uncertain item${unresolved.length === 1 ? " remains" : "s remain"}.` : "No unresolved conflict is visible here."}</p></article>
-          <article><span>Next action</span><p>{hasValue(nextAction) ? `Atlas recommends: ${nextAction}` : "No next action has been preserved yet."}</p></article>
-          {unresolved.length ? <article className={styles.wideState}><span>Material uncertainty</span><ul>{unresolved.slice(0, 3).map((record) => <li key={record.id}>{record.uncertainty || record.statement}</li>)}</ul>{unresolved.length > 3 ? <p>{unresolved.length - 3} more unresolved items are available under Preserved.</p> : null}</article> : null}
-        </div>
-        {governing.length ? (
-          <div className={styles.governingSummary}>
-            <span>What Atlas will carry forward</span>
-            <ul>{governing.slice(0, 4).map((record) => <li key={record.id}>{record.statement}</li>)}</ul>
-            {governing.length > 4 ? <p>{governing.length - 4} more preserved statements are available under Preserved.</p> : null}
+    <div className={styles.evidenceList}>
+      {facts.map((fact) => (
+        <details className={styles.evidenceCard} key={fact.key}>
+          <summary><span>{factLabel(fact)}</span><strong>{fact.statement}</strong></summary>
+          <div>
+            <p>{fact.reason || "Atlas carried this governed fact because leaving it out could change how the fresh room continues."}</p>
+            <small>{humanize(fact.authority || "governed source")}</small>
+            {fact.sourceId ? <Link href={detailHref(projectId, "mechanisms", fact.sourceId)}>View exact source and lineage →</Link> : <p className={styles.honestNote}>No direct mechanism link was stored for this packet item.</p>}
           </div>
-        ) : <p className={styles.honestNote}>No settled project state has been preserved yet.</p>}
-        {(!hasValue(thesis) || !hasValue(outcome)) ? <p className={styles.honestNote}>Atlas has not yet identified {![thesis, outcome].some(hasValue) ? "a working thesis or final outcome" : !hasValue(thesis) ? "a working thesis" : "a final outcome"} for this work.</p> : null}
-      </div>
-    </section>
-  );
-}
-
-function CollaborationSignals({
-  activeCase,
-  changes,
-  reasoning,
-}: {
-  activeCase: CaseRecord | null;
-  changes: Array<{ detail: MechanismDetail; current: MechanismVersion; previous: MechanismVersion; reason: unknown }>;
-  reasoning: ReasoningRecord[];
-}) {
-  const corrections = reasoning.filter((record) => String(record.type || "").toLowerCase() === "correction");
-  const constraints = Array.isArray(activeCase?.activeConstraints) ? activeCase.activeConstraints : [];
-  const connections = reasoning.filter((record) => String(record.type || "").toLowerCase() === "proposed_connection");
-  const hasSignals = corrections.length || constraints.length || changes.length || connections.length;
-
-  if (!hasSignals) {
-    return <Empty text="Nothing currently needs attention here." detail="Atlas does not invent corrections, constraints, or relationships to fill this view." />;
-  }
-
-  return (
-    <div className={styles.signalGrid}>
-      {corrections.length || changes.length ? (
-        <article className={styles.signalCard}>
-          <span>Corrections</span>
-          {changes.slice(0, 2).map((change) => <p key={change.current.id}>{change.current.statement}</p>)}
-          {corrections.slice(0, 2).map((record) => <p key={record.id}>{record.statement}</p>)}
-          <small>Accepted changes remain distinct from their earlier wording.</small>
-        </article>
-      ) : null}
-      {constraints.length ? (
-        <article className={styles.signalCard}>
-          <span>Constraints</span>
-          <ul>{constraints.map((constraint) => <li key={constraint}>{constraint}</li>)}</ul>
-        </article>
-      ) : null}
-      {connections.length ? (
-        <article className={styles.signalCard}>
-          <span>Related context</span>
-          {connections.slice(0, 3).map((record) => <p key={record.id}>{record.statement}</p>)}
-          <small>Relationships awaiting review are not treated as settled.</small>
-        </article>
-      ) : null}
+        </details>
+      ))}
     </div>
   );
 }
 
-function DeliverySummary({ latestPacket, projectId }: { latestPacket: PacketDetail | null; projectId: string }) {
-  if (latestPacket) {
-    const governingUsed = latestPacket.items.filter((item) => item.treatment === "Use" && item.sourceType === "Mechanism");
-    return <article className={styles.deliveryCard}><span>Saved transfer packet</span><h3>{latestPacket.packet.task}</h3><p>Atlas supplied {governingUsed.length} preserved project {governingUsed.length === 1 ? "item" : "items"} for this task.</p><Link href={detailHref(projectId, "packets", latestPacket.packet.id)}>Inspect this packet</Link><small>This is a task-specific selection, not a replacement for the full project record.{latestPacket.packet.finalTokenCount ? ` Estimated size: ${latestPacket.packet.finalTokenCount} tokens.` : ""}</small></article>;
-  }
-  return <Empty text="No transfer packet is available to inspect." detail="Prepare one in Transfer when a fresh room needs project context." />;
+function OpenState({ facts, projectId }: { facts: InspectFact[]; projectId: string }) {
+  const needsDecision = facts.filter((fact) => fact.actionRequired);
+  const waiting = facts.filter((fact) => !fact.actionRequired && fact.resolutionPath);
+  const intentionallyOpen = facts.filter((fact) => !fact.actionRequired && !fact.resolutionPath);
+  if (!facts.length) return <Empty text="No open decision affects this transfer." detail="Atlas found no unresolved state that the fresh room needs to carry." />;
+  return (
+    <div className={styles.openStateList}>
+      {needsDecision.map((fact) => <article className={`${styles.openStateCard} ${styles.actionState}`} key={fact.key}><span>Needs your decision</span><strong>{fact.statement}</strong><p>{fact.reason || "Atlas cannot resolve this from the conversation alone."}</p><Link href={`/projects/${encodeURIComponent(projectId)}/ask`}>Resolve in Transfer →</Link></article>)}
+      {waiting.map((fact) => <article className={styles.openStateCard} key={fact.key}><span>Waiting on a known check</span><strong>{fact.statement}</strong><p>Atlas preserved the condition without turning it into a decision prematurely.</p></article>)}
+      {intentionallyOpen.map((fact) => <article className={styles.openStateCard} key={fact.key}><span>Intentionally undecided</span><strong>{fact.statement}</strong><p>This remains open in the transferred state. No response is required here.</p></article>)}
+    </div>
+  );
 }
 
-function LineageSummary({ detail, projectId, record }: { detail: MechanismDetail | null; projectId: string; record: MechanismRecord | null }) {
-  if (!detail || !record) return <Empty text="No preserved statement is available for source tracing." />;
-  const current = detail.versions.find((item) => item.id === detail.mechanism.currentVersionId);
-  const event = detail.sourceEvents[0];
-  const source = event?.sourceLinks?.[0];
-  const previous = current?.supersedesVersionId
-    ? detail.versions.find((item) => item.id === current.supersedesVersionId)
-    : null;
-  return (
-    <article className={styles.lineageCard}>
-      <div><span>Preserved statement</span><strong>{current?.statement || record.statement}</strong></div><i aria-hidden="true">↓</i>
-      <div><span>Review status</span><strong>{authorityLabel(current?.authority || record.authority, current?.status || record.status) === "Governing" ? "Accepted for future transfers" : "Not yet settled"}</strong></div><i aria-hidden="true">↓</i>
-      <div><span>Earlier wording</span><strong>{previous ? `Replaced: ${previous.statement}` : "No earlier wording is linked to this statement."}</strong></div><i aria-hidden="true">↓</i>
-      <div><span>Source summary</span><strong>{detail.sourceFinding?.proposal_statement || "No readable source summary is available."}</strong></div><i aria-hidden="true">↓</i>
-      <div><span>Conversation evidence</span><strong>{event?.representation === "Exact" ? "Exact conversation evidence is preserved." : "Complete exact conversation linkage is not available for this statement."}</strong></div><i aria-hidden="true">↓</i>
-      <div><span>Original message</span>{event?.representation === "Exact" && source ? <><strong>{event.conversationTitle || "Exact source conversation"}</strong><Link href={source.href}>View exact evidence</Link></> : <strong>Complete Exact-message linkage is not available for this statement.</strong>}</div>
-      {detail.historicalLimitations.length ? <p className={styles.honestNote}>{detail.historicalLimitations.join(" ")}</p> : null}
-      <Link href={detailHref(projectId, "mechanisms", detail.mechanism.id)}>Open technical lineage</Link>
-    </article>
-  );
+function OmissionDetails({ label, items }: { label: string; items: Array<Record<string, unknown>> }) {
+  return <details><summary>{label} · {items.length}</summary><ul>{items.slice(0, 12).map((item, index) => <li key={String(item.id || item.sourceId || index)}>{packetStatement(item)}</li>)}</ul>{items.length > 12 ? <small>{items.length - 12} more remain in Advanced packet records.</small> : null}</details>;
+}
+
+function DeliverySummary({ latestPacket, projectId }: { latestPacket: PacketDetail | null; projectId: string }) {
+  if (latestPacket) {
+    const manifest = latestPacket.deliveryManifest;
+    const factCount = manifest?.sections.reduce((count, section) => count + section.items.length, 0) || 0;
+    const openCount = manifest?.sections.find((section) => section.id === "open")?.items.length || 0;
+    const next = manifest?.sections.find((section) => section.id === "next")?.items[0]?.statement || null;
+    return (
+      <article className={`${styles.deliveryCard} ${styles.packetHero}`}>
+        <div className={styles.packetMeta}><span>{humanize(latestPacket.packet.status || "prepared")} transfer</span><small>{latestPacket.packet.finalTokenCount ? `${latestPacket.packet.finalTokenCount} estimated tokens` : "Saved immutable packet"}</small></div>
+        <h3>{manifest?.orientation || "Atlas prepared a governed continuation for this project."}</h3>
+        <p>{factCount} governing fact{factCount === 1 ? "" : "s"} will travel to the fresh room. {openCount ? `${openCount} intentionally open item${openCount === 1 ? " remains" : "s remain"} unresolved.` : "No unresolved decision is being carried."}</p>
+        {next ? <div className={styles.briefNext}><span>Start here</span><strong>{next}</strong></div> : null}
+        <Link href={detailHref(projectId, "packets", latestPacket.packet.id)}>Open packet and technical details →</Link>
+      </article>
+    );
+  }
+  return <Empty text="No transfer packet is available to inspect." detail="Prepare one in Transfer when a fresh room needs project context." />;
 }
 
 function TechnicalRecords({ overview, projectId, setView, view }: { overview: Overview; projectId: string; setView: (view: typeof technicalViews[number]) => void; view: typeof technicalViews[number] }) {
@@ -500,7 +485,7 @@ function TechnicalRecords({ overview, projectId, setView, view }: { overview: Ov
   return (
     <section className={styles.section}>
       <SectionHeading eyebrow="Advanced" title="Internal records" />
-      <p className={styles.sectionIntro}>Every technical view remains available. These records prove the readable projection above; they do not compete with it by default.</p>
+      <p className={styles.sectionIntro}>These records prove the readable transfer above. Open them only when you need canonical history or implementation detail.</p>
       <label className={styles.technicalSelector}>Technical view<select onChange={(event) => setView(event.target.value as typeof view)} value={view}>{technicalViews.map((item) => <option key={item}>{item}</option>)}</select></label>
       {view === "Cases" ? <div className={styles.stack}>{!overview.cases.length ? <Empty text="No canonical cases exist in this project." /> : null}{overview.cases.map((record) => <article className={styles.record} key={record.id}><header><strong>{record.objective}</strong><span>{humanize(record.status)}</span></header><dl>{hasValue(record.currentDecision) ? <Row label="Current decision" value={record.currentDecision} /> : null}{hasValue(record.currentThesis) ? <Row label="Current thesis" value={record.currentThesis} /> : null}<Row label="Open review" value={record.pendingFindingCount ? `${record.pendingFindingCount} findings` : "None"} /><Row label="Last meaningful change" value={readableDate(record.lastChanged) || "No timestamp recorded"} /></dl><Link href={detailHref(projectId, "cases", record.id)}>Open full case lineage</Link><details><summary>Raw case anatomy</summary><pre>{JSON.stringify(record, null, 2)}</pre></details></article>)}</div> : null}
       {view === "Reasoning" ? <TechnicalList projectId={projectId} records={overview.reasoning} type="reasoning" /> : null}
@@ -508,7 +493,7 @@ function TechnicalRecords({ overview, projectId, setView, view }: { overview: Ov
       {view === "Principles" ? <div className={styles.stack}>{overview.principles.length ? overview.principles.map((item) => <Raw key={String(item.id)} item={item} />) : <Empty text="No principles have been approved." detail={overview.principlesNote} />}</div> : null}
       {view === "Blueprint" ? <article className={styles.record}><header><strong>{value(overview.blueprint.version)}</strong><span>Frozen authority</span></header><details><summary>View Blueprint anatomy</summary><pre>{JSON.stringify(overview.blueprint, null, 2)}</pre></details></article> : null}
       {view === "Packets" ? <TechnicalList projectId={projectId} records={overview.packets} type="packets" /> : null}
-      {advancedView ? <div className={styles.stack}>{!advanced.length ? <Empty text={`No canonical ${view.toLowerCase()} records exist.`} /> : null}{advanced.map((record) => view === "Transfers" ? <Link className={styles.record} href={detailHref(projectId, "transfers", String(record.id))} key={String(record.id)}><header><strong>{String(record.conversationTitle || "Transferred room")}</strong><span>{String(record.stage || "received")}</span></header><p>Open the preserved conversation, exact evidence, governance, and downstream use.</p></Link> : <Raw key={String(record.id || JSON.stringify(record))} item={record} />)}</div> : null}
+      {advancedView ? <div className={styles.stack}>{!advanced.length ? <Empty text={`No canonical ${view.toLowerCase()} records exist.`} /> : null}{advanced.map((record) => view === "Transfers" ? <Link className={styles.record} href={detailHref(projectId, "transfers", String(record.id))} key={String(record.id)}><header><strong>{String(record.conversationTitle || "Transferred room")}</strong><span>{String(record.stage || "received")}</span></header><p>Open the transfer summary, then load internal evidence only if needed.</p></Link> : <Raw key={String(record.id || JSON.stringify(record))} item={record} />)}</div> : null}
     </section>
   );
 }

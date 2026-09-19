@@ -12,13 +12,12 @@ type Project = {
   name: string;
   description: string | null;
   status: "active" | "archived";
-  pendingFindingCount: number;
   lastActivityAt: string;
 };
 
 const destinations = [
   { id: "work", label: "Home", mark: "H" },
-  { id: "ask", label: "Steward", mark: "S" },
+  { id: "ask", label: "Transfer", mark: "T" },
   { id: "inspect", label: "Inspect", mark: "I" },
 ] as const;
 
@@ -128,6 +127,17 @@ function ProjectShellInner({
       });
     return () => { active = false; };
   }, [loadProjects, projectId]);
+
+  useEffect(() => {
+    const refresh = () => {
+      void loadProjects().then((value) => {
+        setProjects(value.active);
+        setAllProjects(value.all);
+      }).catch(() => undefined);
+    };
+    window.addEventListener("atlas:project-lifecycle", refresh);
+    return () => window.removeEventListener("atlas:project-lifecycle", refresh);
+  }, [loadProjects]);
 
   const activeProject = useMemo(
     () => projects.find((project) => project.id === projectId) || null,
@@ -298,17 +308,9 @@ function ProjectShellInner({
             >
               <span>{destination.mark}</span>
               {destination.label}
-              {destination.id === "inspect" && activeProject?.pendingFindingCount
-                ? <b>{activeProject.pendingFindingCount}</b>
-                : null}
             </Link>
           ))}
         </nav>
-        {activeProject?.pendingFindingCount ? (
-          <Link className={styles.reviewLink} href={`/projects/${encodeURIComponent(projectId)}/findings`}>
-            Needs review <b>{activeProject.pendingFindingCount}</b>
-          </Link>
-        ) : null}
         <div className={styles.sidebarBottom}>
           <AuthorizationPanel />
         </div>
@@ -366,9 +368,6 @@ function ProjectShellInner({
           >
             <span>{destination.mark}</span>
             {destination.label}
-            {destination.id === "inspect" && activeProject?.pendingFindingCount
-              ? <em>{activeProject.pendingFindingCount}</em>
-              : null}
           </Link>
         ))}
       </nav>
